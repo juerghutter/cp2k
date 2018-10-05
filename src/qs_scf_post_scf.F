@@ -55,7 +55,7 @@ CONTAINS
 
       IF (dft_control%qs_control%semi_empirical) THEN
          CALL scf_post_calculation_se(qs_env)
-      ELSEIF (dft_control%qs_control%dftb) THEN
+      ELSEIF (dft_control%qs_control%dftb .OR. dft_control%qs_control%xtb) THEN
          CALL scf_post_calculation_dftb(dft_section, scf_env, qs_env)
       ELSEIF (dft_control%qs_control%do_kg) THEN
          CPWARN("No properties from PRINT section available for KG methods")
