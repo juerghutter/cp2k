@@ -27,10 +27,12 @@ MODULE xtb_matrices
                                               cp_print_key_unit_nr
    USE cp_para_types,                   ONLY: cp_para_env_type
    USE dbcsr_api,                       ONLY: &
-        convert_offsets_to_sizes, dbcsr_add, dbcsr_create, dbcsr_distribution_type, &
-        dbcsr_finalize, dbcsr_get_block_p, dbcsr_p_type, dbcsr_type_antisymmetric, &
-        dbcsr_type_symmetric
-   USE input_section_types,             ONLY: section_vals_val_get
+        convert_offsets_to_sizes, dbcsr_add, dbcsr_copy, dbcsr_create, dbcsr_distribution_type, &
+        dbcsr_finalize, dbcsr_get_block_p, dbcsr_multiply, dbcsr_p_type, dbcsr_trace, dbcsr_type, &
+        dbcsr_type_antisymmetric, dbcsr_type_symmetric
+   USE input_section_types,             ONLY: section_vals_get_subs_vals,&
+                                              section_vals_type,&
+                                              section_vals_val_get
    USE kinds,                           ONLY: default_string_length,&
                                               dp
    USE kpoint_types,                    ONLY: get_kpoint_info,&
@@ -52,12 +54,15 @@ MODULE xtb_matrices
    USE qs_ks_types,                     ONLY: get_ks_env,&
                                               qs_ks_env_type,&
                                               set_ks_env
+   USE qs_mo_types,                     ONLY: get_mo_set,&
+                                              mo_set_p_type
    USE qs_neighbor_list_types,          ONLY: get_iterator_info,&
                                               neighbor_list_iterate,&
                                               neighbor_list_iterator_create,&
                                               neighbor_list_iterator_p_type,&
                                               neighbor_list_iterator_release,&
                                               neighbor_list_set_p_type
+   USE qs_overlap,                      ONLY: build_overlap_matrix
    USE qs_rho_types,                    ONLY: qs_rho_get,&
                                               qs_rho_type
    USE virial_methods,                  ONLY: virial_pair_force
@@ -96,23 +101,26 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER :: routineN = 'build_xtb_matrices', &
          routineP = moduleN//':'//routineN
 
-      INTEGER :: after, atom_a, atom_b, handle, i, iatom, ic, icol, ikind, img, irow, iw, jatom, &
-         jkind, natom, natorb_a, natorb_b, nderivatives, nimg, nkind, nmat, za, zb
-      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: atom_of_kind, atomnumber
-      INTEGER, DIMENSION(25)                             :: laoa, laob
+      INTEGER :: after, atom_a, atom_b, handle, i, iatom, ic, icol, ikind, img, irow, iw, j, &
+         jatom, jkind, la, lb, na, natom, natorb_a, natorb_b, nb, nderivatives, nimg, nkind, nmat, &
+         nsa, nsb, nshell, za, zb
+      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: atom_of_kind, atomnumber, kind_of
+      INTEGER, DIMENSION(25)                             :: laoa, laob, lval, naoa, naob
       INTEGER, DIMENSION(3)                              :: cell
       INTEGER, DIMENSION(:, :, :), POINTER               :: cell_to_index
       LOGICAL                                            :: defined, floating_a, found, ghost_a, &
                                                             omit_headers, use_virial
       LOGICAL, ALLOCATABLE, DIMENSION(:)                 :: floating, ghost
-      REAL(KIND=dp) :: alphaa, alphab, derepij, dr, erep, erepij, etaa, etab, k2sh, kcnd, kcnp, &
-         kcns, kd, ken, kf, kg, kp, ks, ksp, kx2, kxr, rcova, rcovb, xgammaa, xgammab, zneffa, &
-         zneffb
+      REAL(KIND=dp) :: alphaa, alphab, derepij, dr, ena, enb, erep, erepij, etaa, etab, fen, fij, &
+         k2sh, kab, kcnd, kcnp, kcns, kd, ken, kf, kg, kp, ks, ksp, kx2, kxr, rcova, rcovab, &
+         rcovb, rcut, rcuta, rcutb, rrab, xgammaa, xgammab, zneffa, zneffb
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: cnumbers
-      REAL(KIND=dp), DIMENSION(3)                        :: force_rr, rij
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: huckel
+      REAL(KIND=dp), DIMENSION(0:3)                      :: kcnl, kl
+      REAL(KIND=dp), DIMENSION(3)                        :: force_ab, force_rr, rij
       REAL(KIND=dp), DIMENSION(5)                        :: hena, henb, kappaa, kappab, kpolya, &
-                                                            kpolyb
-      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: fblock, gblock, pblock, sblock, wblock
+                                                            kpolyb, pia, pib
+      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: fblock, gblock, pblock, sblock
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(atprop_type), POINTER                         :: atprop
       TYPE(block_p_type), DIMENSION(2:4)                 :: dgblocks, dsblocks
@@ -231,6 +239,22 @@ CONTAINS
          CALL get_kpoint_info(kpoint=kpoints, cell_to_index=cell_to_index)
       END IF
 
+      ! overlap matrix
+      IF (calculate_forces) THEN
+         CALL build_overlap_matrix(ks_env, nderivative=nderivatives, matrixkp_s=matrix_s, &
+                                   matrix_name="xTB OVERLAP MATRIX", &
+                                   basis_type_a="ORB", &
+                                   basis_type_b="ORB", &
+                                   sab_nl=sab_orb, calculate_forces=.TRUE., &
+                                   matrixkp_p=matrix_w)
+      ELSE
+         CALL build_overlap_matrix(ks_env, nderivative=nderivatives, matrixkp_s=matrix_s, &
+                                   matrix_name="xTB OVERLAP MATRIX", &
+                                   basis_type_a="ORB", &
+                                   basis_type_b="ORB", &
+                                   sab_nl=sab_orb)
+      END IF
+
       ! Calculate coordination numbers
       ALLOCATE (cnumbers(natom))
       cnumbers = 0._dp
@@ -257,6 +281,29 @@ CONTAINS
                       calculate_forces, .FALSE.)
       DEALLOCATE (ghost, floating, atomnumber)
 
+      ! Calculate Huckel parameters
+      kcnl(0) = kcns
+      kcnl(1) = kcnp
+      kcnl(2) = kcnd
+      kcnl(3) = 0.0_dp
+      kl(0) = ks
+      kl(1) = kp
+      kl(2) = kd
+      kl(3) = 0.0_dp
+      ALLOCATE (huckel(5, natom), kind_of(natom))
+      CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set, kind_of=kind_of)
+      DO iatom = 1, natom
+         ikind = kind_of(iatom)
+         CALL get_qs_kind(qs_kind_set(ikind), xtb_parameter=xtb_atom_a)
+         CALL get_xtb_atom_param(xtb_atom_a, nshell=nshell, lval=lval, hen=hena)
+         huckel(:, iatom) = 0.0_dp
+         DO i = 1, nshell
+            huckel(i, iatom) = hena(i)*(1._dp+kcnl(lval(i))*cnumbers(iatom))
+         END DO
+      END DO
+
+      DEALLOCATE (kind_of)
+
       erep = 0._dp
 
       CALL neighbor_list_iterator_create(nl_iterator, sab_orb)
@@ -267,16 +314,18 @@ CONTAINS
          CALL get_xtb_atom_param(xtb_atom_a, defined=defined, natorb=natorb_a)
          IF (.NOT. defined .OR. natorb_a < 1) CYCLE
          CALL get_qs_kind(qs_kind_set(jkind), xtb_parameter=xtb_atom_b)
-         CALL get_xtb_atom_param(xtb_atom_a, defined=defined, natorb=natorb_b)
+         CALL get_xtb_atom_param(xtb_atom_b, defined=defined, natorb=natorb_b)
          IF (.NOT. defined .OR. natorb_b < 1) CYCLE
 
          dr = SQRT(SUM(rij(:)**2))
 
          ! atomic parameters
-         CALL get_xtb_atom_param(xtb_atom_a, z=za, lao=laoa, rcov=rcova, eta=etaa, xgamma=xgammaa, &
-                                 alpha=alphaa, zneff=zneffa, kpoly=kpolya, kappa=kappaa, hen=hena)
-         CALL get_xtb_atom_param(xtb_atom_b, z=zb, lao=laob, rcov=rcovb, eta=etab, xgamma=xgammab, &
-                                 alpha=alphab, zneff=zneffb, kpoly=kpolyb, kappa=kappab, hen=henb)
+         CALL get_xtb_atom_param(xtb_atom_a, z=za, nao=naoa, lao=laoa, rcov=rcova, eta=etaa, xgamma=xgammaa, &
+                                 nshell=nsa, alpha=alphaa, zneff=zneffa, kpoly=kpolya, kappa=kappaa, hen=hena, &
+                                 electronegativity=ena)
+         CALL get_xtb_atom_param(xtb_atom_b, z=zb, nao=naob, lao=laob, rcov=rcovb, eta=etab, xgamma=xgammab, &
+                                 nshell=nsb, alpha=alphab, zneff=zneffb, kpoly=kpolyb, kappa=kappab, hen=henb, &
+                                 electronegativity=enb)
 
          IF (nimg == 1) THEN
             ic = 1
@@ -303,10 +352,6 @@ CONTAINS
             CALL dbcsr_get_block_p(matrix=matrix_p(1, ic)%matrix, &
                                    row=irow, col=icol, block=pblock, found=found)
             CPASSERT(ASSOCIATED(pblock))
-            NULLIFY (wblock)
-            CALL dbcsr_get_block_p(matrix=matrix_w(1, ic)%matrix, &
-                                   row=irow, col=icol, block=wblock, found=found)
-            CPASSERT(ASSOCIATED(wblock))
             DO i = 2, 4
                NULLIFY (dsblocks(i)%block)
                CALL dbcsr_get_block_p(matrix=matrix_s(i, ic)%matrix, &
@@ -319,114 +364,86 @@ CONTAINS
             END DO
          END IF
 
+         rcovab = rcova+rcovb
+         rrab = SQRT(dr/rcovab)
+         DO i = 1, nsa
+            pia(i) = 1._dp+kpolya(i)*rrab
+         END DO
+         DO i = 1, nsb
+            pib(i) = 1._dp+kpolyb(i)*rrab
+         END DO
+
          IF (iatom == jatom .AND. dr < 0.001_dp) THEN
             ! diagonal block
             DO i = 1, natorb_a
-               sblock(i, i) = sblock(i, i)+1.0_dp
-               fblock(i, i) = fblock(i, i)+0.0_dp
+               na = naoa(i)
+               fblock(i, i) = fblock(i, i)+huckel(na, iatom)
             END DO
+!           IF (calculate_forces) THEN
+!              force_ab = 0._dp
+!           END IF
          ELSE
-!              ! off-diagonal block
-!              CALL compute_block_sk(sblock, smatij, smatji, rij, ngrd, ngrdcut, dgrd, llm, lmaxi, lmaxj, irow, iatom)
-!              CALL compute_block_sk(fblock, fmatij, fmatji, rij, ngrd, ngrdcut, dgrd, llm, lmaxi, lmaxj, irow, iatom)
-!              IF (calculate_forces) THEN
-!                 force_ab = 0._dp
-!                 force_w = 0._dp
+            ! off-diagonal block
+            ! get KAB
+            kab = 1.0_dp
+            ! get Fen
+            fen = 1.0_dp+ken*(ena-enb)**2
+            DO j = 1, natorb_b
+               lb = laob(j)
+               nb = naob(j)
+               DO i = 1, natorb_a
+                  la = laoa(i)
+                  na = naoa(i)
+                  fij = 0.5_dp*(kl(la)+kl(lb))*0.5_dp*(huckel(na, iatom)+huckel(nb, jatom))*pia(na)*pib(nb)
+                  IF (iatom <= jatom) THEN
+                     fblock(i, j) = fblock(i, j)+fij*sblock(i, j)*kab*fen
+                  ELSE
+                     fblock(j, i) = fblock(j, i)+fij*sblock(j, i)*kab*fen
+                  END IF
+               END DO
+            END DO
+!           IF (calculate_forces) THEN
+!              force_ab = 0._dp
 !                 n1 = SIZE(fblock, 1)
 !                 n2 = SIZE(fblock, 2)
-!                 ! make sure that displacement is in the correct direction depending on the position
-!                 ! of the block (upper or lower triangle)
-!                 f0 = 1.0_dp
-!                 IF (irow == iatom) f0 = -1.0_dp
-
-!                 ALLOCATE (dfblock(n1, n2), dsblock(n1, n2))
-
-!                 DO i = 1, 3
-!                    drij = rij
-!                    dfblock = 0._dp; dsblock = 0._dp
-
-!                    drij(i) = rij(i)-ddr*f0
-!                    CALL compute_block_sk(dsblock, smatij, smatji, drij, ngrd, ngrdcut, dgrd, llm, lmaxi, lmaxj, irow, iatom)
-!                    CALL compute_block_sk(dfblock, fmatij, fmatji, drij, ngrd, ngrdcut, dgrd, llm, lmaxi, lmaxj, irow, iatom)
-
-!                    dsblock = -dsblock
-!                    dfblock = -dfblock
-
-!                    drij(i) = rij(i)+ddr*f0
-!                    CALL compute_block_sk(dsblock, smatij, smatji, drij, ngrd, ngrdcut, dgrd, llm, lmaxi, lmaxj, irow, iatom)
-!                    CALL compute_block_sk(dfblock, fmatij, fmatji, drij, ngrd, ngrdcut, dgrd, llm, lmaxi, lmaxj, irow, iatom)
-
-!                    dfblock = dfblock/(2.0_dp*ddr)
-!                    dsblock = dsblock/(2.0_dp*ddr)
-
-!                    foab = 2.0_dp*SUM(dfblock*pblock)
-!                    fow = -2.0_dp*SUM(dsblock*wblock)
-
-!                    force_ab(i) = force_ab(i)+foab
-!                    force_w(i) = force_w(i)+fow
-!                    IF (dftb_control%self_consistent) THEN
-!                       CPASSERT(ASSOCIATED(dsblocks(i+1)%block))
-!                       dsblocks(i+1)%block = dsblocks(i+1)%block+dsblock
-!                    END IF
-!                 ENDDO
-!                 IF (use_virial) THEN
-!                    CALL virial_pair_force(virial%pv_virial, -f0, force_ab, rij)
-!                    CALL virial_pair_force(virial%pv_virial, -f0, force_w, rij)
-!                    IF (atprop%stress) THEN
-!                       f1 = 0.5_dp*f0
-!                       CALL virial_pair_force(atprop%atstress(:, :, iatom), -f1, force_ab, rij)
-!                       CALL virial_pair_force(atprop%atstress(:, :, iatom), -f1, force_w, rij)
-!                       CALL virial_pair_force(atprop%atstress(:, :, jatom), -f1, force_ab, rij)
-!                       CALL virial_pair_force(atprop%atstress(:, :, jatom), -f1, force_w, rij)
-!                    END IF
+!              IF (use_virial) THEN
+!                 CALL virial_pair_force(virial%pv_virial, -f0, force_ab, rij)
+!                 IF (atprop%stress) THEN
+!                    f1 = 0.5_dp*f0
+!                    CALL virial_pair_force(atprop%atstress(:, :, iatom), -f1, force_ab, rij)
+!                    CALL virial_pair_force(atprop%atstress(:, :, jatom), -f1, force_ab, rij)
 !                 END IF
-!                 DEALLOCATE (dfblock, dsblock)
 !              END IF
+!              DEALLOCATE (dfblock, dsblock)
+!           END IF
          END IF
 
-!           IF (calculate_forces .AND. (iatom /= jatom .OR. dr > 0.001_dp)) THEN
-!              atom_a = atom_of_kind(iatom)
-!              atom_b = atom_of_kind(jatom)
-!              IF (irow == iatom) force_ab = -force_ab
-!              IF (irow == iatom) force_w = -force_w
-!              force(ikind)%all_potential(:, atom_a) = force(ikind)%all_potential(:, atom_a)-force_ab(:)
-!              force(jkind)%all_potential(:, atom_b) = force(jkind)%all_potential(:, atom_b)+force_ab(:)
-!              force(ikind)%overlap(:, atom_a) = force(ikind)%overlap(:, atom_a)-force_w(:)
-!              force(jkind)%overlap(:, atom_b) = force(jkind)%overlap(:, atom_b)+force_w(:)
-!           END IF
+         IF (calculate_forces) THEN
+            atom_a = atom_of_kind(iatom)
+            atom_b = atom_of_kind(jatom)
+            IF (irow == iatom) force_ab = -force_ab
+            force(ikind)%all_potential(:, atom_a) = force(ikind)%all_potential(:, atom_a)-force_ab(:)
+            force(jkind)%all_potential(:, atom_b) = force(jkind)%all_potential(:, atom_b)+force_ab(:)
+         END IF
 
-!           ! gamma matrix
-!           IF (dftb_control%self_consistent) THEN
-!              hb_sr_damp = dftb_control%hb_sr_damp
-!              IF (hb_sr_damp) THEN
-!                 ! short range correction enabled only when iatom XOR jatom are hydrogens
-!                 hb_sr_damp = is_hydrogen(particle_set(iatom)%atomic_kind) .NEQV. &
-!                              is_hydrogen(particle_set(jatom)%atomic_kind)
-!              END IF
-!              IF (hb_sr_damp) THEN
-!                 hb_para = dftb_control%hb_sr_para
-!              ELSE
-!                 hb_para = 0.0_dp
-!              END IF
-!              ga = eta_a(0)
-!              gb = eta_b(0)
-!              gblock(1, 1) = gblock(1, 1)+gamma_rab_sr(dr, ga, gb, hb_para)
-!              IF (calculate_forces .AND. (iatom /= jatom .OR. dr > 0.001_dp)) THEN
-!                 drp = dr+ddr
-!                 drm = dr-ddr
-!                 dgam = 0.5_dp*(gamma_rab_sr(drp, ga, gb, hb_para)-gamma_rab_sr(drm, ga, gb, hb_para))/ddr
-!                 DO i = 1, 3
-!                    CPASSERT(ASSOCIATED(dgblocks(i+1)%block))
-!                    IF (irow == iatom) THEN
-!                       dgblocks(i+1)%block(1, 1) = dgblocks(i+1)%block(1, 1)+dgam*rij(i)/dr
-!                    ELSE
-!                       dgblocks(i+1)%block(1, 1) = dgblocks(i+1)%block(1, 1)-dgam*rij(i)/dr
-!                    END IF
-!                 END DO
-!              END IF
-!           END IF
-
-!        END IF
+         ! gamma matrix
+         CALL get_xtb_atom_param(xtb_atom_a, rcut=rcuta)
+         CALL get_xtb_atom_param(xtb_atom_b, rcut=rcutb)
+         rcut = rcuta+rcutb
+         CALL gamma_rab_sr(gblock, dr, nsa, kappaa, etaa, nsb, kappab, etab, kg, rcut)
+         IF (calculate_forces .AND. (iatom /= jatom .OR. dr > 0.001_dp)) THEN
+!              drp = dr+ddr
+!              drm = dr-ddr
+!              dgam = 0.5_dp*(gamma_rab_sr(drp, ga, gb, hb_para)-gamma_rab_sr(drm, ga, gb, hb_para))/ddr
+!              DO i = 1, 3
+!                 CPASSERT(ASSOCIATED(dgblocks(i+1)%block))
+!                 IF (irow == iatom) THEN
+!                    dgblocks(i+1)%block(1, 1) = dgblocks(i+1)%block(1, 1)+dgam*rij(i)/dr
+!                 ELSE
+!                    dgblocks(i+1)%block(1, 1) = dgblocks(i+1)%block(1, 1)-dgam*rij(i)/dr
+!                 END IF
+!              END DO
+         END IF
 
          ! repulsive potential
          IF (dr > 0.001_dp) THEN
@@ -487,6 +504,9 @@ CONTAINS
          END DO
          DEALLOCATE (dcnum)
       END IF
+
+      ! deallocate Huckel parameters
+      DEALLOCATE (huckel)
 
       CALL section_vals_val_get(qs_env%input, "DFT%PRINT%AO_MATRICES%OMIT_HEADERS", l_val=omit_headers)
       IF (BTEST(cp_print_key_should_output(logger%iter_info, &
@@ -556,42 +576,56 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'build_xtb_ks_matrix', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle
+      INTEGER                                            :: handle, img, ispin, nspins
+      REAL(KIND=dp)                                      :: pc_ener, qmmm_el
+      REAL(KIND=dp), DIMENSION(:), POINTER               :: occupation_numbers
+      TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
+      TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_p1, mo_derivs
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: ks_matrix, matrix_h
+      TYPE(dbcsr_type), POINTER                          :: mo_coeff
+      TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(mo_set_p_type), DIMENSION(:), POINTER         :: mo_array
+      TYPE(qs_energy_type), POINTER                      :: energy
+      TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
+      TYPE(qs_ks_env_type), POINTER                      :: ks_env
+      TYPE(qs_rho_type), POINTER                         :: rho
+      TYPE(section_vals_type), POINTER                   :: scf_section
 
       CALL timeset(routineN, handle)
-!     NULLIFY (dft_control, logger, scf_section, matrix_p, particle_set, ks_env, &
-!              ks_matrix, rho, energy)
-!     logger => cp_get_default_logger()
-!     CPASSERT(ASSOCIATED(qs_env))
+      NULLIFY (dft_control, logger, scf_section, ks_env, ks_matrix, rho, &
+               energy)
+      logger => cp_get_default_logger()
+      CPASSERT(ASSOCIATED(qs_env))
 
-!     CALL get_qs_env(qs_env, &
-!                     dft_control=dft_control, &
-!                     atomic_kind_set=atomic_kind_set, &
-!                     qs_kind_set=qs_kind_set, &
-!                     matrix_h_kp=matrix_h, &
-!                     para_env=para_env, &
-!                     ks_env=ks_env, &
-!                     matrix_ks_kp=ks_matrix, &
-!                     rho=rho, &
-!                     energy=energy)
+      CALL get_qs_env(qs_env, &
+                      dft_control=dft_control, &
+                      atomic_kind_set=atomic_kind_set, &
+                      qs_kind_set=qs_kind_set, &
+                      matrix_h_kp=matrix_h, &
+                      para_env=para_env, &
+                      ks_env=ks_env, &
+                      matrix_ks_kp=ks_matrix, &
+                      rho=rho, &
+                      energy=energy)
 
-!     energy%hartree = 0.0_dp
-!     energy%qmmm_el = 0.0_dp
+      energy%hartree = 0.0_dp
+      energy%qmmm_el = 0.0_dp
 
-!     scf_section => section_vals_get_subs_vals(qs_env%input, "DFT%SCF")
-!     nspins = dft_control%nspins
-!     CPASSERT(ASSOCIATED(matrix_h))
-!     CPASSERT(ASSOCIATED(rho))
-!     CPASSERT(SIZE(ks_matrix) > 0)
+      scf_section => section_vals_get_subs_vals(qs_env%input, "DFT%SCF")
+      nspins = dft_control%nspins
+      CPASSERT(ASSOCIATED(matrix_h))
+      CPASSERT(ASSOCIATED(rho))
+      CPASSERT(SIZE(ks_matrix) > 0)
 
-!     DO ispin = 1, nspins
-!        DO img = 1, SIZE(ks_matrix, 2)
-!           ! copy the core matrix into the fock matrix
-!           CALL dbcsr_copy(ks_matrix(ispin, img)%matrix, matrix_h(1, img)%matrix)
-!        END DO
-!     END DO
+      DO ispin = 1, nspins
+         DO img = 1, SIZE(ks_matrix, 2)
+            ! copy the core matrix into the fock matrix
+            CALL dbcsr_copy(ks_matrix(ispin, img)%matrix, matrix_h(1, img)%matrix)
+         END DO
+      END DO
 
-!     IF (dft_control%qs_control%dftb_control%self_consistent) THEN
 !        ! Mulliken charges
 !        CALL get_qs_env(qs_env=qs_env, particle_set=particle_set, &
 !                        matrix_s_kp=matrix_s)
@@ -619,26 +653,24 @@ CONTAINS
 
 !        DEALLOCATE (mcharge)
 
-!     END IF
+      IF (qs_env%qmmm) THEN
+         CPASSERT(SIZE(ks_matrix, 2) == 1)
+         DO ispin = 1, nspins
+            ! If QM/MM sumup the 1el Hamiltonian
+            CALL dbcsr_add(ks_matrix(ispin, 1)%matrix, qs_env%ks_qmmm_env%matrix_h(1)%matrix, &
+                           1.0_dp, 1.0_dp)
+            CALL qs_rho_get(rho, rho_ao=matrix_p1)
+            ! Compute QM/MM Energy
+            CALL dbcsr_trace(qs_env%ks_qmmm_env%matrix_h(1)%matrix, &
+                             matrix_p1(ispin)%matrix, trace=qmmm_el)
+            energy%qmmm_el = energy%qmmm_el+qmmm_el
+         END DO
+         pc_ener = qs_env%ks_qmmm_env%pc_ener
+         energy%qmmm_el = energy%qmmm_el+pc_ener
+      END IF
 
-!     IF (qs_env%qmmm) THEN
-!        CPASSERT(SIZE(ks_matrix, 2) == 1)
-!        DO ispin = 1, nspins
-!           ! If QM/MM sumup the 1el Hamiltonian
-!           CALL dbcsr_add(ks_matrix(ispin, 1)%matrix, qs_env%ks_qmmm_env%matrix_h(1)%matrix, &
-!                          1.0_dp, 1.0_dp)
-!           CALL qs_rho_get(rho, rho_ao=matrix_p1)
-!           ! Compute QM/MM Energy
-!           CALL dbcsr_trace(qs_env%ks_qmmm_env%matrix_h(1)%matrix, &
-!                            matrix_p1(ispin)%matrix, trace=qmmm_el)
-!           energy%qmmm_el = energy%qmmm_el+qmmm_el
-!        END DO
-!        pc_ener = qs_env%ks_qmmm_env%pc_ener
-!        energy%qmmm_el = energy%qmmm_el+pc_ener
-!     END IF
-
-!     energy%total = energy%core+energy%hartree+energy%qmmm_el+ &
-!                    energy%repulsive+energy%dispersion+energy%dftb3
+      energy%total = energy%core+energy%hartree+energy%qmmm_el+ &
+                     energy%repulsive+energy%dispersion+energy%dftb3
 
 !     output_unit = cp_print_key_unit_nr(logger, scf_section, "PRINT%DETAILED_ENERGY", &
 !                                        extension=".scfLog")
@@ -660,19 +692,19 @@ CONTAINS
 !     CALL cp_print_key_finished_output(output_unit, logger, scf_section, &
 !                                       "PRINT%DETAILED_ENERGY")
 !     ! here we compute dE/dC if needed. Assumes dE/dC is H_{ks}C (plus occupation numbers)
-!     IF (qs_env%requires_mo_derivs .AND. .NOT. just_energy) THEN
-!        CPASSERT(SIZE(ks_matrix, 2) == 1)
-!        CALL get_qs_env(qs_env, mo_derivs=mo_derivs, mos=mo_array)
-!        DO ispin = 1, SIZE(mo_derivs)
-!           CALL get_mo_set(mo_set=mo_array(ispin)%mo_set, &
-!                           mo_coeff_b=mo_coeff, occupation_numbers=occupation_numbers)
-!           IF (.NOT. mo_array(ispin)%mo_set%use_mo_coeff_b) THEN
-!              CPABORT("")
-!           ENDIF
-!           CALL dbcsr_multiply('n', 'n', 1.0_dp, ks_matrix(ispin, 1)%matrix, mo_coeff, &
-!                               0.0_dp, mo_derivs(ispin)%matrix)
-!        ENDDO
-!     ENDIF
+      IF (qs_env%requires_mo_derivs .AND. .NOT. just_energy) THEN
+         CPASSERT(SIZE(ks_matrix, 2) == 1)
+         CALL get_qs_env(qs_env, mo_derivs=mo_derivs, mos=mo_array)
+         DO ispin = 1, SIZE(mo_derivs)
+            CALL get_mo_set(mo_set=mo_array(ispin)%mo_set, &
+                            mo_coeff_b=mo_coeff, occupation_numbers=occupation_numbers)
+            IF (.NOT. mo_array(ispin)%mo_set%use_mo_coeff_b) THEN
+               CPABORT("")
+            ENDIF
+            CALL dbcsr_multiply('n', 'n', 1.0_dp, ks_matrix(ispin, 1)%matrix, mo_coeff, &
+                                0.0_dp, mo_derivs(ispin)%matrix)
+         ENDDO
+      ENDIF
 
       CALL timestop(handle)
 
@@ -867,58 +899,72 @@ CONTAINS
    END SUBROUTINE build_xtb_overlap
 
 ! **************************************************************************************************
-!> \brief  Computes the short-range gamma parameter from exact Coulomb
-!>         interaction of normalized exp(-a*r) charge distribution - 1/r
-!> \param r ...
-!> \param ga ...
-!> \param gb ...
-!> \param hb_para ...
-!> \return ...
-!> \par Literature
-!>         Elstner et al, PRB 58 (1998) 7260
+!> \brief  Computes the short-range gamma parameter from
+!>         Nataga-Mishimoto-Ohno-Klopman formula for xTB
+!>         WARNING: The xTB function (gamma - 1/r) has still an l-dependent longrange (1/r^3)
+!>                  behaviour. We use a cutoff function to smoothly remove this part.
+!>                  However, this will change energies and effect final results.
+!>
+!> \param gmat ...
+!> \param rab ...
+!> \param nsa ...
+!> \param kappaa ...
+!> \param etaa ...
+!> \param nsb ...
+!> \param kappab ...
+!> \param etab ...
+!> \param kg ...
+!> \param rcut ...
 !> \par History
-!>      10.2008 Axel Kohlmeyer - adding sr_damp
-!>      08.2014 JGH - adding flexible exponent for damping
+!>      10.2018 JGH
 !> \version 1.1
 ! **************************************************************************************************
-   FUNCTION gamma_rab_sr(r, ga, gb, hb_para) RESULT(gamma)
-      REAL(dp), INTENT(in)                               :: r, ga, gb, hb_para
-      REAL(dp)                                           :: gamma
+   SUBROUTINE gamma_rab_sr(gmat, rab, nsa, kappaa, etaa, nsb, kappab, etab, kg, rcut)
+      REAL(dp), DIMENSION(:, :), INTENT(INOUT)           :: gmat
+      REAL(dp), INTENT(IN)                               :: rab
+      INTEGER, INTENT(IN)                                :: nsa
+      REAL(dp), DIMENSION(:), INTENT(IN)                 :: kappaa
+      REAL(dp), INTENT(IN)                               :: etaa
+      INTEGER, INTENT(IN)                                :: nsb
+      REAL(dp), DIMENSION(:), INTENT(IN)                 :: kappab
+      REAL(dp), INTENT(IN)                               :: etab, kg, rcut
 
-      REAL(dp)                                           :: a, b, fac, g_sum
+      CHARACTER(len=*), PARAMETER :: routineN = 'gamma_rab_sr', routineP = moduleN//':'//routineN
+      REAL(KIND=dp), PARAMETER                           :: rsmooth = 1.0_dp
 
-      gamma = 0.0_dp
-      a = 3.2_dp*ga ! 3.2 = 16/5 in Eq. 18 and ff.
-      b = 3.2_dp*gb
-      g_sum = a+b
-      IF (g_sum < tol_gamma) RETURN ! hardness screening
-      IF (r < rtiny) THEN ! This is for short distances but non-onsite terms
-         ! This gives also correct diagonal elements (a=b, r=0)
-         gamma = 0.5_dp*(a*b/g_sum+(a*b)**2/g_sum**3)
-         RETURN
-      END IF
-      !
-      ! distinguish two cases: Gamma's are very close, e.g. for the same atom type,
-      !                        and Gamma's are different
-      !
-      IF (ABS(a-b) < rtiny) THEN
-         fac = 1.6_dp*r*a*b/g_sum*(1.0_dp+a*b/g_sum**2)
-         gamma = -(48.0_dp+33._dp*fac+(9.0_dp+fac)*fac**2)*EXP(-fac)/(48._dp*r)
+      INTEGER                                            :: i, j
+      REAL(KIND=dp)                                      :: fcut, r, rk, x
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: eta
+
+      ALLOCATE (eta(nsa, nsb))
+
+      DO j = 1, nsb
+         DO i = 1, nsa
+            eta(i, j) = 1._dp/(etaa*(1._dp+kappaa(i)))+1._dp/(etab*(1._dp+kappab(j)))
+            eta(i, j) = 2._dp/eta(i, j)
+         END DO
+      END DO
+
+      IF (rab < 1.e-6) THEN
+         ! on site terms
+         gmat(:, :) = gmat(:, :)+eta(:, :)
+      ELSEIF (rab > rcut) THEN
+         ! do nothing
       ELSE
-         gamma = -EXP(-a*r)*(0.5_dp*a*b**4/(a**2-b**2)**2- &
-                             (b**6-3._dp*a**2*b**4)/(r*(a**2-b**2)**3))- & ! a-> b
-                 EXP(-b*r)*(0.5_dp*b*a**4/(b**2-a**2)**2- &
-                            (a**6-3._dp*b**2*a**4)/(r*(b**2-a**2)**3)) ! b-> a
+         rk = rab**kg
+         IF (rab < rcut-rsmooth) THEN
+            fcut = 1.0_dp
+         ELSE
+            r = rab-(rcut-rsmooth)
+            x = r/rsmooth
+            fcut = -10._dp*x**5+15._dp*x**4-10._dp*x**3+1._dp
+         END IF
+         gmat(:, :) = gmat(:, :)+fcut*((1._dp/(rk+eta(:, :)**(-kg)))**(1._dp/kg)-1.0_dp/rab)
       END IF
-      !
-      ! damping function for better short range hydrogen bonds.
-      ! functional form from Hu H. et al., J. Phys. Chem. A 2007, 111, 5685-5691
-      ! according to Elstner M, Theor. Chem. Acc. 2006, 116, 316-325,
-      ! this should only be applied to a-b pairs involving hydrogen.
-      IF (hb_para > 0.0_dp) THEN
-         gamma = gamma*EXP(-(0.5_dp*(ga+gb))**hb_para*r*r)
-      END IF
-   END FUNCTION gamma_rab_sr
+
+      DEALLOCATE (eta)
+
+   END SUBROUTINE gamma_rab_sr
 
 ! **************************************************************************************************
 !> \brief ...

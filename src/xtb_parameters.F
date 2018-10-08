@@ -33,6 +33,7 @@ MODULE xtb_parameters
                                               dp
    USE periodic_table,                  ONLY: get_ptable_info,&
                                               ptable
+   USE physcon,                         ONLY: evolt
    USE string_utilities,                ONLY: remove_word
    USE xtb_types,                       ONLY: xtb_atom_type
 #include "./base/base_uses.f90"
@@ -41,7 +42,7 @@ MODULE xtb_parameters
 
    PRIVATE
 
-   ! Element Valence
+   INTEGER, PARAMETER, PRIVATE :: nelem = 106
    !   H                                                                      He
    !   Li Be                                                 B  C  N  O  F    Ne
    !   Na Mg                                                 Al Si P  S  Cl   Ar
@@ -50,7 +51,7 @@ MODULE xtb_parameters
    !   Cs Ba La Ce-Lu          Hf Ta W  Re Os Ir Pt Au Hg    Tl Pb Bi Po At   Rn
    !   Fr Ra Ac Th Pa U        Np Pu Am Cm Bk Cf Es Fm Md    No Lr Rf Ha 106
 
-   INTEGER, PARAMETER, PRIVATE :: nelem = 106
+   ! Element Valence
    INTEGER, DIMENSION(0:nelem), PARAMETER, PRIVATE :: zval = (/-1, & !    0
                                                                1, 2, & !    2
                                                                1, 2, 3, 4, 5, 6, 7, 8, & !   10
@@ -60,6 +61,26 @@ MODULE xtb_parameters
                                                                1, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, &
                                                                4, 5, 6, 7, 8, 9, 10, 11, 2, 3, 4, 5, 6, 7, 8, & !   86
                                                       -1, -1, -1, 4, -1, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1/)
+
+   ! Element Pauling Electronegativity
+   REAL(KIND=dp), DIMENSION(0:nelem), &
+      PARAMETER, PRIVATE :: eneg = (/0.00_dp, & ! 0
+                                     2.10_dp, 0.00_dp, & ! 2
+                                     0.98_dp, 1.57_dp, 2.04_dp, 2.55_dp, 3.04_dp, 3.44_dp, 3.98_dp, 0.00_dp, & ! 10
+                                     0.93_dp, 1.31_dp, 1.61_dp, 1.90_dp, 2.19_dp, 2.58_dp, 3.16_dp, 0.00_dp, & ! 18
+                                     0.82_dp, 1.00_dp, 1.36_dp, 1.54_dp, 1.63_dp, 1.66_dp, 1.55_dp, 1.83_dp, &
+                                     1.88_dp, 1.91_dp, 1.90_dp, 1.65_dp, 1.81_dp, 2.01_dp, 2.18_dp, 2.55_dp, 2.96_dp, 0.00_dp, & ! 36
+                                     0.82_dp, 0.95_dp, 1.22_dp, 1.33_dp, 1.60_dp, 2.16_dp, 1.90_dp, 2.20_dp, &
+                                     2.28_dp, 2.20_dp, 1.93_dp, 1.69_dp, 1.78_dp, 1.96_dp, 2.05_dp, 2.10_dp, 2.66_dp, 2.60_dp, & ! 54
+                                     0.79_dp, 0.89_dp, 1.10_dp, &
+                                     1.12_dp, 1.13_dp, 1.14_dp, 1.13_dp, 1.17_dp, 1.20_dp, 1.20_dp, 1.10_dp, &
+                                     1.22_dp, 1.23_dp, 1.24_dp, 1.25_dp, 1.10_dp, 1.27_dp, & ! Lanthanides
+                                     1.30_dp, 1.50_dp, 2.36_dp, 1.90_dp, 2.20_dp, 2.20_dp, 2.28_dp, 2.54_dp, &
+                                     2.00_dp, 2.04_dp, 2.33_dp, 2.02_dp, 2.00_dp, 2.20_dp, 0.00_dp, & ! 86
+                                     0.70_dp, 0.89_dp, 1.10_dp, &
+                                     1.30_dp, 1.50_dp, 1.38_dp, 1.36_dp, 1.28_dp, 1.30_dp, 1.30_dp, 1.30_dp, &
+                                     1.30_dp, 1.30_dp, 1.30_dp, 1.30_dp, 1.30_dp, 0.00_dp, & !  Actinides
+                                     0.00_dp, 0.00_dp, 0.00_dp/)
 
 ! *** Global parameters ***
 
@@ -314,14 +335,21 @@ CONTAINS
 
       IF (param%defined) THEN
          ! AO to shell pointer
+         ! AO to l-qn pointer
          na = 0
          DO is = 1, param%nshell
             l = param%lval(is)
             DO i = 1, 2*l+1
                na = na+1
+               param%nao(na) = is
                param%lao(na) = l
             END DO
          END DO
+         ! Electronegativity
+         i = param%z
+         param%electronegativity = eneg(i)
+         ! orbital energies [evolt] -> [a.u.]
+         param%hen = param%hen/evolt
       END IF
 
    END SUBROUTINE xtb_parameters_set

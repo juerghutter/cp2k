@@ -22,7 +22,8 @@ MODULE qs_environment
                                               create_lri_aux_basis_set,&
                                               create_ri_aux_basis_set
    USE basis_set_container_types,       ONLY: add_basis_set_to_container
-   USE basis_set_types,                 ONLY: gto_basis_set_type
+   USE basis_set_types,                 ONLY: get_gto_basis_set,&
+                                              gto_basis_set_type
    USE bibliography,                    ONLY: Iannuzzi2006,&
                                               Iannuzzi2007,&
                                               cite_reference
@@ -658,6 +659,8 @@ CONTAINS
             NULLIFY (tmp_basis_set)
             CALL init_xtb_basis(qs_kind%xtb_parameter, tmp_basis_set, ngauss)
             CALL add_basis_set_to_container(qs_kind%basis_sets, tmp_basis_set, "ORB")
+            ! cutoff radius
+            CALL get_gto_basis_set(tmp_basis_set, kind_radius=qs_kind%xtb_parameter%rcut)
             ! potential
             CALL init_potential(qs_kind%all_potential, itype="BARE", &
                                 zeff=qs_kind%xtb_parameter%zeff, zeff_correction=zeff_correction)
