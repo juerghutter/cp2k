@@ -40,7 +40,9 @@ MODULE xtb_types
       INTEGER                                :: natorb !number of orbitals
       INTEGER                                :: lmax !max angular momentum
       !
+      REAL(KIND=dp)                          :: rcut !cutoff radius for sr-Coulomb
       REAL(KIND=dp)                          :: rcov !covalent radius
+      REAL(KIND=dp)                          :: electronegativity !electronegativity
       !
       REAL(KIND=dp)                          :: eta !Atomic Hubbard parameter
       REAL(KIND=dp)                          :: xgamma !charge derivative of eta
@@ -55,7 +57,7 @@ MODULE xtb_types
       REAL(KIND=dp), DIMENSION(5)            :: hen
       REAL(KIND=dp), DIMENSION(5)            :: zeta
       ! AO to shell pointer
-      INTEGER, DIMENSION(25)                 :: lao
+      INTEGER, DIMENSION(25)                 :: nao, lao
    END TYPE xtb_atom_type
 
 ! *** Public data types ***
@@ -89,7 +91,9 @@ CONTAINS
       xtb_parameter%zeff = -1.0_dp
       xtb_parameter%natorb = 0
       xtb_parameter%lmax = -1
+      xtb_parameter%rcut = 0.0_dp
       xtb_parameter%rcov = 0.0_dp
+      xtb_parameter%electronegativity = 0.0_dp
       xtb_parameter%eta = 0.0_dp
       xtb_parameter%xgamma = 0.0_dp
       xtb_parameter%alpha = 0.0_dp
@@ -101,6 +105,7 @@ CONTAINS
       xtb_parameter%kappa = 0.0_dp
       xtb_parameter%hen = 0.0_dp
       xtb_parameter%zeta = 0.0_dp
+      xtb_parameter%nao = 0
       xtb_parameter%lao = 0
 
    END SUBROUTINE allocate_xtb_atom_param
@@ -131,7 +136,9 @@ CONTAINS
 !> \param zeff ...
 !> \param natorb ...
 !> \param lmax ...
+!> \param nao ...
 !> \param lao ...
+!> \param rcut ...
 !> \param rcov ...
 !> \param eta ...
 !> \param xgamma ...
@@ -144,9 +151,11 @@ CONTAINS
 !> \param kappa ...
 !> \param hen ...
 !> \param zeta ...
+!> \param electronegativity ...
 ! **************************************************************************************************
-   SUBROUTINE get_xtb_atom_param(xtb_parameter, aname, typ, defined, z, zeff, natorb, lmax, lao, &
-                                 rcov, eta, xgamma, alpha, zneff, nshell, nval, lval, kpoly, kappa, hen, zeta)
+   SUBROUTINE get_xtb_atom_param(xtb_parameter, aname, typ, defined, z, zeff, natorb, lmax, nao, lao, &
+                                 rcut, rcov, eta, xgamma, alpha, zneff, nshell, nval, lval, kpoly, kappa, &
+                                 hen, zeta, electronegativity)
 
       TYPE(xtb_atom_type), POINTER                       :: xtb_parameter
       CHARACTER(LEN=default_string_length), &
@@ -155,11 +164,12 @@ CONTAINS
       INTEGER, INTENT(OUT), OPTIONAL                     :: z
       REAL(KIND=dp), INTENT(OUT), OPTIONAL               :: zeff
       INTEGER, INTENT(OUT), OPTIONAL                     :: natorb, lmax
-      INTEGER, DIMENSION(25), INTENT(OUT), OPTIONAL      :: lao
-      REAL(KIND=dp), INTENT(OUT), OPTIONAL               :: rcov, eta, xgamma, alpha, zneff
+      INTEGER, DIMENSION(25), INTENT(OUT), OPTIONAL      :: nao, lao
+      REAL(KIND=dp), INTENT(OUT), OPTIONAL               :: rcut, rcov, eta, xgamma, alpha, zneff
       INTEGER, INTENT(OUT), OPTIONAL                     :: nshell
       INTEGER, DIMENSION(5), INTENT(OUT), OPTIONAL       :: nval, lval
       REAL(KIND=dp), DIMENSION(5), INTENT(OUT), OPTIONAL :: kpoly, kappa, hen, zeta
+      REAL(KIND=dp), INTENT(OUT), OPTIONAL               :: electronegativity
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'get_xtb_atom_param', &
          routineP = moduleN//':'//routineN
@@ -173,9 +183,12 @@ CONTAINS
       IF (PRESENT(zeff)) zeff = xtb_parameter%zeff
       IF (PRESENT(natorb)) natorb = xtb_parameter%natorb
       IF (PRESENT(lmax)) lmax = xtb_parameter%lmax
+      IF (PRESENT(nao)) nao = xtb_parameter%nao
       IF (PRESENT(lao)) lao = xtb_parameter%lao
       !
+      IF (PRESENT(rcut)) rcut = xtb_parameter%rcut
       IF (PRESENT(rcov)) rcov = xtb_parameter%rcov
+      IF (PRESENT(electronegativity)) electronegativity = xtb_parameter%electronegativity
       IF (PRESENT(eta)) eta = xtb_parameter%eta
       IF (PRESENT(xgamma)) xgamma = xtb_parameter%xgamma
       IF (PRESENT(alpha)) alpha = xtb_parameter%alpha
@@ -200,7 +213,9 @@ CONTAINS
 !> \param zeff ...
 !> \param natorb ...
 !> \param lmax ...
+!> \param nao ...
 !> \param lao ...
+!> \param rcut ...
 !> \param rcov ...
 !> \param eta ...
 !> \param xgamma ...
@@ -213,9 +228,11 @@ CONTAINS
 !> \param kappa ...
 !> \param hen ...
 !> \param zeta ...
+!> \param electronegativity ...
 ! **************************************************************************************************
-   SUBROUTINE set_xtb_atom_param(xtb_parameter, aname, typ, defined, z, zeff, natorb, lmax, lao, &
-                                 rcov, eta, xgamma, alpha, zneff, nshell, nval, lval, kpoly, kappa, hen, zeta)
+   SUBROUTINE set_xtb_atom_param(xtb_parameter, aname, typ, defined, z, zeff, natorb, lmax, nao, lao, &
+                                 rcut, rcov, eta, xgamma, alpha, zneff, nshell, nval, lval, kpoly, kappa, &
+                                 hen, zeta, electronegativity)
 
       TYPE(xtb_atom_type), POINTER                       :: xtb_parameter
       CHARACTER(LEN=default_string_length), INTENT(IN), &
@@ -224,11 +241,12 @@ CONTAINS
       INTEGER, INTENT(IN), OPTIONAL                      :: z
       REAL(KIND=dp), INTENT(IN), OPTIONAL                :: zeff
       INTEGER, INTENT(IN), OPTIONAL                      :: natorb, lmax
-      INTEGER, DIMENSION(25), INTENT(IN), OPTIONAL       :: lao
-      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: rcov, eta, xgamma, alpha, zneff
+      INTEGER, DIMENSION(25), INTENT(IN), OPTIONAL       :: nao, lao
+      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: rcut, rcov, eta, xgamma, alpha, zneff
       INTEGER, INTENT(IN), OPTIONAL                      :: nshell
       INTEGER, DIMENSION(5), INTENT(IN), OPTIONAL        :: nval, lval
       REAL(KIND=dp), DIMENSION(5), INTENT(IN), OPTIONAL  :: kpoly, kappa, hen, zeta
+      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: electronegativity
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'set_xtb_atom_param', &
          routineP = moduleN//':'//routineN
@@ -242,9 +260,12 @@ CONTAINS
       IF (PRESENT(zeff)) xtb_parameter%zeff = zeff
       IF (PRESENT(natorb)) xtb_parameter%natorb = natorb
       IF (PRESENT(lmax)) xtb_parameter%lmax = lmax
+      IF (PRESENT(nao)) xtb_parameter%nao = nao
       IF (PRESENT(lao)) xtb_parameter%lao = lao
       !
+      IF (PRESENT(rcut)) xtb_parameter%rcut = rcut
       IF (PRESENT(rcov)) xtb_parameter%rcov = rcov
+      IF (PRESENT(electronegativity)) xtb_parameter%electronegativity = electronegativity
       IF (PRESENT(eta)) xtb_parameter%eta = eta
       IF (PRESENT(xgamma)) xtb_parameter%xgamma = xgamma
       IF (PRESENT(alpha)) xtb_parameter%alpha = alpha
