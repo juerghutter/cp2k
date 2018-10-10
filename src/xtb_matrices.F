@@ -69,6 +69,7 @@ MODULE xtb_matrices
    USE virial_methods,                  ONLY: virial_pair_force
    USE virial_types,                    ONLY: virial_type
    USE xtb_coulomb,                     ONLY: build_xtb_coulomb
+   USE xtb_parameters,                  ONLY: xtb_set_kab
    USE xtb_types,                       ONLY: get_xtb_atom_param,&
                                               xtb_atom_type
 #include "./base/base_uses.f90"
@@ -117,7 +118,7 @@ CONTAINS
          k2sh, kab, kcnd, kcnp, kcns, kd, ken, kf, kg, kp, ks, ksp, kx2, kxr, rcova, rcovab, &
          rcovb, rcut, rcuta, rcutb, rrab, xgammaa, xgammab, zneffa, zneffb
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: cnumbers
-      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: huckel
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: huckel, kabset
       REAL(KIND=dp), DIMENSION(0:3)                      :: kcnl, kl
       REAL(KIND=dp), DIMENSION(3)                        :: force_ab, force_rr, rij
       REAL(KIND=dp), DIMENSION(5)                        :: hena, henb, kappaa, kappab, kpolya, &
@@ -202,7 +203,7 @@ CONTAINS
       ELSE
          nmat = 1
       END IF
-      CALL get_qs_env(qs_env=qs_env, gamma_matrix=gamma_matrix)
+      CALL get_qs_env(qs_env, gamma_matrix=gamma_matrix)
       CALL setup_gamma(qs_env, nmat, gamma_matrix, sab_orb)
 
       IF (calculate_forces) THEN
@@ -300,8 +301,19 @@ CONTAINS
             huckel(i, iatom) = hena(i)*(1._dp+kcnl(lval(i))*cnumbers(iatom))
          END DO
       END DO
-
       DEALLOCATE (kind_of)
+
+      ! Calculate KAB parameters
+      ALLOCATE(kabset(nkind,nkind))
+      kabset = 1.0_dp
+      DO ikind=1,nkind
+         CALL get_atomic_kind(atomic_kind_set(ikind), z=za)
+         DO jkind=ikind+1,nkind
+            CALL get_atomic_kind(atomic_kind_set(jkind), z=zb)
+            kabset(ikind,jkind) = xtb_set_kab(za,zb)
+            kabset(ikind,jkind) = kabset(jkind,ikind)
+         END DO
+      ENDDO
 
       erep = 0._dp
 
@@ -379,12 +391,13 @@ CONTAINS
                fblock(i, i) = fblock(i, i)+huckel(na, iatom)
             END DO
 !           IF (calculate_forces) THEN
+!qxtb forces from H0 diagonal block
 !              force_ab = 0._dp
 !           END IF
          ELSE
             ! off-diagonal block
             ! get KAB
-            kab = 1.0_dp
+            kab = kabset(ikind,jkind)
             ! get Fen
             fen = 1.0_dp+ken*(ena-enb)**2
             DO j = 1, natorb_b
@@ -402,6 +415,7 @@ CONTAINS
                END DO
             END DO
 !           IF (calculate_forces) THEN
+!qxtb forces from H0
 !              force_ab = 0._dp
 !                 n1 = SIZE(fblock, 1)
 !                 n2 = SIZE(fblock, 2)
@@ -431,6 +445,7 @@ CONTAINS
          rcut = rcuta+rcutb
          CALL gamma_rab_sr(gblock, dr, nsa, kappaa, etaa, nsb, kappab, etab, kg, rcut)
          IF (calculate_forces .AND. (iatom /= jatom .OR. dr > 0.001_dp)) THEN
+!qxtb calculate dgamma
 !              drp = dr+ddr
 !              drm = dr-ddr
 !              dgam = 0.5_dp*(gamma_rab_sr(drp, ga, gb, hb_para)-gamma_rab_sr(drm, ga, gb, hb_para))/ddr
@@ -471,6 +486,7 @@ CONTAINS
                   END IF
                END IF
             END IF
+!qxtb calculate halogen correction term
          END IF
 
       END DO
@@ -506,6 +522,8 @@ CONTAINS
 
       ! deallocate Huckel parameters
       DEALLOCATE (huckel)
+      ! deallocate KAB parameters
+      DEALLOCATE (kabset)
 
       CALL section_vals_val_get(qs_env%input, "DFT%PRINT%AO_MATRICES%OMIT_HEADERS", l_val=omit_headers)
       IF (BTEST(cp_print_key_should_output(logger%iter_info, &
