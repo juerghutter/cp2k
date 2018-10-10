@@ -68,6 +68,7 @@ MODULE xtb_matrices
                                               qs_rho_type
    USE virial_methods,                  ONLY: virial_pair_force
    USE virial_types,                    ONLY: virial_type
+   USE xtb_coulomb,                     ONLY: build_xtb_coulomb
    USE xtb_types,                       ONLY: get_xtb_atom_param,&
                                               xtb_atom_type
 #include "./base/base_uses.f90"
@@ -149,9 +150,6 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-!qxtb
-      WRITE (6, *) "START XTB MATRICES"
-!qxtb
       NULLIFY (logger, virial, atprop)
       logger => cp_get_default_logger()
 
@@ -557,9 +555,6 @@ CONTAINS
          DEALLOCATE (atom_of_kind)
       END IF
 
-!qxtb
-      WRITE (6, *) "END XTB MATRICES"
-!qxtb
       CALL timestop(handle)
 
    END SUBROUTINE build_xtb_matrices
@@ -577,11 +572,13 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'build_xtb_ks_matrix', &
          routineP = moduleN//':'//routineN
 
-      INTEGER :: handle, img, ispin, nspins, iounit, natorb, ikind, nkind, natom, is, ns, atom_a, iatom
-      INTEGER, DIMENSION(5)                              :: occ
+      INTEGER                                            :: atom_a, handle, iatom, ikind, img, &
+                                                            iounit, is, ispin, natom, natorb, &
+                                                            nkind, ns, nspins
       INTEGER, DIMENSION(25)                             :: nao
-      REAL(KIND=dp), DIMENSION(:), ALLOCATABLE           :: aocharge, mcharge
-      REAL(KIND=dp), DIMENSION(:,:), ALLOCATABLE         :: charges
+      INTEGER, DIMENSION(5)                              :: occ
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: aocharge, mcharge
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: charges
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(cp_para_env_type), POINTER                    :: para_env
@@ -595,12 +592,9 @@ CONTAINS
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
       TYPE(qs_rho_type), POINTER                         :: rho
-      TYPE(xtb_atom_type), POINTER                       :: xtb_kind
       TYPE(section_vals_type), POINTER                   :: scf_section
+      TYPE(xtb_atom_type), POINTER                       :: xtb_kind
 
-!qxtb
-      WRITE (6, *) "BUILD XTB KS MATRIX"
-!qxtb
       CALL timeset(routineN, handle)
       NULLIFY (dft_control, logger, scf_section, matrix_p, particle_set, ks_env, &
                ks_matrix, rho, energy)
@@ -648,18 +642,18 @@ CONTAINS
          DO iatom = 1, natom
             atom_a = atomic_kind_set(ikind)%atom_list(iatom)
             CALL ao_charges(matrix_p, matrix_s, aocharge, atom_a, para_env)
-            charges(atom_a,:) = REAL(occ(:),KIND=dp)
-            DO is=1,natorb
+            charges(atom_a, :) = REAL(occ(:), KIND=dp)
+            DO is = 1, natorb
                ns = nao(is)
-               charges(atom_a,ns) = charges(atom_a,ns) - aocharge(is)
+               charges(atom_a, ns) = charges(atom_a, ns)-aocharge(is)
             END DO
-            mcharge(atom_a) = SUM(charges(atom_a,:))
+            mcharge(atom_a) = SUM(charges(atom_a, :))
          END DO
          DEALLOCATE (aocharge)
       END DO
 
-!        CALL build_xtb_coulomb(qs_env, ks_matrix, rho, mcharge, energy, &
-!                               calculate_forces, just_energy)
+      CALL build_xtb_coulomb(qs_env, ks_matrix, rho, charges, mcharge, energy, &
+                             calculate_forces, just_energy)
 
       DEALLOCATE (mcharge, charges)
 
@@ -671,7 +665,7 @@ CONTAINS
                      energy%repulsive+energy%dispersion+energy%dftb3
 
       iounit = cp_print_key_unit_nr(logger, scf_section, "PRINT%DETAILED_ENERGY", &
-                                         extension=".scfLog")
+                                    extension=".scfLog")
       IF (iounit > 0) THEN
          WRITE (UNIT=iounit, FMT="(/,(T9,A,T60,F20.10))") &
             "Repulsive pair potential energy:               ", energy%repulsive, &
@@ -683,7 +677,7 @@ CONTAINS
       END IF
       CALL cp_print_key_finished_output(iounit, logger, scf_section, &
                                         "PRINT%DETAILED_ENERGY")
-      ! here we compute dE/dC if needed. Assumes dE/dC is H_{ks}C 
+      ! here we compute dE/dC if needed. Assumes dE/dC is H_{ks}C
       IF (qs_env%requires_mo_derivs .AND. .NOT. just_energy) THEN
          CPASSERT(SIZE(ks_matrix, 2) == 1)
          CALL get_qs_env(qs_env, mo_derivs=mo_derivs, mos=mo_array)
@@ -697,9 +691,6 @@ CONTAINS
          ENDDO
       ENDIF
 
-!qxtb
-      WRITE (6, *) "END XTB KS MATRIX"
-!qxtb
       CALL timestop(handle)
 
    END SUBROUTINE build_xtb_ks_matrix
