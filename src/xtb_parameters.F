@@ -108,7 +108,8 @@ MODULE xtb_parameters
 
 ! *** Public data types ***
 
-   PUBLIC :: xtb_parameters_init, xtb_parameters_read, xtb_parameters_set, init_xtb_basis
+   PUBLIC :: xtb_parameters_init, xtb_parameters_read, xtb_parameters_set, init_xtb_basis, &
+             xtb_set_kab
 
 CONTAINS
 
@@ -443,6 +444,64 @@ CONTAINS
       END IF
 
    END SUBROUTINE init_xtb_basis
+
+! **************************************************************************************************
+!> \brief ...
+! **************************************************************************************************
+   FUNCTION xtb_set_kab(za,zb) RESULT(kab)
+
+      INTEGER, INTENT(IN)                                :: za, zb
+      REAL(KIND=dp)                                      :: kab
+
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'xtb_set_kab', routineP = moduleN//':'//routineN
+
+      INTEGER                                            :: z
+
+      kab = 1.0_dp
+      IF(za==1 .OR. zb==1) THEN
+         ! hydrogen
+         z = za+zb-1
+         SELECT CASE (z)
+            CASE (1)
+               kab = 0.96_dp
+            CASE (5)
+               kab = 0.95_dp
+            CASE (7)
+               kab = 1.04_dp
+            CASE (28)
+               kab = 0.90_dp
+            CASE (75)
+               kab = 0.80_dp
+            CASE (78)
+               kab = 0.80_dp
+         END SELECT
+      ELSEIF(za==5 .OR. zb==5) THEN
+         ! Boron
+         z = za+zb-5
+         SELECT CASE (z)
+            CASE (14)
+               kab = 1.01_dp
+            CASE (15)
+               kab = 0.97_dp
+         END SELECT
+      ELSEIF(za>=21 .AND. za<=30) THEN
+         ! 3d
+         IF(zb>=21 .AND. zb<=30) THEN
+            ! 3d
+            kab = 1.10_dp
+         ELSEIF( (zb>=39 .AND. zb<=48) .OR. (zb>=57 .AND. zb<=80) ) THEN
+            ! 4d/5d/4f
+            kab = 0.50_dp * ( 1.20_dp + 1.10_dp )
+         END IF
+      ELSEIF( (za>=39 .AND. za<=48) .OR. (za>=57 .AND. za<=80) ) THEN
+         ! 4d/5d/4f
+         IF( (zb>=39 .AND. zb<=48) .OR. (zb>=57 .AND. zb<=80) ) THEN
+            ! 4d/5d/4f
+            kab = 1.20_dp
+         END IF
+      END IF
+
+   END FUNCTION xtb_set_kab
 
 END MODULE xtb_parameters
 
