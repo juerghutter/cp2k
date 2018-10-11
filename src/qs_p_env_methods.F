@@ -38,11 +38,13 @@ MODULE qs_p_env_methods
                                               cp_fm_retain,&
                                               cp_fm_set_all,&
                                               cp_fm_to_fm,&
-                                              cp_fm_type
+                                              cp_fm_type,&
+                                              cp_fm_write_formatted
    USE cp_fm_vect,                      ONLY: cp_fm_vect_copy,&
                                               cp_fm_vect_dealloc
    USE cp_gemm_interface,               ONLY: cp_gemm
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
+                                              cp_logger_get_default_io_unit,&
                                               cp_logger_type,&
                                               cp_to_string
    USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
@@ -52,7 +54,8 @@ MODULE qs_p_env_methods
                                               dbcsr_p_type,&
                                               dbcsr_scale,&
                                               dbcsr_set,&
-                                              dbcsr_type
+                                              dbcsr_type,&
+                                              dbcsr_print
    USE hartree_local_methods,           ONLY: init_coulomb_local
    USE hartree_local_types,             ONLY: hartree_local_create
    USE input_constants,                 ONLY: ot_precond_none
@@ -85,6 +88,10 @@ MODULE qs_p_env_methods
    USE qs_rho_types,                    ONLY: qs_rho_create,&
                                               qs_rho_get,&
                                               qs_rho_type
+   USE qs_tddfpt_stda_types,            ONLY: allocate_stda_env,&
+                                              stda_env_type,&
+                                              stda_init_param
+   USE qs_tddfpt_stda_utils,            ONLY: stda_init_matrices
    USE string_utilities,                ONLY: compress
 #include "./base/base_uses.f90"
 
@@ -106,6 +113,7 @@ CONTAINS
 !> \param qs_env the qs_environment for the system
 !> \param kpp1_env the environment that builds the second order
 !>        perturbation kernel
+!> \param stda_env ...
 !> \param p1_option ...
 !> \param psi0d ...
 !> \param orthogonal_orbitals if the orbitals are orthogonal
@@ -114,12 +122,13 @@ CONTAINS
 !>      07.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! **************************************************************************************************
-   SUBROUTINE p_env_create(p_env, qs_env, kpp1_env, p1_option, &
+   SUBROUTINE p_env_create(p_env, qs_env, kpp1_env, stda_env, p1_option, &
                            psi0d, orthogonal_orbitals, linres_control)
 
       TYPE(qs_p_env_type), POINTER                       :: p_env
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(qs_kpp1_env_type), OPTIONAL, POINTER          :: kpp1_env
+      TYPE(stda_env_type), OPTIONAL, POINTER             :: stda_env
       TYPE(dbcsr_p_type), DIMENSION(:), OPTIONAL, &
          POINTER                                         :: p1_option
       TYPE(cp_fm_p_type), DIMENSION(:), OPTIONAL, &
@@ -129,13 +138,19 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'p_env_create', routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, n_ao, n_mo, n_spins, natom, spin
+      INTEGER                                            :: handle, n_ao, n_mo, n_spins, natom, &
+                                                            output_unit, spin
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_pool_p_type), DIMENSION(:), POINTER     :: ao_mo_fm_pools, mo_mo_fm_pools
       TYPE(cp_fm_type), POINTER                          :: qs_env_c
+      TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s
       TYPE(dft_control_type), POINTER                    :: dft_control
+
+      NULLIFY (logger) !get output_unit
+      logger => cp_get_default_logger()
+      output_unit = cp_logger_get_default_io_unit(logger)
 
 ! code
 
@@ -156,6 +171,7 @@ CONTAINS
                p_env%psi0d, &
                p_env%S_psi0, &
                p_env%kpp1_env, &
+               p_env%stda_env, &
                p_env%rho1, &
                p_env%rho1_xc, &
                p_env%Smo_inv, &
@@ -187,6 +203,12 @@ CONTAINS
          p_env%kpp1_env => kpp1_env
       ELSE
          CALL kpp1_create(p_env%kpp1_env)
+      END IF
+
+      IF (PRESENT(stda_env)) THEN
+         p_env%stda_env => stda_env
+      ELSEIF (dft_control%tddfpt_control%kernel .EQ. 0) THEN
+         CALL allocate_stda_env(qs_env, p_env%stda_env)
       END IF
 
       IF (PRESENT(p1_option)) THEN
@@ -221,6 +243,7 @@ CONTAINS
          p_env%n_ao(spin) = n_ao
       END DO
 
+      write(output_unit,*) "orthogonal_orbitals", orthogonal_orbitals
       p_env%orthogonal_orbitals = .FALSE.
       IF (PRESENT(orthogonal_orbitals)) &
          p_env%orthogonal_orbitals = orthogonal_orbitals
@@ -291,6 +314,13 @@ CONTAINS
 
       END IF
 
+! stda initialization
+      IF (dft_control%tddfpt_control%kernel .EQ. 0) THEN
+! initialize Ewald for stda ! do this in qs_environment
+         IF (dft_control%tddfpt_control%stda_control%do_ewald) CPABORT("ewald not working yet")
+         CALL stda_init_param(qs_env, p_env%n_mo, p_env%stda_env)
+      ENDIF
+
       CALL timestop(handle)
 
    END SUBROUTINE p_env_create
@@ -326,6 +356,7 @@ CONTAINS
       CPASSERT(p_env%ref_count > 0)
       CALL get_qs_env(qs_env, dft_control=dft_control)
       gapw_xc = dft_control%qs_control%gapw_xc
+
       IF (.NOT. ASSOCIATED(p_env%kpp1)) THEN
          CALL get_qs_env(qs_env, matrix_s=matrix_s)
          nspins = dft_control%nspins
@@ -537,10 +568,6 @@ CONTAINS
                       p_env%n_mo(spin), p_env%n_mo(spin), p_env%n_ao(spin), &
                       -1.0_dp, p_env%S_psi0(spin)%matrix, p_env%psi0d(spin)%matrix, &
                       0.0_dp, p_env%m_epsilon(spin)%matrix)
-!   DO i =1,size(p_env%m_epsilon(spin)%matrix%local_data,1)
-!    write(*,'(I4,4f12.6)') i,(p_env%m_epsilon(spin)%matrix%local_data(i,j), j=1,4)
-!   end do
-! stop 'o'
       END DO
 
       !----------------------------------|
@@ -566,6 +593,11 @@ CONTAINS
 
       ! tells kpp1_env about the change of psi0
       CALL kpp1_did_change(p_env%kpp1_env, psi0_changed=.TRUE.)
+
+! stda initialization
+      IF (dft_control%tddfpt_control%kernel .EQ. 0) THEN
+         CALL stda_init_matrices(qs_env, p_env)
+      ENDIF
 
       CALL timestop(handle)
 
@@ -639,8 +671,13 @@ CONTAINS
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks, matrix_s
       TYPE(dbcsr_type), POINTER                          :: k_p
       TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(cp_logger_type), POINTER                      :: logger
+      INTEGER:: output_unit
 
 ! code
+      NULLIFY (logger) !get output_unit
+      logger => cp_get_default_logger()
+      output_unit = cp_logger_get_default_io_unit(logger)
 
       CALL timeset(routineN, handle)
       NULLIFY (tmp, matrix_ks, matrix_s, dft_control)
@@ -673,6 +710,10 @@ CONTAINS
                       p_env%m_epsilon(spin)%matrix, v, 0.0_dp, tmp)
       CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, tmp, &
                                    res, p_env%n_mo(spin), alpha=1.0_dp, beta=1.0_dp)
+
+  !    CALL cp_fm_write_formatted(res,output_unit,"smatrix")
+  !    CALL cp_fm_write_formatted(p_env%m_epsilon(spin)%matrix,output_unit,"smatrix")
+ !     CALL dbcsr_print(res,UNIT=output_unit)
 
       CALL cp_fm_release(tmp)
       CALL timestop(handle)
@@ -745,11 +786,14 @@ CONTAINS
       CALL qs_rho_update_rho(rho_struct=p_env%rho1, qs_env=qs_env)
 
       IF (fdiff) THEN
+
          CALL kpp1_calc_k_p_p1_fdiff(qs_env=qs_env, &
                                      k_p_p1=p_env%kpp1, rho=rho, rho1=p_env%rho1)
       ELSE
+
          CALL kpp1_calc_k_p_p1(kpp1_env=p_env%kpp1_env, p_env=p_env, qs_env=qs_env, &
                                k_p_p1=p_env%kpp1, rho=rho, rho1=p_env%rho1, rho1_xc=p_env%rho1)
+
       END IF
 
       DO ispin = 1, n_spins
@@ -791,7 +835,6 @@ CONTAINS
       TYPE(dft_control_type), POINTER                    :: dft_control
 
 ! code
-
       CALL timeset(routineN, handle)
 
       NULLIFY (tmp_matrix, maxmo_maxmo_fm_pool, maxmo_maxmo_fmstruct, tmp_fmstruct, &
@@ -888,7 +931,6 @@ CONTAINS
       TYPE(dft_control_type), POINTER                    :: dft_control
 
 ! code
-
       CALL timeset(routineN, handle)
 
       NULLIFY (tmp_matrix, maxmo_maxmo_fm_pool, maxmo_maxmo_fmstruct, tmp_fmstruct, &

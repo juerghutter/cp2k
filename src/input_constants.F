@@ -548,6 +548,8 @@ MODULE input_constants
                                                tddfpt_triplet = 1
    INTEGER, PARAMETER, PUBLIC               :: tddfpt_lanczos = 0, &
                                                tddfpt_davidson = 1
+   INTEGER, PARAMETER, PUBLIC               :: tddfpt_kernel_full = 1, &
+                                               tddfpt_kernel_stda = 0
    INTEGER, PARAMETER, PUBLIC               :: oe_none = 0, &
                                                oe_lb = 1, &
                                                oe_gllb = 2, &

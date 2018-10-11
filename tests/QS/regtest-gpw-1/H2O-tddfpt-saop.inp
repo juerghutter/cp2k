@@ -16,7 +16,7 @@
     &END SCF
     &TDDFPT
       INVERT_S Y
-      KERNEL Y
+      CALCULATE_KERNEL Y
       MAX_KV 60
       METHOD DAVIDSON
       NEV 2

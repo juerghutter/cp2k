@@ -25,15 +25,14 @@ MODULE qs_tddfpt_types
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
-
 ! **************************************************************************************************
    TYPE tddfpt_env_type
       REAL(KIND=dp), DIMENSION(:), POINTER               :: evals ! eigenvalues
       TYPE(cp_fm_p_type), DIMENSION(:, :), &
-         POINTER                                       :: evecs ! eigenvectors
+         POINTER                                         :: evecs ! eigenvectors
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: invS ! the inverse of the metric
       TYPE(cp_fm_pool_p_type), DIMENSION(:), &
-         POINTER                                       :: ao_mo_fm_pools
+         POINTER                                         :: ao_mo_fm_pools
    END TYPE tddfpt_env_type
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_tddfpt_types'
@@ -131,5 +130,4 @@ CONTAINS
       NULLIFY (t_env%invS)
 
    END SUBROUTINE tddfpt_env_deallocate
-
 END MODULE qs_tddfpt_types

@@ -350,6 +350,7 @@ MODULE cp_control_types
 !   - n_ev       : number of eigenvalues to calculate
 !   - n_reortho  : how many time to reorthogonalize (in the lanczos algorithm)
 !   - do_kernel  : wether to evaluate the kernel (this is a debugging option)
+!   - kernel     : which kernel to be calculated (full or stda)
 !   - res_etype : { SINGLET | TRIPLET } which excitations
 !                  to calculate
 !   - lumos_eigenvalues : holds the eigenvalues of the lumos (if calculated in QS)
@@ -368,6 +369,7 @@ MODULE cp_control_types
       INTEGER                              :: n_restarts
       INTEGER                              :: n_reortho
       LOGICAL                              :: do_kernel
+      INTEGER                              :: kernel
       LOGICAL                              :: lsd_singlets
       LOGICAL                              :: invert_S
       LOGICAL                              :: precond
@@ -381,8 +383,18 @@ MODULE cp_control_types
       REAL(KIND=dp)                        :: sic_scaling_a, sic_scaling_b
       REAL(KIND=dp), DIMENSION(:, :), &
          POINTER                           :: lumos_eigenvalues
+      TYPE(stda_control_type), POINTER     :: stda_control
    END TYPE tddfpt_control_type
-
+! **************************************************************************************************
+! \brief Control parameters for simplified Tamm Dancoff approximation (sTDA)
+! \par  ATTRIBUTES
+! \par  NOTES
+! **************************************************************************************************
+   TYPE stda_control_type
+      LOGICAL                                :: do_ewald
+      LOGICAL                                :: do_mic
+      REAL(KIND=dp)                          :: cutoff_cou
+   END TYPE stda_control_type
 ! **************************************************************************************************
 ! \brief Control parameters for a Time-Dependent DFT calculation.
 ! **************************************************************************************************
@@ -523,7 +535,8 @@ MODULE cp_control_types
              s2_restraint_type, &
              admm_control_type, &
              rtp_control_type, &
-             sccs_control_type
+             sccs_control_type, &
+             stda_control_type
 
    ! Public subroutines
 
@@ -921,8 +934,10 @@ CONTAINS
       NULLIFY (tddfpt_control%lumos)
       NULLIFY (tddfpt_control%lumos_eigenvalues)
 
-   END SUBROUTINE tddfpt_control_create
+      NULLIFY (tddfpt_control%stda_control)
+      CALL stda_control_create(tddfpt_control%stda_control)
 
+   END SUBROUTINE tddfpt_control_create
 ! **************************************************************************************************
 !> \brief ...
 !> \param tddfpt_control ...
@@ -951,9 +966,42 @@ CONTAINS
          IF (ASSOCIATED(tddfpt_control%lumos_eigenvalues)) THEN
             DEALLOCATE (tddfpt_control%lumos_eigenvalues)
          END IF
+         IF (ASSOCIATED(tddfpt_control%stda_control)) &
+            CALL stda_control_release(tddfpt_control%stda_control)
          DEALLOCATE (tddfpt_control)
       END IF
    END SUBROUTINE tddfpt_control_release
+! **************************************************************************************************
+!> \brief ...
+!> \param stda_control ...
+! **************************************************************************************************
+   SUBROUTINE stda_control_create(stda_control)
+      TYPE(stda_control_type), POINTER                   :: stda_control
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'stda_control_create', &
+         routineP = moduleN//':'//routineN
+
+      CPASSERT(.NOT. ASSOCIATED(stda_control))
+      ALLOCATE (stda_control)
+
+      stda_control%do_ewald = .FALSE.
+      stda_control%do_mic = .FALSE.
+
+   END SUBROUTINE stda_control_create
+! **************************************************************************************************
+!> \brief ...
+!> \param stda_control ...
+! **************************************************************************************************
+   SUBROUTINE stda_control_release(stda_control)
+      TYPE(stda_control_type), POINTER                   :: stda_control
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'stda_control_release', &
+         routineP = moduleN//':'//routineN
+
+      IF (ASSOCIATED(stda_control)) THEN
+         DEALLOCATE (stda_control)
+      END IF
+   END SUBROUTINE stda_control_release
 
 ! **************************************************************************************************
 !> \brief allocate control options for Time-Dependent Density Functional Theory calculation

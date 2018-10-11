@@ -352,6 +352,7 @@ CONTAINS
 !> \param particle_set ...
 !> \param energy ...
 !> \param force ...
+!> \param sab_orb_mic ...
 !> \param matrix_h ...
 !> \param matrix_ks ...
 !> \param matrix_ks_im ...
@@ -484,7 +485,7 @@ CONTAINS
    SUBROUTINE get_qs_env(qs_env, atomic_kind_set, qs_kind_set, cell, super_cell, cell_ref, use_ref_cell, kpoints, &
                          dft_control, mos, mos_aux_fit, sab_orb, sab_aux_fit, sab_aux_fit_asymm, sab_aux_fit_vs_orb, &
                          sab_all, qmmm, qmmm_periodic, sac_ae, sac_ppl, sac_lri, sap_ppnl, sab_vdw, sab_scp, sap_oce, sab_lrc, &
-                         sab_se, sab_tbe, sab_core, sab_xb, sab_almo, sab_kp, particle_set, energy, force, &
+                         sab_se, sab_tbe, sab_core, sab_xb, sab_almo, sab_kp, particle_set, energy, force, sab_orb_mic, &
                          matrix_h, matrix_ks, matrix_ks_im, matrix_vxc, run_rtp, rtp, &
                          matrix_h_kp, matrix_ks_kp, matrix_vxc_kp, kinetic_kp, matrix_s_kp, matrix_w_kp, matrix_s_RI_aux_kp, &
                          matrix_ks_aux_fit, matrix_ks_aux_fit_im, matrix_ks_aux_fit_dft, matrix_ks_aux_fit_hfx, &
@@ -531,6 +532,8 @@ CONTAINS
       TYPE(qs_energy_type), OPTIONAL, POINTER            :: energy
       TYPE(qs_force_type), DIMENSION(:), OPTIONAL, &
          POINTER                                         :: force
+      TYPE(neighbor_list_set_p_type), DIMENSION(:), &
+         OPTIONAL, POINTER                               :: sab_orb_mic
       TYPE(dbcsr_p_type), DIMENSION(:), OPTIONAL, &
          POINTER                                         :: matrix_h, matrix_ks, matrix_ks_im, &
                                                             matrix_vxc
@@ -780,6 +783,7 @@ CONTAINS
                       vee=vee, &
                       neighbor_list_id=neighbor_list_id, &
                       sab_orb=sab_orb, &
+                      sab_orb_mic=sab_orb_mic, &
                       sab_aux_fit=sab_aux_fit, &
                       sab_aux_fit_asymm=sab_aux_fit_asymm, &
                       sab_aux_fit_vs_orb=sab_aux_fit_vs_orb, &

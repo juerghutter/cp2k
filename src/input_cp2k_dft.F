@@ -34,58 +34,59 @@ MODULE input_cp2k_dft
         cdft_alpha_constraint, cdft_beta_constraint, cdft_charge_constraint, &
         cdft_magnetization_constraint, cholesky_dbcsr, cholesky_inverse, cholesky_off, &
         cholesky_reduce, cholesky_restore, core_guess, diag_block_davidson, diag_block_krylov, &
-        diag_filter_matrix, diag_ot, diag_standard, dmft_model, do_admm_aux_exch_func_bee, &
-        do_admm_aux_exch_func_default, do_admm_aux_exch_func_none, do_admm_aux_exch_func_opt, &
-        do_admm_aux_exch_func_pbex, do_admm_basis_projection, do_admm_blocked_projection, &
-        do_admm_blocking_purify_full, do_admm_charge_constrained_projection, &
-        do_admm_exch_scaling_merlot, do_admm_exch_scaling_none, do_admm_purify_cauchy, &
-        do_admm_purify_cauchy_subspace, do_admm_purify_mcweeny, do_admm_purify_mo_diag, &
-        do_admm_purify_mo_no_diag, do_admm_purify_none, do_admm_purify_none_dm, do_arnoldi, &
-        do_bch, do_cn, do_ddapc_constraint, do_ddapc_restraint, do_em, do_etrs, do_full_density, &
-        do_gapw_gcs, do_gapw_gct, do_gapw_log, do_loc_both, do_loc_crazy, do_loc_direct, &
-        do_loc_homo, do_loc_jacobi, do_loc_l1_norm_sd, do_loc_lumo, do_loc_max, do_loc_min, &
-        do_loc_none, do_lri_inv, do_lri_inv_auto, do_lri_opt_all, do_lri_opt_coeff, &
-        do_lri_opt_exps, do_lri_pseudoinv_diag, do_lri_pseudoinv_svd, do_method_am1, &
-        do_method_dftb, do_method_gapw, do_method_gapw_xc, do_method_gpw, do_method_lrigpw, &
-        do_method_mndo, do_method_mndod, do_method_ofgpw, do_method_pdg, do_method_pm3, &
-        do_method_pm6, do_method_pm6fm, do_method_pnnl, do_method_rigpw, do_method_rm1, &
-        do_method_xtb, do_pade, do_ppl_analytic, do_ppl_grid, do_pwgrid_ns_fullspace, &
-        do_pwgrid_ns_halfspace, do_pwgrid_spherical, do_s2_constraint, do_s2_restraint, &
-        do_se_is_kdso, do_se_is_kdso_d, do_se_is_slater, do_se_lr_ewald, do_se_lr_ewald_gks, &
-        do_se_lr_ewald_r3, do_se_lr_none, do_spin_density, do_taylor, ehrenfest, &
-        embed_grid_angstrom, embed_grid_bohr, embed_level_shift, embed_quasi_newton, &
-        embed_steep_desc, eri_method_full_gpw, eri_method_gpw_ht, eri_operator_coulomb, &
-        eri_operator_erf, eri_operator_erfc, eri_operator_gaussian, eri_operator_yukawa, gaussian, &
-        general_roks, hf_model, high_spin_roks, history_guess, jacobian_fd1, &
-        jacobian_fd1_backward, jacobian_fd1_central, jacobian_fd2, jacobian_fd2_backward, &
-        kg_cholesky, kg_color_dsatur, kg_color_greedy, kg_ec_diagonalization, &
-        kg_ec_functional_harris, kg_tnadd_atomic, kg_tnadd_embed, kg_tnadd_embed_ri, &
-        kg_tnadd_none, ls_2pnt, ls_3pnt, ls_gold, ls_none, mao_basis_ext, mao_basis_orb, &
-        mao_basis_prim, mao_projection, mopac_guess, no_excitations, no_guess, numerical, oe_gllb, &
-        oe_lb, oe_none, oe_saop, oe_sic, op_loc_berry, op_loc_boys, op_loc_pipek, orb_dx2, &
-        orb_dxy, orb_dy2, orb_dyz, orb_dz2, orb_dzx, orb_px, orb_py, orb_pz, orb_s, ot_algo_irac, &
-        ot_algo_taylor_or_diag, ot_chol_irac, ot_lwdn_irac, ot_mini_broyden, ot_mini_cg, &
-        ot_mini_diis, ot_mini_sd, ot_poly_irac, ot_precond_full_all, ot_precond_full_kinetic, &
-        ot_precond_full_single, ot_precond_full_single_inverse, ot_precond_none, &
-        ot_precond_s_inverse, ot_precond_solver_default, ot_precond_solver_direct, &
-        ot_precond_solver_inv_chol, ot_precond_solver_update, outer_scf_basis_center_opt, &
-        outer_scf_becke_constraint, outer_scf_cdft_constraint, outer_scf_ddapc_constraint, &
-        outer_scf_hirshfeld_constraint, outer_scf_none, outer_scf_optimizer_bisect, &
-        outer_scf_optimizer_broyden, outer_scf_optimizer_diis, outer_scf_optimizer_newton, &
-        outer_scf_optimizer_newton_ls, outer_scf_optimizer_none, outer_scf_optimizer_sd, &
-        outer_scf_optimizer_secant, outer_scf_s2_constraint, plus_u_lowdin, plus_u_mulliken, &
-        plus_u_mulliken_charges, pw_interp, radius_covalent, radius_default, radius_single, &
-        radius_user, radius_vdw, random_guess, real_time_propagation, ref_charge_atomic, &
-        ref_charge_mulliken, rel_dkh, rel_none, rel_pot_erfc, rel_pot_full, rel_sczora_mp, &
-        rel_trans_atom, rel_trans_full, rel_trans_molecule, rel_zora, rel_zora_full, rel_zora_mp, &
-        restart_guess, rsdft_model, sccs_andreussi, sccs_derivative_cd3, sccs_derivative_cd5, &
-        sccs_derivative_cd7, sccs_derivative_fft, sccs_fattebert_gygi, shape_function_density, &
-        shape_function_gaussian, sic_ad, sic_eo, sic_list_all, sic_list_unpaired, sic_mauri_spz, &
-        sic_mauri_us, sic_none, slater, smear_energy_window, smear_fermi_dirac, smear_list, &
-        sparse_guess, spline3_nopbc_interp, spline3_pbc_interp, tddfpt_davidson, &
-        tddfpt_excitations, tddfpt_lanczos, tddfpt_singlet, tddfpt_triplet, use_coulomb, use_diff, &
-        use_no, use_restart_wfn, use_rt_restart, use_scf_wfn, wannier_projection, &
-        weight_type_mass, weight_type_unit, wfi_aspc_nr, wfi_frozen_method_nr, &
+        diag_filter_matrix, diag_ot, diag_standard, dispersion_d3, dispersion_uff, dmft_model, &
+        do_admm_aux_exch_func_bee, do_admm_aux_exch_func_default, do_admm_aux_exch_func_none, &
+        do_admm_aux_exch_func_opt, do_admm_aux_exch_func_pbex, do_admm_basis_projection, &
+        do_admm_blocked_projection, do_admm_blocking_purify_full, &
+        do_admm_charge_constrained_projection, do_admm_exch_scaling_merlot, &
+        do_admm_exch_scaling_none, do_admm_purify_cauchy, do_admm_purify_cauchy_subspace, &
+        do_admm_purify_mcweeny, do_admm_purify_mo_diag, do_admm_purify_mo_no_diag, &
+        do_admm_purify_none, do_admm_purify_none_dm, do_arnoldi, do_bch, do_cn, &
+        do_ddapc_constraint, do_ddapc_restraint, do_em, do_etrs, do_full_density, do_gapw_gcs, &
+        do_gapw_gct, do_gapw_log, do_loc_both, do_loc_crazy, do_loc_direct, do_loc_homo, &
+        do_loc_jacobi, do_loc_l1_norm_sd, do_loc_lumo, do_loc_max, do_loc_min, do_loc_none, &
+        do_lri_inv, do_lri_inv_auto, do_lri_opt_all, do_lri_opt_coeff, do_lri_opt_exps, &
+        do_lri_pseudoinv_diag, do_lri_pseudoinv_svd, do_method_am1, do_method_dftb, &
+        do_method_gapw, do_method_gapw_xc, do_method_gpw, do_method_lrigpw, do_method_mndo, &
+        do_method_mndod, do_method_ofgpw, do_method_pdg, do_method_pm3, do_method_pm6, &
+        do_method_pm6fm, do_method_pnnl, do_method_rigpw, do_method_rm1, do_pade, do_ppl_analytic, &
+        do_ppl_grid, do_pwgrid_ns_fullspace, do_pwgrid_ns_halfspace, do_pwgrid_spherical, &
+        do_s2_constraint, do_s2_restraint, do_se_is_kdso, do_se_is_kdso_d, do_se_is_slater, &
+        do_se_lr_ewald, do_se_lr_ewald_gks, do_se_lr_ewald_r3, do_se_lr_none, do_spin_density, &
+        do_taylor, ehrenfest, embed_grid_angstrom, embed_grid_bohr, embed_level_shift, &
+        embed_quasi_newton, embed_steep_desc, eri_method_full_gpw, eri_method_gpw_ht, &
+        eri_operator_coulomb, eri_operator_erf, eri_operator_erfc, eri_operator_gaussian, &
+        eri_operator_yukawa, gaussian, general_roks, hf_model, high_spin_roks, history_guess, &
+        jacobian_fd1, jacobian_fd1_backward, jacobian_fd1_central, jacobian_fd2, &
+        jacobian_fd2_backward, kg_cholesky, kg_color_dsatur, kg_color_greedy, &
+        kg_ec_diagonalization, kg_ec_functional_harris, kg_tnadd_atomic, kg_tnadd_embed, &
+        kg_tnadd_embed_ri, kg_tnadd_none, ls_2pnt, ls_3pnt, ls_gold, ls_none, mao_basis_ext, &
+        mao_basis_orb, mao_basis_prim, mao_projection, mopac_guess, no_excitations, no_guess, &
+        numerical, oe_gllb, oe_lb, oe_none, oe_saop, oe_sic, op_loc_berry, op_loc_boys, &
+        op_loc_pipek, orb_dx2, orb_dxy, orb_dy2, orb_dyz, orb_dz2, orb_dzx, orb_px, orb_py, &
+        orb_pz, orb_s, ot_algo_irac, ot_algo_taylor_or_diag, ot_chol_irac, ot_lwdn_irac, &
+        ot_mini_broyden, ot_mini_cg, ot_mini_diis, ot_mini_sd, ot_poly_irac, ot_precond_full_all, &
+        ot_precond_full_kinetic, ot_precond_full_single, ot_precond_full_single_inverse, &
+        ot_precond_none, ot_precond_s_inverse, ot_precond_solver_default, &
+        ot_precond_solver_direct, ot_precond_solver_inv_chol, ot_precond_solver_update, &
+        outer_scf_basis_center_opt, outer_scf_becke_constraint, outer_scf_cdft_constraint, &
+        outer_scf_ddapc_constraint, outer_scf_hirshfeld_constraint, outer_scf_none, &
+        outer_scf_optimizer_bisect, outer_scf_optimizer_broyden, outer_scf_optimizer_diis, &
+        outer_scf_optimizer_newton, outer_scf_optimizer_newton_ls, outer_scf_optimizer_none, &
+        outer_scf_optimizer_sd, outer_scf_optimizer_secant, outer_scf_s2_constraint, &
+        plus_u_lowdin, plus_u_mulliken, plus_u_mulliken_charges, pw_interp, radius_covalent, &
+        radius_default, radius_single, radius_user, radius_vdw, random_guess, &
+        real_time_propagation, ref_charge_atomic, ref_charge_mulliken, rel_dkh, rel_none, &
+        rel_pot_erfc, rel_pot_full, rel_sczora_mp, rel_trans_atom, rel_trans_full, &
+        rel_trans_molecule, rel_zora, rel_zora_full, rel_zora_mp, restart_guess, rsdft_model, &
+        sccs_andreussi, sccs_derivative_cd3, sccs_derivative_cd5, sccs_derivative_cd7, &
+        sccs_derivative_fft, sccs_fattebert_gygi, shape_function_density, shape_function_gaussian, &
+        sic_ad, sic_eo, sic_list_all, sic_list_unpaired, sic_mauri_spz, sic_mauri_us, sic_none, &
+        slater, smear_energy_window, smear_fermi_dirac, smear_list, sparse_guess, &
+        spline3_nopbc_interp, spline3_pbc_interp, tddfpt_davidson, tddfpt_excitations, &
+        tddfpt_kernel_full, tddfpt_kernel_stda, tddfpt_lanczos, tddfpt_singlet, tddfpt_triplet, &
+        use_coulomb, use_diff, use_no, use_restart_wfn, use_rt_restart, use_scf_wfn, &
+        wannier_projection, weight_type_mass, weight_type_unit, wfi_aspc_nr, wfi_frozen_method_nr, &
         wfi_linear_p_method_nr, wfi_linear_ps_method_nr, wfi_linear_wf_method_nr, &
         wfi_ps_method_nr, wfi_use_guess_method_nr, wfi_use_prev_p_method_nr, &
         wfi_use_prev_rho_r_method_nr, wfi_use_prev_wf_method_nr, xas_1s_type, xas_2p_type, &
@@ -939,6 +940,16 @@ CONTAINS
                           name="sab_orb", &
                           description="Activates the printing of the orbital "// &
                           "orbital neighbor lists, "// &
+                          "i.e. the overlap neighbor lists", &
+                          default_l_val=.FALSE., &
+                          lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword=keyword, &
+                          name="sab_orb_mic", &
+                          description="Activates the printing of the orbital "// &
+                          "orbital neighbor lists within mic, "// &
                           "i.e. the overlap neighbor lists", &
                           default_l_val=.FALSE., &
                           lone_keyword_l_val=.TRUE.)
@@ -4519,7 +4530,7 @@ CONTAINS
       CPASSERT(.NOT. ASSOCIATED(section))
       CALL section_create(section, "tddfpt", &
                           description="parameters needed to set up the Time Dependent Density Functional PT", &
-                          n_keywords=5, n_subsections=1, repeats=.FALSE., &
+                          n_keywords=14, n_subsections=1, repeats=.FALSE., &
                           citations=(/Iannuzzi2005/))
 
       NULLIFY (subsection, keyword)
@@ -4570,10 +4581,10 @@ CONTAINS
       CALL keyword_release(keyword)
 
       ! Logical
-      CALL keyword_create(keyword, name="KERNEL", &
+      CALL keyword_create(keyword, name="CALCULATE_KERNEL", &
                           variants=s2a("DO_KERNEL"), &
                           description="compute the kernel (debug purpose only)", &
-                          usage="KERNEL logical_value", &
+                          usage="CALCULATE_KERNEL logical_value", &
                           default_l_val=.TRUE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -4602,6 +4613,15 @@ CONTAINS
       CALL keyword_release(keyword)
 
       ! Character
+      CALL keyword_create(keyword, name="KERNEL", &
+                          description="options to compute the kernel", &
+                          usage="KERNEL FULL", &
+                          enum_c_vals=s2a("FULL", "sTDA"), &
+                          enum_i_vals=(/tddfpt_kernel_full, tddfpt_kernel_stda/), &
+                          default_i_val=tddfpt_kernel_full)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
       CALL keyword_create(keyword, name="RES_ETYPE", &
                           variants=s2a("RESTRICTED_EXCITATIONS_TYPE", "RES_E_TYPE"), &
                           description="(singlets/triplets) for restricted calculation", &
@@ -4652,8 +4672,60 @@ CONTAINS
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
 
-   END SUBROUTINE create_tddfpt_section
+      CALL create_stda_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
 
+   END SUBROUTINE create_tddfpt_section
+! **************************************************************************************************
+!> \brief creates the stda input section (simplified Tamm Dancoff Approximation)
+!> \param section the section to create
+! **************************************************************************************************
+   SUBROUTINE create_stda_section(section)
+      TYPE(section_type), POINTER                        :: section
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'create_stda_section', &
+         routineP = moduleN//':'//routineN
+
+      TYPE(keyword_type), POINTER                        :: keyword
+
+      CPASSERT(.NOT. ASSOCIATED(section))
+      CALL section_create(section, "sTDA", &
+                          description="parameters needed and setup for sTDA calculations", &
+                          n_keywords=4, n_subsections=0, repeats=.FALSE.)
+      NULLIFY (keyword)
+
+      CALL keyword_create(keyword, name="FRACTION", &
+                          description="The fraction of Hartree-Fock to add to the total energy. "// &
+                          "1.0 implies standard Hartree-Fock if used with XC_FUNCTIONAL NONE. "// &
+                          "NOTE: In a mixed potential calculation this should be set to 1.0, otherwise "// &
+                          "all parts are multiplied with this factor. ", &
+                          usage="FRACTION 0.0", default_r_val=0.0_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="DO_EWALD", &
+                          description="Use Ewald type method instead of direct sum for Coulomb interaction", &
+                          usage="DO_EWALD", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="DO_MIC", &
+                          description="Use minimum image convention for Coulomb interaction", &
+                          usage="DO_MIC", default_l_val=.TRUE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="COULOMB_CUTOFF", &
+                          description="Atomic Cutoff Radius Cutoff for the evaluation of the  Coulomb integrals. "// &
+                          "For non-periodic calculation the default value is exactly the full cell dimension, in order "// &
+                     "to evaluate all pair interactions. Instead, for periodic calculations the default numerical value is used.", &
+                          usage="COULOMB_CUTOFF {real} ", unit_str="angstrom", &
+                          default_r_val=cp_unit_to_cp2k(value=12.0_dp, unit_str="angstrom"))
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+   END SUBROUTINE create_stda_section
 ! **************************************************************************************************
 !> \brief creates the input section for the relativistic part
 !> \param section the section to create

@@ -1125,10 +1125,10 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       LOGICAL                                            :: kenergy_den
-      TYPE(section_vals_type), POINTER                   :: sic_section, t_section
+      TYPE(section_vals_type), POINTER                   :: sic_section, stda_section, t_section
 
       kenergy_den = .FALSE.
-      NULLIFY (sic_section, t_section)
+      NULLIFY (sic_section, t_section, stda_section)
       t_section => section_vals_get_subs_vals(dft_section, "TDDFPT")
 
       CALL section_vals_val_get(t_section, "CONVERGENCE", r_val=t_control%tolerance)
@@ -1138,7 +1138,8 @@ CONTAINS
       CALL section_vals_val_get(t_section, "NREORTHO", i_val=t_control%n_reortho)
       CALL section_vals_val_get(t_section, "RES_ETYPE", i_val=t_control%res_etype)
       CALL section_vals_val_get(t_section, "DIAG_METHOD", i_val=t_control%diag_method)
-      CALL section_vals_val_get(t_section, "KERNEL", l_val=t_control%do_kernel)
+      CALL section_vals_val_get(t_section, "KERNEL", i_val=t_control%kernel)
+      CALL section_vals_val_get(t_section, "CALCULATE_KERNEL", l_val=t_control%do_kernel)
       CALL section_vals_val_get(t_section, "LSD_SINGLETS", l_val=t_control%lsd_singlets)
       CALL section_vals_val_get(t_section, "INVERT_S", l_val=t_control%invert_S)
       CALL section_vals_val_get(t_section, "PRECOND", l_val=t_control%precond)
@@ -1151,8 +1152,16 @@ CONTAINS
       CALL section_vals_val_get(sic_section, "SIC_SCALING_A", r_val=t_control%sic_scaling_a)
       CALL section_vals_val_get(sic_section, "SIC_SCALING_B", r_val=t_control%sic_scaling_b)
 
+      IF ((t_control%do_kernel) .AND. (t_control%kernel .EQ. 0)) THEN
+         stda_section => section_vals_get_subs_vals(t_section, "sTDA")
+         CALL section_vals_val_get(stda_section, "DO_EWALD", &
+                                   l_val=t_control%stda_control%do_ewald)
+         CALL section_vals_val_get(stda_section, "DO_MIC", &
+                                   l_val=t_control%stda_control%do_mic)
+         CALL section_vals_val_get(stda_section, "COULOMB_CUTOFF", &
+                                   r_val=t_control%stda_control%cutoff_cou)
+      END IF
    END SUBROUTINE read_tddfpt_control
-
 ! **************************************************************************************************
 !> \brief Read TDDFPT-related input parameters.
 !> \param t_control  TDDFPT control parameters

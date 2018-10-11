@@ -46,6 +46,7 @@ MODULE qs_tddfpt_eigensolver
                                               p_postortho,&
                                               p_preortho
    USE qs_p_env_types,                  ONLY: qs_p_env_type
+   USE qs_tddfpt_stda_utils,            ONLY: stda_calculate_kernel
    USE qs_tddfpt_types,                 ONLY: tddfpt_env_type
    USE qs_tddfpt_utils,                 ONLY: co_initial_guess,&
                                               normalize,&
@@ -121,11 +122,23 @@ CONTAINS
       !-----------------!
       ! call the solver !
       !-----------------!
-      IF (output_unit > 0) THEN
-         WRITE (output_unit, *)
-         WRITE (output_unit, *) " Doing TDDFPT calculation"
-         WRITE (output_unit, *)
-      END IF
+      IF (dft_control%tddfpt_control%kernel .EQ. 1) THEN
+         IF (output_unit > 0) THEN
+            WRITE (output_unit, *)
+            WRITE (output_unit, *) " Doing TDDFPT calculation"
+            WRITE (output_unit, *)
+         ENDIF
+      ELSEIF (dft_control%tddfpt_control%kernel .EQ. 0) THEN
+         IF (output_unit > 0) THEN
+            WRITE (output_unit, *)
+            WRITE (output_unit, *) " Doing sTDA calculation"
+            WRITE (output_unit, *)
+         ENDIF
+      ELSE
+         IF (output_unit > 0) WRITE (output_unit, *) "Chosen TDDFPT kernel not implemented!", &
+            "Choose either full kernel or sTDA kernel"
+         CPABORT("")
+      ENDIF
       DO restarts = 1, dft_control%tddfpt_control%n_restarts
          IF (iterative_solver(ievals, t_env, p_env, qs_env, t_env%evals)) EXIT
          IF (output_unit > 0) THEN
@@ -178,7 +191,8 @@ CONTAINS
       CHARACTER                                          :: mode
       INTEGER                                            :: col, handle, i, iev, iter, j, k, &
                                                             max_krylovspace_dim, max_kv, n_ev, &
-                                                            n_kv, nspins, output_unit, row, spin
+                                                            n_kv, nspins, output_unit, row, spin,&
+                                                            max_excitations
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: must_improve
       REAL(dp)                                           :: Atilde_ij, convergence, tmp, tmp2
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals_difference, evals_tmp
@@ -232,6 +246,16 @@ CONTAINS
             WRITE (output_unit, *) "  Setting the maximum number of krylov vectors to ", max_kv, "!!"
          END IF
       END IF
+      max_excitations = SUM((p_env%n_ao(1:nspins)-p_env%n_mo(1:nspins))*p_env%n_mo(1:nspins))
+      IF (max_excitations <= n_ev) THEN
+         tddfpt_control%n_ev = max_excitations
+         n_ev = tddfpt_control%n_ev
+         WRITE (output_unit, *) "  The maximum number of excitations is limited to ", max_excitations, "!!"
+      END IF
+      IF (max_kv <= n_ev) THEN 
+        CPABORT("Please increase # krylov vectors (to at least # requested excitations)")
+      ENDIF
+
 !    CPPostcondition(max_krylovspace_dim>=max_kv,cp_failure_level,routineP,failure)
 
       !----------------------!
@@ -416,6 +440,8 @@ CONTAINS
          evals_tmp(:) = evals(:, iter)
          CALL cp_fm_syevd(Atilde%matrix, Us%matrix, evals_tmp(:))
          evals(:, iter) = evals_tmp(:)
+         DO i = 1, k
+         ENDDO
 
          !-------------------!
          ! check convergence !
@@ -435,7 +461,6 @@ CONTAINS
 
             convergence = MAXVAL(evals_difference)
             IF (output_unit > 0) WRITE (output_unit, '(2X,I4,T69,ES11.4)') k, convergence
-
             IF (convergence < tddfpt_control%tolerance) THEN
                res = .TRUE.
                EXIT iteration
@@ -547,6 +572,9 @@ CONTAINS
       INTEGER                                            :: handle, nspins, spin
       INTEGER, SAVE                                      :: counter = 0
       TYPE(dft_control_type), POINTER                    :: dft_control
+      INTEGER:: output_unit
+       
+      output_unit = cp_logger_get_default_io_unit()
 
       NULLIFY (dft_control)
 
@@ -566,28 +594,34 @@ CONTAINS
       ! R = R + K(P1)*C !
       !-----------------!
       IF (do_kernel) THEN
-         DO spin = 1, nspins
-            CALL dbcsr_set(p_env%p1(spin)%matrix, 0.0_dp) ! optimize?
-            CALL cp_dbcsr_plus_fm_fm_t(p_env%p1(spin)%matrix, &
-                                       matrix_v=p_env%psi0d(spin)%matrix, &
-                                       matrix_g=X(spin)%matrix, &
-                                       ncol=p_env%n_mo(spin), &
-                                       alpha=0.5_dp)
-            CALL cp_dbcsr_plus_fm_fm_t(p_env%p1(spin)%matrix, &
-                                       matrix_v=X(spin)%matrix, &
-                                       matrix_g=p_env%psi0d(spin)%matrix, &
-                                       ncol=p_env%n_mo(spin), &
-                                       alpha=0.5_dp)
-         END DO
-         DO spin = 1, nspins
-            CALL cp_fm_set_all(X(spin)%matrix, 0.0_dp)
-         END DO
-         CALL p_op_l2(p_env, qs_env, p_env%p1, X, &
-                      alpha=1.0_dp, beta=0.0_dp) ! X = beta*X + alpha*K(P1)*C
-         DO spin = 1, nspins
-            CALL cp_fm_scale_and_add(1.0_dp, R(spin)%matrix, &
-                                     1.0_dp, X(spin)%matrix) ! add X to R
-         END DO
+         IF (dft_control%tddfpt_control%kernel .EQ. 0) THEN
+            CALL stda_calculate_kernel(p_env, qs_env, X, R)
+         ELSE
+            DO spin = 1, nspins
+               CALL dbcsr_set(p_env%p1(spin)%matrix, 0.0_dp) ! optimize?
+               CALL cp_dbcsr_plus_fm_fm_t(p_env%p1(spin)%matrix, &
+                                          matrix_v=p_env%psi0d(spin)%matrix, &
+                                          matrix_g=X(spin)%matrix, &
+                                          ncol=p_env%n_mo(spin), &
+                                          alpha=0.5_dp)
+               CALL cp_dbcsr_plus_fm_fm_t(p_env%p1(spin)%matrix, &
+                                          matrix_v=X(spin)%matrix, &
+                                          matrix_g=p_env%psi0d(spin)%matrix, &
+                                          ncol=p_env%n_mo(spin), &
+                                          alpha=0.5_dp)
+            END DO
+            DO spin = 1, nspins
+               CALL cp_fm_set_all(X(spin)%matrix, 0.0_dp)
+            END DO
+
+            CALL p_op_l2(p_env, qs_env, p_env%p1, X, &
+                         alpha=1.0_dp, beta=0.0_dp) ! X = beta*X + alpha*K(P1)*C
+
+            DO spin = 1, nspins
+               CALL cp_fm_scale_and_add(1.0_dp, R(spin)%matrix, &
+                                        1.0_dp, X(spin)%matrix) ! add X to R
+            END DO
+         ENDIF
       END IF
 
       CALL timestop(handle)

@@ -25,6 +25,8 @@ MODULE qs_p_env_types
                                               local_rho_type
    USE qs_rho_types,                    ONLY: qs_rho_release,&
                                               qs_rho_type
+   USE qs_tddfpt_stda_types,            ONLY: deallocate_stda_env,&
+                                              stda_env_type
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -79,6 +81,7 @@ MODULE qs_p_env_types
       ! preconditioner matrix should be symmetric and positive definite
       TYPE(preconditioner_type), DIMENSION(:), POINTER :: preconditioner
       LOGICAL :: new_preconditioner
+      TYPE(stda_env_type), POINTER                       :: stda_env
 
       !factors
       REAL(KIND=dp)  :: delta, gnorm, gnorm_cross, gnorm_old, etotal, gradient
@@ -169,6 +172,9 @@ CONTAINS
                   CALL destroy_preconditioner(p_env%preconditioner(ip))
                END DO
                DEALLOCATE (p_env%preconditioner)
+            END IF
+            IF (ASSOCIATED(p_env%stda_env)) THEN
+               CALL deallocate_stda_env(p_env%stda_env)
             END IF
          END IF
          DEALLOCATE (p_env)

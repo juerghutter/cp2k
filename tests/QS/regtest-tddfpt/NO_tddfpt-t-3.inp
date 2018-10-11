@@ -21,7 +21,7 @@
       SCF_GUESS atomic
     &END SCF
     &TDDFPT
-      KERNEL T
+      CALCULATE_KERNEL T
       MAX_KV 10
       METHOD LANCZOS
       INVERT_S F

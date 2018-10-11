@@ -1,0 +1,9 @@
+# runs are executed in the same order as in this file
+# the second field tells which test should be run in order to compare with the last available output
+# e.g. 0 means do not compare anything, running is enough
+#      1 compares the last total energy in the file
+#      for details see cp2k/tools/do_regtest
+H2O_tddfpt_stda-s-1.inp                                    68    1.0E-05                   7.860913
+CH2O_tddfpt_stda-s-1.inp                                   68    1.0E-05                   3.389611 
+NO_tddfpt_stda-s-1.inp                                     68    1.0E-05                   0.605017
+#EOF

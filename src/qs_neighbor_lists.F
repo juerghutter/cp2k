@@ -30,6 +30,7 @@ MODULE qs_neighbor_lists
                                               scaled_to_real
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
+                                              cp_logger_get_default_io_unit,&
                                               cp_logger_type
    USE cp_output_handling,              ONLY: cp_p_file,&
                                               cp_print_key_finished_output,&
@@ -296,7 +297,7 @@ CONTAINS
 
       CHARACTER(LEN=default_string_length)               :: print_key_path
       INTEGER                                            :: handle, ikind, iw, maxatom, nkind, &
-                                                            numshells, zat
+                                                            numshells, output_unit, zat
       LOGICAL :: all_potential_present, almo, dftb, do_hfx, dokp, explicit, gth_potential_present, &
          lri_optbas, lrigpw, mic, molecule_only, nddo, paw_atom, paw_atom_present, rigpw, &
          sgp_potential_present, xtb
@@ -324,8 +325,8 @@ CONTAINS
       TYPE(molecule_type), DIMENSION(:), POINTER         :: molecule_set
       TYPE(neighbor_list_set_p_type), DIMENSION(:), POINTER :: saa_list, sab_all, sab_almo, &
          sab_aux_fit, sab_aux_fit_asymm, sab_aux_fit_vs_orb, sab_cn, sab_core, sab_kp, sab_lrc, &
-         sab_orb, sab_scp, sab_se, sab_tbe, sab_vdw, sab_xb, sac_ae, sac_lri, sac_ppl, sap_oce, &
-         sap_ppnl, soa_list, soo_list
+         sab_orb, sab_orb_mic, sab_scp, sab_se, sab_tbe, sab_vdw, sab_xb, sac_ae, sac_lri, sac_ppl, &
+         sap_oce, sap_ppnl, soa_list, soo_list
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(paw_proj_set_type), POINTER                   :: paw_proj
       TYPE(qs_dftb_atom_type), POINTER                   :: dftb_atom
@@ -338,6 +339,7 @@ CONTAINS
       CALL timeset(routineN, handle)
       NULLIFY (logger)
       logger => cp_get_default_logger()
+      output_unit = cp_logger_get_default_io_unit(logger)
 
       NULLIFY (atomic_kind_set, qs_kind_set, cell, neighbor_list_section, &
                distribution_1d, distribution_2d, gth_potential, sgp_potential, orb_basis_set, &
@@ -363,6 +365,7 @@ CONTAINS
       NULLIFY (sab_scp)
       NULLIFY (sab_almo)
       NULLIFY (sab_kp)
+      NULLIFY (sab_orb_mic)
 
       CALL get_qs_env(qs_env, &
                       ks_env=ks_env, &
@@ -385,6 +388,7 @@ CONTAINS
 
       CALL get_ks_env(ks_env=ks_env, &
                       sab_orb=sab_orb, &
+                      sab_orb_mic=sab_orb_mic, &
                       sab_aux_fit=sab_aux_fit, &
                       sab_aux_fit_vs_orb=sab_aux_fit_vs_orb, &
                       sab_aux_fit_asymm=sab_aux_fit_asymm, &
@@ -740,6 +744,27 @@ CONTAINS
          END IF
       END IF
 
+      IF ((dft_control%tddfpt_control%do_kernel) .AND. (dft_control%tddfpt_control%kernel .EQ. 0)) THEN
+         IF (dft_control%tddfpt_control%stda_control%do_mic) THEN
+            default_present = .TRUE.
+            c_radius = dft_control%tddfpt_control%stda_control%cutoff_cou
+            ! Build the minimum image neighbor lists
+            CALL pair_radius_setup(default_present, default_present, c_radius, c_radius, pair_radius)
+            CALL build_neighbor_lists(sab_se, particle_set, atom2d, cell, pair_radius, mic=mic, &
+                                      subcells=subcells, nlname="sab_se")
+            CALL set_ks_env(ks_env=ks_env, sab_se=sab_se)
+            CALL write_neighbor_lists(sab_se, particle_set, cell, para_env, neighbor_list_section, &
+                                      "/SAB_SE", "sab_se", "HARTREE INTERACTIONS")
+
+            CALL pair_radius_setup(orb_present, orb_present, orb_radius, orb_radius, pair_radius)
+            CALL build_neighbor_lists(sab_orb_mic, particle_set, atom2d, cell, pair_radius, &
+                                      mic=.TRUE., subcells=subcells, molecular=molecule_only, nlname="sab_orb_mic")
+            CALL set_ks_env(ks_env=ks_env, sab_orb_mic=sab_orb_mic)
+            CALL write_neighbor_lists(sab_orb_mic, particle_set, cell, para_env, neighbor_list_section, &
+                                      "/SAB_ORB_MIC", "sab_orb_mic", "ORBITAL ORBITAL")
+         ENDIF
+      ENDIF
+
       IF (dftb) THEN
          ! Build the neighbor lists for the DFTB Ewald methods
          IF (dft_control%qs_control%dftb_control%do_ewald) THEN
@@ -799,6 +824,19 @@ CONTAINS
          CALL build_neighbor_lists(sab_xb, particle_set, atom2d, cell, pair_radius, &
                                    symmetric=.FALSE., subcells=subcells, operator_type="PP", nlname="sab_xb")
          CALL set_ks_env(ks_env=ks_env, sab_xb=sab_xb)
+      END IF
+
+      IF ((dft_control%tddfpt_control%do_kernel) .AND. &
+          (dft_control%tddfpt_control%kernel .EQ. 0)) THEN
+         IF (dft_control%tddfpt_control%stda_control%do_ewald) THEN
+            CALL get_qs_env(qs_env=qs_env, ewald_env=ewald_env)
+            CALL ewald_env_get(ewald_env, alpha=alpha)
+            c_radius = 0.5_dp*SQRT(-LOG(3.5_dp*alpha**3*1.e-12_dp))/alpha
+            CALL pair_radius_setup(orb_present, orb_present, c_radius, c_radius, pair_radius)
+            CALL build_neighbor_lists(sab_tbe, particle_set, atom2d, cell, pair_radius, mic=mic, &
+                                      subcells=subcells, nlname="sab_tbe")
+            CALL set_ks_env(ks_env=ks_env, sab_tbe=sab_tbe)
+         END IF
       END IF
 
       ! Build the neighbor lists for the vdW pair potential

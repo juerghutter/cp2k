@@ -181,6 +181,7 @@ MODULE qs_ks_types
 
       INTEGER                                               :: neighbor_list_id = -1
       TYPE(neighbor_list_set_p_type), DIMENSION(:), POINTER :: sab_orb => Null(), &
+                                                               sab_orb_mic => Null(), &
                                                                sac_ae => Null(), &
                                                                sac_ppl => Null(), &
                                                                sac_lri => Null(), &
@@ -291,6 +292,7 @@ CONTAINS
 !> \param vee ...
 !> \param neighbor_list_id ...
 !> \param sab_orb ...
+!> \param sab_orb_mic ...
 !> \param sab_aux_fit ...
 !> \param sab_aux_fit_asymm ...
 !> \param sab_aux_fit_vs_orb ...
@@ -356,7 +358,7 @@ CONTAINS
                          rho_buffer, rho_xc, &
                          vppl, rho_core, rho_nlcc, rho_nlcc_g, vee, &
                          neighbor_list_id, &
-                         sab_orb, sab_aux_fit, sab_aux_fit_asymm, &
+                         sab_orb, sab_orb_mic, sab_aux_fit, sab_aux_fit_asymm, &
                          sab_aux_fit_vs_orb, sab_all, sac_ae, sac_ppl, sac_lri, sap_ppnl, sap_oce, sab_lrc, &
                          sab_se, sab_tbe, sab_core, sab_xb, sab_vdw, sab_scp, sab_almo, sab_kp, &
                          task_list, task_list_aux_fit, task_list_soft, &
@@ -384,9 +386,15 @@ CONTAINS
                                                             rho_buffer, rho_xc
       TYPE(pw_p_type), OPTIONAL, POINTER                 :: vppl, rho_core, rho_nlcc, rho_nlcc_g, vee
       INTEGER, OPTIONAL                                  :: neighbor_list_id
+<<<<<<< HEAD
       TYPE(neighbor_list_set_p_type), DIMENSION(:), OPTIONAL, POINTER :: sab_orb, sab_aux_fit, &
          sab_aux_fit_asymm, sab_aux_fit_vs_orb, sab_all, sac_ae, sac_ppl, sac_lri, sap_ppnl, &
          sap_oce, sab_lrc, sab_se, sab_tbe, sab_core, sab_xb, sab_vdw, sab_scp, sab_almo, sab_kp
+=======
+      TYPE(neighbor_list_set_p_type), DIMENSION(:), OPTIONAL, POINTER :: sab_orb, sab_orb_mic, &
+         sab_aux_fit, sab_aux_fit_asymm, sab_aux_fit_vs_orb, sab_all, sac_ae, sac_ppl, sac_lri, &
+         sap_ppnl, sap_oce, sab_lrc, sab_se, sab_tbe, sab_core, sab_vdw, sab_scp, sab_almo, sab_kp
+>>>>>>> funktioniert
       TYPE(task_list_type), OPTIONAL, POINTER            :: task_list, task_list_aux_fit, &
                                                             task_list_soft
       TYPE(kpoint_type), OPTIONAL, POINTER               :: kpoints
@@ -471,6 +479,7 @@ CONTAINS
 
       IF (PRESENT(neighbor_list_id)) neighbor_list_id = ks_env%neighbor_list_id
       IF (PRESENT(sab_orb)) sab_orb => ks_env%sab_orb
+      IF (PRESENT(sab_orb_mic)) sab_orb_mic => ks_env%sab_orb_mic
       IF (PRESENT(sab_aux_fit)) sab_aux_fit => ks_env%sab_aux_fit
       IF (PRESENT(sab_aux_fit_asymm)) sab_aux_fit_asymm => ks_env%sab_aux_fit_asymm
       IF (PRESENT(sab_aux_fit_vs_orb)) sab_aux_fit_vs_orb => ks_env%sab_aux_fit_vs_orb
@@ -572,6 +581,7 @@ CONTAINS
 !> \param sab_orb ...
 !> \param sab_aux_fit ...
 !> \param sab_aux_fit_asymm ...
+!> \param sab_orb_mic ...
 !> \param sab_aux_fit_vs_orb ...
 !> \param sab_all ...
 !> \param sac_ae ...
@@ -611,7 +621,7 @@ CONTAINS
                          vppl, rho_core, rho_nlcc, rho_nlcc_g, vee, &
                          neighbor_list_id, &
                          kpoints, &
-                         sab_orb, sab_aux_fit, sab_aux_fit_asymm, &
+                         sab_orb, sab_aux_fit, sab_aux_fit_asymm, sab_orb_mic, &
                          sab_aux_fit_vs_orb, sab_all, sac_ae, sac_ppl, sac_lri, sap_ppnl, sap_oce, sab_lrc, &
                          sab_se, sab_tbe, sab_core, sab_xb, sab_vdw, sab_scp, sab_almo, sab_kp, &
                          task_list, task_list_aux_fit, task_list_soft, &
@@ -635,8 +645,13 @@ CONTAINS
       INTEGER, OPTIONAL                                  :: neighbor_list_id
       TYPE(kpoint_type), OPTIONAL, POINTER               :: kpoints
       TYPE(neighbor_list_set_p_type), DIMENSION(:), OPTIONAL, POINTER :: sab_orb, sab_aux_fit, &
+<<<<<<< HEAD
          sab_aux_fit_asymm, sab_aux_fit_vs_orb, sab_all, sac_ae, sac_ppl, sac_lri, sap_ppnl, &
          sap_oce, sab_lrc, sab_se, sab_tbe, sab_core, sab_xb, sab_vdw, sab_scp, sab_almo, sab_kp
+=======
+         sab_aux_fit_asymm, sab_orb_mic, sab_aux_fit_vs_orb, sab_all, sac_ae, sac_ppl, sac_lri, &
+         sap_ppnl, sap_oce, sab_lrc, sab_se, sab_tbe, sab_core, sab_vdw, sab_scp, sab_almo, sab_kp
+>>>>>>> funktioniert
       TYPE(task_list_type), OPTIONAL, POINTER            :: task_list, task_list_aux_fit, &
                                                             task_list_soft
       TYPE(qs_subsys_type), OPTIONAL, POINTER            :: subsys
@@ -698,6 +713,7 @@ CONTAINS
       IF (PRESENT(neighbor_list_id)) ks_env%neighbor_list_id = neighbor_list_id
       IF (PRESENT(kpoints)) ks_env%kpoints => kpoints
       IF (PRESENT(sab_orb)) ks_env%sab_orb => sab_orb
+      IF (PRESENT(sab_orb_mic)) ks_env%sab_orb_mic => sab_orb_mic
       IF (PRESENT(sab_aux_fit)) ks_env%sab_aux_fit => sab_aux_fit
       IF (PRESENT(sab_aux_fit_asymm)) ks_env%sab_aux_fit_asymm => sab_aux_fit_asymm
       IF (PRESENT(sab_aux_fit_vs_orb)) ks_env%sab_aux_fit_vs_orb => sab_aux_fit_vs_orb
@@ -852,6 +868,7 @@ CONTAINS
             ENDIF
 
             CALL release_sab(ks_env%sab_orb)
+            CALL release_sab(ks_env%sab_orb_mic)
             CALL release_sab(ks_env%sac_ae)
             CALL release_sab(ks_env%sac_ppl)
             CALL release_sab(ks_env%sac_lri)
