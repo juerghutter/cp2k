@@ -389,8 +389,9 @@ CONTAINS
          IF (iatom == jatom .AND. dr < 0.001_dp) THEN
             ! diagonal block
             DO i = 1, natorb_a
+               la = laoa(i)
                na = naoa(i)
-               fblock(i, i) = fblock(i, i)+huckel(na, iatom)
+               fblock(i, i) = fblock(i, i)+kl(la)*huckel(na, iatom)
             END DO
             IF (calculate_forces) THEN
 !qxtb
