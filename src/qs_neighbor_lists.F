@@ -116,7 +116,7 @@ MODULE qs_neighbor_lists
 
    ! Public subroutines
    PUBLIC :: build_qs_neighbor_lists, local_atoms_type, atom2d_cleanup, &
-             atom2d_build, build_neighbor_lists, pair_radius_setup, &
+             atom2d_build, build_ab_nlist, build_neighbor_lists, pair_radius_setup, &
              setup_neighbor_list, write_neighbor_lists
 CONTAINS
 
@@ -1289,6 +1289,261 @@ CONTAINS
    END SUBROUTINE build_neighbor_lists
 
 ! **************************************************************************************************
+!> \brief Build simple pair neighbor list.
+!>        for two sets of atoms
+!> \param ab_list ...
+!> \param lista ...
+!> \param listb ...
+!> \param ca ...
+!> \param cb ...
+!> \param radiusa ...
+!> \param radiusb ...
+!> \param cell ...
+!> \param subcells ...
+!> \date    15.11.2018
+!> \par History
+!>          - Based on build_neighbour_lists(15.11.2018,jhu)
+!> \author  MK
+!> \version 2.0
+! **************************************************************************************************
+   SUBROUTINE build_ab_nlist(ab_list, lista, listb, ca, cb, radiusa, radiusb, cell, subcells)
+
+      TYPE(neighbor_list_set_p_type), DIMENSION(:), &
+         POINTER                                         :: ab_list
+      TYPE(local_atoms_type), DIMENSION(:), INTENT(IN)   :: lista, listb
+      REAL(dp), DIMENSION(:, :), INTENT(INOUT)           :: ca, cb
+      REAL(dp), DIMENSION(:), INTENT(IN)                 :: radiusa, radiusb
+      TYPE(cell_type), POINTER                           :: cell
+      REAL(dp), INTENT(IN)                               :: subcells
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'build_ab_nlist', routineP = moduleN//':'//routineN
+
+      TYPE local_lists
+         INTEGER, DIMENSION(:), POINTER           :: list
+      END TYPE local_lists
+      INTEGER :: atom_a, atom_b, handle, i, iab, iatom, iatom_local, &
+                 iatom_subcell, icell, ikind, j, jatom, jatom_local, jcell, jkind, k, &
+                 kcell, maxat, mol_a, mol_b, nkind, natom, nkinda, nkindb, na, nb, maxata, maxatb
+      INTEGER, DIMENSION(3)                    :: cell_b, ncell, &
+                                                  nsubcell, periodic
+      INTEGER, DIMENSION(:), POINTER           :: index_list
+      LOGICAL                                  :: include_ab
+      REAL(dp)                                 :: rab2, rab2_max, rab_max, rabm, deth, subcell_scale
+      REAL(dp), DIMENSION(3)                   :: r, rab, ra, rb, sab_max, sb, &
+                                                  sb_pbc, sb_min, sb_max, rab_pbc, pd, sab_max_guard
+      INTEGER, ALLOCATABLE, DIMENSION(:)       :: nlista, nlistb
+      TYPE(neighbor_list_p_type), &
+         ALLOCATABLE, DIMENSION(:)              :: kind_a
+      TYPE(neighbor_list_set_type), POINTER     :: neighbor_list_set
+      TYPE(subcell_type), DIMENSION(:, :, :), &
+         POINTER                                :: subcell
+
+      CALL timeset(routineN, handle)
+
+      ! Deallocate the old neighbor list structure
+      IF (ASSOCIATED(ab_list)) THEN
+         DO iab = 1, SIZE(ab_list)
+            CALL deallocate_neighbor_list_set(ab_list(iab)%neighbor_list_set)
+         END DO
+         DEALLOCATE (ab_list)
+      END IF
+
+      nkinda = SIZE(lista)
+      nkindb = SIZE(listb)
+      ! Allocate and initialize the new neighbor list structure
+      ALLOCATE (ab_list(nkinda*nkindb))
+      DO iab = 1, SIZE(ab_list)
+         NULLIFY (ab_list(iab)%neighbor_list_set)
+      END DO
+
+      ! pbc coordinates
+      na = SIZE(ca, 2)
+      DO i = 1, na
+         ca(1:3, i) = pbc(ca(1:3, i), cell)
+      ENDDO
+      nb = SIZE(cb, 2)
+      DO i = 1, nb
+         cb(1:3, i) = pbc(cb(1:3, i), cell)
+      ENDDO
+
+      ALLOCATE (nlista(nkinda), nlistb(nkindb))
+      nlista = 0
+      DO ikind = 1, nkinda
+         nlista(ikind) = SIZE(lista(ikind)%list)
+      END DO
+      nlistb = 0
+      DO ikind = 1, nkindb
+         nlistb(ikind) = SIZE(listb(ikind)%list)
+      END DO
+
+      ! Determine max. number of local atoms
+      maxata = MAXVAL(nlista)
+      maxatb = MAXVAL(nlistb)
+      ALLOCATE (kind_a(2*maxata))
+
+      ! Load informations about the simulation cell
+      CALL get_cell(cell=cell, periodic=periodic, deth=deth)
+
+      ! Loop over all atomic kind pairs
+      DO ikind = 1, nkinda
+
+         DO jkind = 1, nkindb
+
+            iab = ikind+nkinda*(jkind-1)
+
+            ! Calculate the square of the maximum interaction distance
+            rab_max = radiusa(ikind)+radiusb(jkind)
+            IF (rab_max <= 0._dp) CYCLE
+            rabm = rab_max
+            rab2_max = rabm*rabm
+
+            pd(1) = plane_distance(1, 0, 0, cell)
+            pd(2) = plane_distance(0, 1, 0, cell)
+            pd(3) = plane_distance(0, 0, 1, cell)
+
+            sab_max = rabm/pd
+            sab_max_guard = 15.0_dp/pd
+
+            ! It makes sense to have fewer subcells for larger systems
+            subcell_scale = ((125.0_dp**3)/deth)**(1.0_dp/6.0_dp)
+
+            ! guess the number of subcells for optimal performance, guard against crazy stuff triggered by very small rabm
+            nsubcell(:) = INT(MAX(1.0_dp, MIN(0.5_dp*subcells*subcell_scale/sab_max(:), &
+                                              0.5_dp*subcells*subcell_scale/sab_max_guard(:))))
+
+            ! number of image cells to be considered
+            ncell(:) = (INT(sab_max(:))+1)*periodic(:)
+
+            CALL allocate_neighbor_list_set(neighbor_list_set=ab_list(iab)%neighbor_list_set, symmetric=.FALSE.)
+            neighbor_list_set => ab_list(iab)%neighbor_list_set
+
+            DO iatom_local = 1, nlista(ikind)
+               iatom = lista(ikind)%list(iatom_local)
+               CALL add_neighbor_list(neighbor_list_set=neighbor_list_set, &
+                                      atom=iatom, &
+                                      neighbor_list=kind_a(iatom_local)%neighbor_list)
+            END DO
+
+            CALL allocate_subcell(subcell, nsubcell)
+            DO iatom_local = 1, nlista(ikind)
+               iatom = lista(ikind)%list(iatom_local)
+               r = ca(:, iatom)
+               CALL give_ijk_subcell(r, i, j, k, cell, nsubcell)
+               subcell(i, j, k)%natom = subcell(i, j, k)%natom+1
+            END DO
+            DO k = 1, nsubcell(3)
+               DO j = 1, nsubcell(2)
+                  DO i = 1, nsubcell(1)
+                     maxat = subcell(i, j, k)%natom+subcell(i, j, k)%natom/10
+                     ALLOCATE (subcell(i, j, k)%atom_list(maxat))
+                     subcell(i, j, k)%natom = 0
+                  END DO
+               END DO
+            END DO
+            DO iatom_local = 1, nlista(ikind)
+               iatom = lista(ikind)%list(iatom_local)
+               r = ca(:, iatom)
+               CALL give_ijk_subcell(r, i, j, k, cell, nsubcell)
+               subcell(i, j, k)%natom = subcell(i, j, k)%natom+1
+               subcell(i, j, k)%atom_list(subcell(i, j, k)%natom) = iatom_local
+            END DO
+
+            DO jatom_local = 1, nlistb(jkind)
+               jatom = listb(jkind)%list(jatom_local)
+               r = cb(:, jatom)
+               CALL real_to_scaled(sb_pbc(:), r(:), cell)
+
+               loop2_kcell: DO kcell = -ncell(3), ncell(3)
+                  sb(3) = sb_pbc(3)+REAL(kcell, dp)
+                  sb_min(3) = sb(3)-sab_max(3)
+                  sb_max(3) = sb(3)+sab_max(3)
+                  IF (periodic(3) /= 0) THEN
+                     IF (sb_min(3) >= 0.5_dp) EXIT loop2_kcell
+                     IF (sb_max(3) < -0.5_dp) CYCLE loop2_kcell
+                  END IF
+                  cell_b(3) = kcell
+
+                  loop2_jcell: DO jcell = -ncell(2), ncell(2)
+                     sb(2) = sb_pbc(2)+REAL(jcell, dp)
+                     sb_min(2) = sb(2)-sab_max(2)
+                     sb_max(2) = sb(2)+sab_max(2)
+                     IF (periodic(2) /= 0) THEN
+                        IF (sb_min(2) >= 0.5_dp) EXIT loop2_jcell
+                        IF (sb_max(2) < -0.5_dp) CYCLE loop2_jcell
+                     END IF
+                     cell_b(2) = jcell
+
+                     loop2_icell: DO icell = -ncell(1), ncell(1)
+                        sb(1) = sb_pbc(1)+REAL(icell, dp)
+                        sb_min(1) = sb(1)-sab_max(1)
+                        sb_max(1) = sb(1)+sab_max(1)
+                        IF (periodic(1) /= 0) THEN
+                           IF (sb_min(1) >= 0.5_dp) EXIT loop2_icell
+                           IF (sb_max(1) < -0.5_dp) CYCLE loop2_icell
+                        END IF
+                        cell_b(1) = icell
+
+                        CALL scaled_to_real(rb, sb, cell)
+
+                        loop_k: DO k = 1, nsubcell(3)
+                           loop_j: DO j = 1, nsubcell(2)
+                              loop_i: DO i = 1, nsubcell(1)
+
+                                 IF (periodic(3) /= 0) THEN
+                                    IF (sb_max(3) < subcell(i, j, k)%s_min(3)) EXIT loop_k
+                                    IF (sb_min(3) >= subcell(i, j, k)%s_max(3)) CYCLE loop_k
+                                 END IF
+
+                                 IF (periodic(2) /= 0) THEN
+                                    IF (sb_max(2) < subcell(i, j, k)%s_min(2)) EXIT loop_j
+                                    IF (sb_min(2) >= subcell(i, j, k)%s_max(2)) CYCLE loop_j
+                                 END IF
+
+                                 IF (periodic(1) /= 0) THEN
+                                    IF (sb_max(1) < subcell(i, j, k)%s_min(1)) EXIT loop_i
+                                    IF (sb_min(1) >= subcell(i, j, k)%s_max(1)) CYCLE loop_i
+                                 END IF
+
+                                 IF (subcell(i, j, k)%natom == 0) CYCLE
+
+                                 DO iatom_subcell = 1, subcell(i, j, k)%natom
+                                    iatom_local = subcell(i, j, k)%atom_list(iatom_subcell)
+                                    iatom = lista(ikind)%list(iatom_local)
+                                    ra(:) = ca(:, iatom)
+                                    rab(:) = rb(:)-ra(:)
+                                    rab2 = rab(1)*rab(1)+rab(2)*rab(2)+rab(3)*rab(3)
+                                    IF (rab2 < rab2_max) THEN
+                                       CALL add_neighbor_node( &
+                                          neighbor_list=kind_a(iatom_local)%neighbor_list, &
+                                          neighbor=jatom, &
+                                          cell=cell_b, &
+                                          r=rab, &
+                                          nkind=nkinda)
+                                    END IF
+                                 END DO
+
+                              END DO loop_i
+                           END DO loop_j
+                        END DO loop_k
+
+                     END DO loop2_icell
+                  END DO loop2_jcell
+               END DO loop2_kcell
+
+            END DO
+
+            CALL deallocate_subcell(subcell)
+
+         END DO
+      END DO
+
+      DEALLOCATE (kind_a, nlista, nlistb)
+
+      CALL timestop(handle)
+
+   END SUBROUTINE build_ab_nlist
+
+! **************************************************************************************************
 !> \brief Build a neighborlist
 !> \param ab_list ...
 !> \param basis_set_a ...
@@ -1455,8 +1710,6 @@ CONTAINS
          END DO loopb
       ENDIF
    END SUBROUTINE combine_lists
-
-! **************************************************************************************************
 
 ! **************************************************************************************************
 !> \brief ...
