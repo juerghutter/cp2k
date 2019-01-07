@@ -12,17 +12,14 @@
 ! **************************************************************************************************
 MODULE xtb_matrices
    USE ai_contraction,                  ONLY: block_add,&
-                                              contraction,&
-                                              decontraction,&
-                                              force_trace
+                                              contraction
    USE ai_overlap,                      ONLY: overlap_ab
    USE atomic_kind_types,               ONLY: atomic_kind_type,&
                                               get_atomic_kind,&
                                               get_atomic_kind_set
    USE atprop_types,                    ONLY: atprop_array_init,&
                                               atprop_type
-   USE basis_set_types,                 ONLY: get_gto_basis_set,&
-                                              gto_basis_set_p_type,&
+   USE basis_set_types,                 ONLY: gto_basis_set_p_type,&
                                               gto_basis_set_type
    USE block_p_types,                   ONLY: block_p_type
    USE cp_control_types,                ONLY: dft_control_type,&
@@ -53,8 +50,7 @@ MODULE xtb_matrices
                                               kpoint_type
    USE message_passing,                 ONLY: mp_sum
    USE mulliken,                        ONLY: ao_charges
-   USE orbital_pointers,                ONLY: indco,&
-                                              ncoset
+   USE orbital_pointers,                ONLY: ncoset
    USE particle_types,                  ONLY: particle_type
    USE qs_dispersion_pairpot,           ONLY: d3_cnumber,&
                                               dcnum_type
@@ -63,6 +59,8 @@ MODULE xtb_matrices
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
    USE qs_force_types,                  ONLY: qs_force_type
+   USE qs_integral_utils,               ONLY: basis_set_list_setup,&
+                                              get_memory_usage
    USE qs_kind_types,                   ONLY: get_qs_kind,&
                                               get_qs_kind_set,&
                                               qs_kind_type
@@ -77,9 +75,7 @@ MODULE xtb_matrices
                                               neighbor_list_iterator_p_type,&
                                               neighbor_list_iterator_release,&
                                               neighbor_list_set_p_type
-   USE qs_overlap,                      ONLY: build_overlap_matrix, create_sab_matrix
-   USE qs_integral_utils,               ONLY: basis_set_list_setup,&
-                                              get_memory_usage
+   USE qs_overlap,                      ONLY: create_sab_matrix
    USE qs_rho_types,                    ONLY: qs_rho_get,&
                                               qs_rho_type
    USE virial_methods,                  ONLY: virial_pair_force
@@ -122,9 +118,9 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       INTEGER :: after, atom_a, atom_b, atom_c, handle, i, iatom, ic, icol, ikind, img, ir, irow, &
-         iw, j, jatom, jkind, katom, kkind, la, lb, ldsab, lmaxa, lmaxb, maxder, maxs, n1, n2, na, natom, &
-         natorb_a, natorb_b, nb, nderivatives, nimg, nkind, nsa, nsb, nshell, nseta, nsetb, za, zat, zb, &
-         iset, jset, ncoa, ncob, sgfa, sgfb
+         iset, iw, j, jatom, jkind, jset, katom, kkind, la, lb, ldsab, lmaxa, lmaxb, maxder, maxs, &
+         n1, n2, na, natom, natorb_a, natorb_b, nb, ncoa, ncob, nderivatives, nimg, nkind, nsa, &
+         nsb, nseta, nsetb, nshell, sgfa, sgfb, za, zat, zb
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: atom_of_kind, atomnumber, kind_of
       INTEGER, DIMENSION(25)                             :: laoa, laob, lval, naoa, naob
       INTEGER, DIMENSION(3)                              :: cell
@@ -141,7 +137,7 @@ CONTAINS
          kd, ken, kf, kg, kia, kjb, kp, ks, ksp, kx2, kxr, rcova, rcovab, rcovb, rrab, zneffa, &
          zneffb
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: cnumbers, kx
-      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: dfblock, huckel, kcnlk, rcab, owork
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: dfblock, huckel, kcnlk, owork, rcab
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :, :)     :: oint, sint
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :, :, :)  :: kijab
       REAL(KIND=dp), DIMENSION(0:3)                      :: kl
@@ -149,9 +145,8 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(5)                        :: dpia, dpib, hena, henb, kappaa, kappab, &
                                                             kpolya, kpolyb, pia, pib
       REAL(KIND=dp), DIMENSION(:), POINTER               :: set_radius_a, set_radius_b
-      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: rpgfa, rpgfb, scon_a, scon_b, &
-                                                            zeta, zetb
-      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: fblock, pblock, sblock, wblock
+      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: fblock, pblock, rpgfa, rpgfb, sblock, &
+                                                            scon_a, scon_b, wblock, zeta, zetb
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(atprop_type), POINTER                         :: atprop
       TYPE(block_p_type), DIMENSION(2:4)                 :: dsblocks
@@ -159,6 +154,8 @@ CONTAINS
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_h, matrix_p, matrix_s, matrix_w
       TYPE(dcnum_type), ALLOCATABLE, DIMENSION(:)        :: dcnum
       TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(gto_basis_set_p_type), DIMENSION(:), POINTER  :: basis_set_list
+      TYPE(gto_basis_set_type), POINTER                  :: basis_set_a, basis_set_b
       TYPE(kpoint_type), POINTER                         :: kpoints
       TYPE(neighbor_atoms_type), ALLOCATABLE, &
          DIMENSION(:)                                    :: neighbor_atoms
@@ -167,8 +164,6 @@ CONTAINS
       TYPE(neighbor_list_set_p_type), DIMENSION(:), &
          POINTER                                         :: sab_orb, sab_xb
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
-      TYPE(gto_basis_set_p_type), DIMENSION(:), POINTER  :: basis_set_list
-      TYPE(gto_basis_set_type), POINTER                  :: basis_set_a, basis_set_b
       TYPE(qs_dispersion_type), POINTER                  :: dispersion_env
       TYPE(qs_energy_type), POINTER                      :: energy
       TYPE(qs_force_type), DIMENSION(:), POINTER         :: force
@@ -530,7 +525,7 @@ CONTAINS
 
          ldsab = get_memory_usage(qs_kind_set, "ORB", "ORB")
          ALLOCATE (oint(ldsab, ldsab, maxder), owork(ldsab, ldsab))
-         ALLOCATE (sint(natorb_a,natorb_b,maxder))
+         ALLOCATE (sint(natorb_a, natorb_b, maxder))
          sint = 0.0_dp
 
          DO iset = 1, nseta
@@ -554,12 +549,12 @@ CONTAINS
                ! Contraction
                CALL contraction(oint(:, :, 1), owork, ca=scon_a(:, sgfa:), na=n1, ma=nsgfa(iset), &
                                 cb=scon_b(:, sgfb:), nb=n2, mb=nsgfb(jset), fscale=1.0_dp, trans=.FALSE.)
-               CALL block_add("IN", owork, nsgfa(iset), nsgfb(jset), sint(:,:,1), sgfa, sgfb, trans=.FALSE.)
+               CALL block_add("IN", owork, nsgfa(iset), nsgfb(jset), sint(:, :, 1), sgfa, sgfb, trans=.FALSE.)
                IF (calculate_forces) THEN
                DO i = 2, 4
                   CALL contraction(oint(:, :, i), owork, ca=scon_a(:, sgfa:), na=n1, ma=nsgfa(iset), &
                                    cb=scon_b(:, sgfb:), nb=n2, mb=nsgfb(jset), fscale=1.0_dp, trans=.FALSE.)
-                  CALL block_add("IN", owork, nsgfa(iset), nsgfb(jset), sint(:,:,i), sgfa, sgfb, trans=.FALSE.)
+                  CALL block_add("IN", owork, nsgfa(iset), nsgfb(jset), sint(:, :, i), sgfa, sgfb, trans=.FALSE.)
                END DO
                END IF
             END DO
@@ -568,31 +563,31 @@ CONTAINS
          IF (calculate_forces) THEN
             DO i = 1, 3
                IF (iatom <= jatom) THEN
-                  force_ab(i) = SUM(sint(:, :, i+1)*wblock(:,:))
+                  force_ab(i) = SUM(sint(:, :, i+1)*wblock(:, :))
                ELSE
-                  force_ab(i) = SUM(sint(:, :, i+1)*TRANSPOSE(wblock(:,:)))
+                  force_ab(i) = SUM(sint(:, :, i+1)*TRANSPOSE(wblock(:, :)))
                END IF
             END DO
             force(ikind)%overlap(:, atom_a) = force(ikind)%overlap(:, atom_a)-2.0_dp*force_ab(:)
             force(jkind)%overlap(:, atom_b) = force(jkind)%overlap(:, atom_b)+2.0_dp*force_ab(:)
             IF (use_virial) THEN
                f0 = 2.0_dp
-               IF(iatom==jatom) f0 = 1.0_dp
+               IF (iatom == jatom) f0 = 1.0_dp
                CALL virial_pair_force(virial%pv_virial, -f0, force_ab, rij)
             END IF
          END IF
          ! update S matrix
          IF (iatom <= jatom) THEN
-            sblock(:, :) = sblock(:, :) + sint(:,:,1)
+            sblock(:, :) = sblock(:, :)+sint(:, :, 1)
          ELSE
-            sblock(:, :) = sblock(:, :) + TRANSPOSE(sint(:,:,1))
+            sblock(:, :) = sblock(:, :)+TRANSPOSE(sint(:, :, 1))
          END IF
          IF (calculate_forces) THEN
-            DO i=2,4
+            DO i = 2, 4
                IF (iatom <= jatom) THEN
-                  dsblocks(i)%block(:, :) = dsblocks(i)%block(:, :) + sint(:,:,i)
+                  dsblocks(i)%block(:, :) = dsblocks(i)%block(:, :)+sint(:, :, i)
                ELSE
-                  dsblocks(i)%block(:, :) = dsblocks(i)%block(:, :) - TRANSPOSE(sint(:,:,i))
+                  dsblocks(i)%block(:, :) = dsblocks(i)%block(:, :)-TRANSPOSE(sint(:, :, i))
                END IF
             END DO
          END IF
@@ -777,7 +772,7 @@ CONTAINS
             force(jkind)%all_potential(:, atom_b) = force(jkind)%all_potential(:, atom_b)+force_ab(:)
          END IF
 
-         DEALLOCATE(oint,owork,sint)
+         DEALLOCATE (oint, owork, sint)
 
          ! repulsive potential
          IF (dr > 0.001_dp) THEN
