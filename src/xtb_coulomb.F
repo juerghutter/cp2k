@@ -331,7 +331,7 @@ CONTAINS
          ecsr = ecsr+SUM(charges(iatom, 1:ni)*gchrg(iatom, 1:ni, 1))
       END DO
       energy%hartree = energy%hartree+0.5_dp*ecsr
-      energy%hartree = energy%hartree+0.5_dp*SUM(mcharge(:)*gmcharge(:, 1))
+!deb  energy%hartree = energy%hartree+0.5_dp*SUM(mcharge(:)*gmcharge(:, 1))
       IF (atprop%energy) THEN
          CALL get_qs_env(qs_env=qs_env, local_particles=local_particles)
          DO ikind = 1, SIZE(local_particles%n_el)
@@ -442,7 +442,7 @@ CONTAINS
                                       row=irow, col=icol, block=ksblock, found=found)
                CPASSERT(found)
                ksblock = ksblock-gcij*sblock
-               ksblock = ksblock-gmij*sblock
+!deb           ksblock = ksblock-gmij*sblock
             END DO
 
             IF (calculate_forces) THEN
@@ -503,8 +503,8 @@ CONTAINS
          CALL get_xtb_atom_param(xtb_kind, xgamma=xgamma(ikind), zeff=zeffk(ikind))
       END DO
       ! Diagonal 3rd order correction (DFTB3)
-      CALL build_dftb3_diagonal(qs_env, ks_matrix, rho, mcharge, energy, xgamma, zeffk, &
-                                calculate_forces, just_energy)
+!deb  CALL build_dftb3_diagonal(qs_env, ks_matrix, rho, mcharge, energy, xgamma, zeffk, &
+!deb                            calculate_forces, just_energy)
       DEALLOCATE (zeffk, xgamma)
 
       DEALLOCATE (gmcharge, gchrg, atom_of_kind, kind_of)
@@ -892,9 +892,10 @@ CONTAINS
          END DO
       END DO
 
+      gmat = 0.0_dp
       IF (rab < 1.e-6_dp) THEN
          ! on site terms
-         gmat(:, :) = gmat(:, :)+eta(:, :)
+         gmat(:, :) = eta(:, :)
       ELSEIF (rab > rcut) THEN
          ! do nothing
       ELSE
@@ -907,8 +908,7 @@ CONTAINS
             x = r/rsmooth
             fcut = -10._dp*x**5+15._dp*x**4-10._dp*x**3+1._dp
          END IF
-         gmat(:, :) = gmat(:, :)+fcut*(1._dp/(rk+eta(:, :)))**(1._dp/kg)
-         gmat(:, :) = gmat(:, :)-fcut*1.0_dp/rab
+         gmat(:, :) = fcut*(1._dp/(rk+eta(:, :)))**(1._dp/kg)-fcut/rab
       END IF
 
       DEALLOCATE (eta)
