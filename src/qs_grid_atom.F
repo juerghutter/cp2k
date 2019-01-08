@@ -376,10 +376,10 @@ CONTAINS
       ng = ng+MOD(ng+1, 2)
       ! avarage number of points along radial grid
       dco = 0.0_dp
-      ag = REAL(igr%np, dp)/ng
+      ag = REAL(igr%np+1, dp)/ng
       CPASSERT(SIZE(dco) >= (ng+1)/2)
       DO ig = 1, ng, 2
-         ir = MIN(NINT(ag)*ig, igr%np)
+         ir = MIN(NINT(ag*ig), igr%np)
          ia = (ig+1)/2
          dco(ia) = rad(ir)
       END DO

@@ -23,6 +23,7 @@ MODULE kg_correction
    USE kg_environment_types,            ONLY: kg_environment_type
    USE kinds,                           ONLY: dp
    USE lri_environment_methods,         ONLY: calculate_lri_densities,&
+                                              calculate_avec_lri,&
                                               lri_kg_rho_update
    USE lri_environment_types,           ONLY: lri_density_type,&
                                               lri_environment_type,&
@@ -487,7 +488,7 @@ CONTAINS
       xcvirial(1:3, 1:3) = 0.0_dp
       IF (use_virial) xcvirial(1:3, 1:3) = xcvirial(1:3, 1:3)-virial%pv_xc(1:3, 1:3)
 !deb
-!     WRITE(6,*) " E KIN (full)       ",-ekin_mol
+      WRITE(6,*) " E KIN (full)       ",-ekin_mol
 !deb
 
       ! loop over all subsets
@@ -508,7 +509,7 @@ CONTAINS
                             vxc_rho=vxc_rho, vxc_tau=vxc_tau, exc=ekin_imol)
          ekin_mol = ekin_mol+ekin_imol
 !deb
-!     WRITE(6,*) " E KIN (molecule)    ",isub,ekin_imol
+      WRITE(6,*) " E KIN (molecule)    ",isub,ekin_imol
 !deb
 
          DO ispin = 1, nspins
@@ -551,6 +552,45 @@ CONTAINS
       CALL qs_rho_release(rho_struct)
       DEALLOCATE (cell_to_index)
 
+      CALL timestop(handle)
+
+      CALL timeset(routineN//"_RI", handle)
+!deb
+write(6,*) "START RI code"
+!deb
+      CALL get_qs_env(qs_env, &
+                      ks_env=ks_env, &
+                      rho=rho, &
+                      natom=natom, &
+                      nkind=nkind, &
+                      dft_control=dft_control, &
+                      virial=virial, &
+                      para_env=para_env, &
+                      pw_env=pw_env)
+
+      nspins = dft_control%nspins
+      use_virial = virial%pv_availability .AND. (.NOT. virial%pv_numer)
+      use_virial = use_virial .AND. calc_force
+
+      ! get the density matrix
+      CALL qs_rho_get(rho, rho_ao_kp=density_matrix)
+      ! allocate and initialize the density
+      NULLIFY (rho_struct)
+      CALL qs_rho_create(rho_struct)
+      ! set the density matrix to the blocked matrix
+      CALL qs_rho_set(rho_struct, rho_ao_kp=density_matrix)
+      CALL qs_rho_rebuild(rho_struct, qs_env, rebuild_ao=.FALSE., rebuild_grids=.TRUE.)
+
+      ALLOCATE (cell_to_index(1, 1, 1))
+      cell_to_index(1, 1, 1) = 1
+      lri_env => kg_env%lri_env
+      lri_density => kg_env%lri_density
+      CALL calculate_avec_lri(lri_env, lri_density, density_matrix, cell_to_index)
+      kg_env%lri_density => lri_density
+
+!deb
+write(6,*) "END RI code"
+!deb
       CALL timestop(handle)
 
    END SUBROUTINE kg_ekin_ri_embed
