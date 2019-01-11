@@ -571,9 +571,7 @@ CONTAINS
             force(ikind)%overlap(:, atom_a) = force(ikind)%overlap(:, atom_a)-2.0_dp*force_ab(:)
             force(jkind)%overlap(:, atom_b) = force(jkind)%overlap(:, atom_b)+2.0_dp*force_ab(:)
             IF (use_virial) THEN
-               f0 = 2.0_dp
-               IF (iatom == jatom) f0 = 1.0_dp
-               CALL virial_pair_force(virial%pv_virial, -f0, force_ab, rij)
+               CALL virial_pair_force(virial%pv_virial, -2.0_dp, force_ab, rij)
             END IF
          END IF
          ! update S matrix
@@ -918,7 +916,7 @@ CONTAINS
 
       INTEGER                                            :: atom_a, handle, iatom, ikind, img, &
                                                             iounit, is, ispin, natom, natorb, &
-                                                            nkind, ns, nspins
+                                                            nkind, ns, nspins, nimg
       INTEGER, DIMENSION(25)                             :: lao
       INTEGER, DIMENSION(5)                              :: occ
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: aocharge, mcharge
@@ -926,7 +924,7 @@ CONTAINS
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(cp_para_env_type), POINTER                    :: para_env
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mo_derivs
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mo_derivs, matrix_p1
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: ks_matrix, matrix_h, matrix_p, matrix_s
       TYPE(dbcsr_type), POINTER                          :: mo_coeff
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -960,12 +958,13 @@ CONTAINS
 
       scf_section => section_vals_get_subs_vals(qs_env%input, "DFT%SCF")
       nspins = dft_control%nspins
+      nimg = dft_control%nimages
       CPASSERT(ASSOCIATED(matrix_h))
       CPASSERT(ASSOCIATED(rho))
       CPASSERT(SIZE(ks_matrix) > 0)
 
       DO ispin = 1, nspins
-         DO img = 1, SIZE(ks_matrix, 2)
+         DO img = 1, nimg
             ! copy the core matrix into the fock matrix
             CALL dbcsr_copy(ks_matrix(ispin, img)%matrix, matrix_h(1, img)%matrix)
          END DO

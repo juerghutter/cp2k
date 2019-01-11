@@ -131,7 +131,7 @@ CONTAINS
       INTEGER, DIMENSION(:, :, :), POINTER               :: cell_to_index
       LOGICAL                                            :: defined, do_ewald, found, use_virial
       REAL(KIND=dp)                                      :: alpha, deth, dr, ecsr, etaa, etab, fi, &
-                                                            gmij, kg, rcut, rcuta, rcutb, zeff
+                                                            gmij, kg, rcut, rcuta, rcutb, zeff, ksb1
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: xgamma, zeffk
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: gammab, gcij, gmcharge
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :, :)     :: gchrg
@@ -239,7 +239,6 @@ CONTAINS
                   DO i = 1, 3
                      fij(i) = SUM(charges(iatom, 1:ni)*gcint(1:ni))*rij(i)/dr
                   END DO
-!deb              IF (iatom /= jatom) THEN
                   CALL virial_pair_force(virial%pv_virial, 1._dp, fij, rij)
                   IF (atprop%stress) THEN
                      CALL virial_pair_force(atprop%atstress(:, :, iatom), 0.5_dp, fij, rij)
@@ -330,8 +329,10 @@ CONTAINS
          ni = ni+1
          ecsr = ecsr+SUM(charges(iatom, 1:ni)*gchrg(iatom, 1:ni, 1))
       END DO
+
       energy%hartree = energy%hartree+0.5_dp*ecsr
       energy%hartree = energy%hartree+0.5_dp*SUM(mcharge(:)*gmcharge(:, 1))
+
       IF (atprop%energy) THEN
          CALL get_qs_env(qs_env=qs_env, local_particles=local_particles)
          DO ikind = 1, SIZE(local_particles%n_el)
@@ -402,6 +403,8 @@ CONTAINS
             irow = MIN(iatom, jatom)
 
             IF (nimg == 1) THEN
+               ! for case without k-points we only need MIC pairs
+               IF(SUM(ABS(cellind)) /= 0) CYCLE
                ic = 1
             ELSE
                ic = cell_to_index(cellind(1), cellind(2), cellind(3))
