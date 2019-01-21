@@ -30,6 +30,7 @@ MODULE qs_dftb_matrices
         convert_offsets_to_sizes, dbcsr_add, dbcsr_copy, dbcsr_create, dbcsr_distribution_type, &
         dbcsr_finalize, dbcsr_get_block_p, dbcsr_multiply, dbcsr_p_type, dbcsr_trace, dbcsr_type, &
         dbcsr_type_antisymmetric, dbcsr_type_symmetric
+   USE efield_tb_methods,               ONLY: efield_tb_matrix
    USE input_section_types,             ONLY: section_vals_get_subs_vals,&
                                               section_vals_type,&
                                               section_vals_val_get
@@ -602,6 +603,8 @@ CONTAINS
 
       END IF
 
+      CALL efield_tb_matrix(qs_env, ks_matrix, rho, mcharge, energy, calculate_forces, just_energy)
+
       IF (qs_env%qmmm) THEN
          CPASSERT(SIZE(ks_matrix, 2) == 1)
          DO ispin = 1, nspins
@@ -618,7 +621,7 @@ CONTAINS
          energy%qmmm_el = energy%qmmm_el+pc_ener
       END IF
 
-      energy%total = energy%core+energy%hartree+energy%qmmm_el+ &
+      energy%total = energy%core+energy%hartree+energy%qmmm_el+energy%efield+ &
                      energy%repulsive+energy%dispersion+energy%dftb3
 
       output_unit = cp_print_key_unit_nr(logger, scf_section, "PRINT%DETAILED_ENERGY", &
@@ -629,6 +632,10 @@ CONTAINS
             "Zeroth order Hamiltonian energy:               ", energy%core, &
             "Charge fluctuation energy:                     ", energy%hartree, &
             "London dispersion energy:                      ", energy%dispersion
+         IF (ABS(energy%efield) > 1.e-12_dp) THEN
+            WRITE (UNIT=output_unit, FMT="(T9,A,T60,F20.10)") &
+               "Electric field interaction energy:             ", energy%efield
+         END IF
          IF (dft_control%qs_control%dftb_control%dftb3_diagonal) THEN
             WRITE (UNIT=output_unit, FMT="(T9,A,T60,F20.10)") &
                "DFTB3 3rd Order Energy Correction              ", energy%dftb3
