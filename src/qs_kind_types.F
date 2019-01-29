@@ -44,7 +44,9 @@ MODULE qs_kind_types
                                               qs_control_type
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_type
-   USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
+   USE cp_output_handling,              ONLY: cp_p_file,&
+                                              cp_print_key_finished_output,&
+                                              cp_print_key_should_output,&
                                               cp_print_key_unit_nr
    USE cp_para_types,                   ONLY: cp_para_env_type
    USE external_potential_types,        ONLY: &
@@ -95,6 +97,7 @@ MODULE qs_kind_types
                                               se_param_set_default
    USE soft_basis_set,                  ONLY: create_soft_basis
    USE string_utilities,                ONLY: uppercase
+   USE xtb_parameters,                  ONLY: xtb_set_kab
    USE xtb_types,                       ONLY: deallocate_xtb_atom_param,&
                                               get_xtb_atom_param,&
                                               write_xtb_atom_param,&
@@ -789,6 +792,7 @@ CONTAINS
 !> \param max_sph_harm ...
 !> \param maxg_iso_not0 ...
 !> \param lmax_rho0 ...
+!> \param basis_rcut ...
 !> \param basis_type ...
 ! **************************************************************************************************
    SUBROUTINE get_qs_kind_set(qs_kind_set, &
@@ -797,6 +801,7 @@ CONTAINS
                               maxcgf, maxsgf, maxco, maxco_proj, maxgtops, maxlgto, maxlprj, maxnset, maxsgf_set, &
                               ncgf, npgf, nset, nsgf, nshell, maxpol, maxlppl, maxlppnl, maxppnl, &
                               nelectron, maxder, max_ngrid_rad, max_sph_harm, maxg_iso_not0, lmax_rho0, &
+                              basis_rcut, &
                               basis_type)
 
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
@@ -808,6 +813,7 @@ CONTAINS
       INTEGER, INTENT(IN), OPTIONAL                      :: maxder
       INTEGER, INTENT(OUT), OPTIONAL                     :: max_ngrid_rad, max_sph_harm, &
                                                             maxg_iso_not0, lmax_rho0
+      REAL(KIND=dp), INTENT(OUT), OPTIONAL               :: basis_rcut
       CHARACTER(len=*), OPTIONAL                         :: basis_type
 
       CHARACTER(len=*), PARAMETER :: routineN = 'get_qs_kind_set', &
@@ -818,7 +824,7 @@ CONTAINS
                                                             max_iso_not0, max_s_harm, n, &
                                                             ngrid_rad, nkind, nrloc(10)
       LOGICAL                                            :: dft_plus_u_atom, paw_atom
-      REAL(KIND=dp)                                      :: zeff, zeff_correction
+      REAL(KIND=dp)                                      :: brcut, zeff, zeff_correction
       TYPE(all_potential_type), POINTER                  :: all_potential
       TYPE(gth_potential_type), POINTER                  :: gth_potential
       TYPE(gto_basis_set_type), POINTER                  :: tmp_basis_set
@@ -864,6 +870,7 @@ CONTAINS
          IF (PRESENT(max_ngrid_rad)) max_ngrid_rad = 0
          IF (PRESENT(max_sph_harm)) max_sph_harm = 0
          IF (PRESENT(lmax_rho0)) lmax_rho0 = 0
+         IF (PRESENT(basis_rcut)) basis_rcut = 0.0_dp
 
          nkind = SIZE(qs_kind_set)
          DO ikind = 1, nkind
@@ -1054,6 +1061,16 @@ CONTAINS
                   zeff_correction = 0.0_dp
                END IF
                nelectron = nelectron+qs_kind_set(ikind)%natom*NINT(zeff-zeff_correction)
+            END IF
+
+            IF (PRESENT(basis_rcut)) THEN
+               IF (ASSOCIATED(tmp_basis_set)) THEN
+                  CALL get_gto_basis_set(gto_basis_set=tmp_basis_set, kind_radius=brcut)
+                  basis_rcut = MAX(basis_rcut, brcut)
+               ELSE IF (ASSOCIATED(qs_kind%dftb_parameter)) THEN
+                  CALL get_dftb_atom_param(dftb_parameter=dftb_parameter, cutoff=brcut)
+                  basis_rcut = MAX(basis_rcut, brcut)
+               END IF
             END IF
 
             IF (PRESENT(all_potential_present)) THEN
@@ -2469,11 +2486,64 @@ CONTAINS
             qs_kind => qs_kind_set(ikind)
             CALL check_qs_kind(qs_kind, dft_control, subsys_section)
          END DO
+         IF (dft_control%qs_control%xtb) THEN
+            CALL write_xtb_kab_param(qs_kind_set, subsys_section)
+         END IF
       ELSE
          CPABORT("The pointer qs_kind_set is not associated")
       END IF
       CALL timestop(handle)
    END SUBROUTINE check_qs_kind_set
+
+! **************************************************************************************************
+!> \brief ...
+!> \param qs_kind_set ...
+!> \param subsys_section ...
+! **************************************************************************************************
+   SUBROUTINE write_xtb_kab_param(qs_kind_set, subsys_section)
+
+      TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
+      TYPE(section_vals_type), POINTER                   :: subsys_section
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'write_xtb_kab_param', &
+         routineP = moduleN//':'//routineN
+
+      CHARACTER(LEN=default_string_length)               :: aname, bname
+      INTEGER                                            :: ikind, io_unit, jkind, nkind, za, zb
+      TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(qs_kind_type), POINTER                        :: qs_kinda, qs_kindb
+      TYPE(xtb_atom_type), POINTER                       :: xtb_parameter_a, xtb_parameter_b
+
+      NULLIFY (logger)
+      logger => cp_get_default_logger()
+      IF (BTEST(cp_print_key_should_output(logger%iter_info, subsys_section, &
+                                           "PRINT%KINDS/POTENTIAL"), cp_p_file)) THEN
+
+         io_unit = cp_print_key_unit_nr(logger, subsys_section, "PRINT%KINDS", extension=".Log")
+         IF (io_unit > 0) THEN
+
+            WRITE (io_unit, "(/,T2,A)") "xTB| Kab parameters"
+            nkind = SIZE(qs_kind_set)
+            DO ikind = 1, nkind
+               qs_kinda => qs_kind_set(ikind)
+               CALL get_qs_kind(qs_kinda, xtb_parameter=xtb_parameter_a)
+               CALL get_xtb_atom_param(xtb_parameter_a, aname=aname, z=za)
+               DO jkind = ikind, nkind
+                  qs_kindb => qs_kind_set(jkind)
+                  CALL get_qs_kind(qs_kindb, xtb_parameter=xtb_parameter_b)
+                  CALL get_xtb_atom_param(xtb_parameter_b, aname=bname, z=zb)
+                  WRITE (io_unit, "(A,T10,A15,T25,A15,T71,F10.3)") &
+                     "    Kab:", TRIM(aname), TRIM(bname), xtb_set_kab(za, zb)
+               END DO
+            END DO
+            WRITE (io_unit, *)
+
+         END IF
+
+         CALL cp_print_key_finished_output(io_unit, logger, subsys_section, "PRINT%KINDS")
+      END IF
+
+   END SUBROUTINE write_xtb_kab_param
 
 ! **************************************************************************************************
 !> \brief Set the components of an atomic kind data set.

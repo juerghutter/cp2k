@@ -34,25 +34,23 @@ MODULE xtb_matrices
                                               cp_print_key_should_output,&
                                               cp_print_key_unit_nr
    USE cp_para_types,                   ONLY: cp_para_env_type
-   USE dbcsr_api,                       ONLY: dbcsr_add,&
-                                              dbcsr_copy,&
-                                              dbcsr_create,&
-                                              dbcsr_finalize,&
-                                              dbcsr_get_block_p,&
-                                              dbcsr_multiply,&
-                                              dbcsr_p_type,&
-                                              dbcsr_type
+   USE dbcsr_api,                       ONLY: &
+        dbcsr_add, dbcsr_copy, dbcsr_create, dbcsr_finalize, dbcsr_get_block_p, dbcsr_multiply, &
+        dbcsr_p_type, dbcsr_trace, dbcsr_type
+   USE efield_tb_methods,               ONLY: efield_tb_matrix
    USE input_section_types,             ONLY: section_vals_get_subs_vals,&
                                               section_vals_type,&
                                               section_vals_val_get
    USE kinds,                           ONLY: dp
    USE kpoint_types,                    ONLY: get_kpoint_info,&
                                               kpoint_type
-   USE message_passing,                 ONLY: mp_sum
+   USE message_passing,                 ONLY: mp_minloc,&
+                                              mp_sum
    USE mulliken,                        ONLY: ao_charges
    USE orbital_pointers,                ONLY: ncoset
    USE particle_types,                  ONLY: particle_type
    USE qs_dispersion_pairpot,           ONLY: d3_cnumber,&
+                                              d3_cnumber_bcast,&
                                               dcnum_type
    USE qs_dispersion_types,             ONLY: qs_dispersion_type
    USE qs_energy_types,                 ONLY: qs_energy_type
@@ -141,7 +139,8 @@ CONTAINS
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :, :)     :: oint, sint
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :, :, :)  :: kijab
       REAL(KIND=dp), DIMENSION(0:3)                      :: kl
-      REAL(KIND=dp), DIMENSION(3)                        :: fdik, force_ab, force_rr, rij, rik
+      REAL(KIND=dp), DIMENSION(3)                        :: fdik, fdika, fdikb, force_ab, force_rr, &
+                                                            rij, rik
       REAL(KIND=dp), DIMENSION(5)                        :: dpia, dpib, hena, henb, kappaa, kappab, &
                                                             kpolya, kpolyb, pia, pib
       REAL(KIND=dp), DIMENSION(:), POINTER               :: set_radius_a, set_radius_b
@@ -298,6 +297,10 @@ CONTAINS
       CALL d3_cnumber(qs_env, dispersion_env, cnumbers, dcnum, ghost, floating, atomnumber, &
                       calculate_forces, .FALSE.)
       DEALLOCATE (ghost, floating, atomnumber)
+      CALL mp_sum(cnumbers, para_env%group)
+      IF (calculate_forces) THEN
+         CALL d3_cnumber_bcast(dcnum, para_env)
+      END IF
 
       ! Calculate Huckel parameters
       ! Eq 12
@@ -551,11 +554,11 @@ CONTAINS
                                 cb=scon_b(:, sgfb:), nb=n2, mb=nsgfb(jset), fscale=1.0_dp, trans=.FALSE.)
                CALL block_add("IN", owork, nsgfa(iset), nsgfb(jset), sint(:, :, 1), sgfa, sgfb, trans=.FALSE.)
                IF (calculate_forces) THEN
-               DO i = 2, 4
-                  CALL contraction(oint(:, :, i), owork, ca=scon_a(:, sgfa:), na=n1, ma=nsgfa(iset), &
-                                   cb=scon_b(:, sgfb:), nb=n2, mb=nsgfb(jset), fscale=1.0_dp, trans=.FALSE.)
-                  CALL block_add("IN", owork, nsgfa(iset), nsgfb(jset), sint(:, :, i), sgfa, sgfb, trans=.FALSE.)
-               END DO
+                  DO i = 2, 4
+                     CALL contraction(oint(:, :, i), owork, ca=scon_a(:, sgfa:), na=n1, ma=nsgfa(iset), &
+                                      cb=scon_b(:, sgfb:), nb=n2, mb=nsgfb(jset), fscale=1.0_dp, trans=.FALSE.)
+                     CALL block_add("IN", owork, nsgfa(iset), nsgfb(jset), sint(:, :, i), sgfa, sgfb, trans=.FALSE.)
+                  END DO
                END IF
             END DO
          END DO
@@ -568,12 +571,16 @@ CONTAINS
                   force_ab(i) = SUM(sint(:, :, i+1)*TRANSPOSE(wblock(:, :)))
                END IF
             END DO
-            force(ikind)%overlap(:, atom_a) = force(ikind)%overlap(:, atom_a)-2.0_dp*force_ab(:)
-            force(jkind)%overlap(:, atom_b) = force(jkind)%overlap(:, atom_b)+2.0_dp*force_ab(:)
+            f1 = 2.0_dp
+            force(ikind)%overlap(:, atom_a) = force(ikind)%overlap(:, atom_a)-f1*force_ab(:)
+            force(jkind)%overlap(:, atom_b) = force(jkind)%overlap(:, atom_b)+f1*force_ab(:)
             IF (use_virial) THEN
-               f0 = 2.0_dp
-               IF (iatom == jatom) f0 = 1.0_dp
-               CALL virial_pair_force(virial%pv_virial, -f0, force_ab, rij)
+               IF (iatom == jatom) f1 = 1.0_dp
+               CALL virial_pair_force(virial%pv_virial, -f1, force_ab, rij)
+               IF (atprop%stress) THEN
+                  CALL virial_pair_force(atprop%atstress(:, :, iatom), -0.5_dp*f1, force_ab, rij)
+                  CALL virial_pair_force(atprop%atstress(:, :, jatom), -0.5_dp*f1, force_ab, rij)
+               END IF
             END IF
          END IF
          ! update S matrix
@@ -666,8 +673,10 @@ CONTAINS
                      END IF
                   END DO
                END DO
-               fhua = 2.0_dp*fhua
-               fhub = 2.0_dp*fhub
+               IF (iatom /= jatom) THEN
+                  fhua = 2.0_dp*fhua
+                  fhub = 2.0_dp*fhub
+               END IF
             END IF
             ! iatom
             atom_a = atom_of_kind(iatom)
@@ -677,18 +686,19 @@ CONTAINS
                atom_c = atom_of_kind(katom)
                rik = dcnum(iatom)%rik(:, i)
                drk = SQRT(SUM(rik(:)**2))
-               fdik(:) = fhua*dcnum(iatom)%dvals(i)*rik(:)/drk
-               force(ikind)%all_potential(:, atom_a) = force(ikind)%all_potential(:, atom_a)-fdik(:)
-               force(kkind)%all_potential(:, atom_c) = force(kkind)%all_potential(:, atom_c)+fdik(:)
-               fdik(:) = fhud*dcnum(iatom)%dvals(i)*rik(:)/drk
-               force(ikind)%all_potential(:, atom_a) = force(ikind)%all_potential(:, atom_a)-fdik(:)
-               force(kkind)%all_potential(:, atom_c) = force(kkind)%all_potential(:, atom_c)+fdik(:)
+               fdika(:) = fhua*dcnum(iatom)%dvals(i)*rik(:)/drk
+               force(ikind)%all_potential(:, atom_a) = force(ikind)%all_potential(:, atom_a)-fdika(:)
+               force(kkind)%all_potential(:, atom_c) = force(kkind)%all_potential(:, atom_c)+fdika(:)
+               fdikb(:) = fhud*dcnum(iatom)%dvals(i)*rik(:)/drk
+               force(ikind)%all_potential(:, atom_a) = force(ikind)%all_potential(:, atom_a)-fdikb(:)
+               force(kkind)%all_potential(:, atom_c) = force(kkind)%all_potential(:, atom_c)+fdikb(:)
                IF (use_virial) THEN
+                  fdik = fdika+fdikb
                   CALL virial_pair_force(virial%pv_virial, -1._dp, fdik, rik)
-               END IF
-               IF (atprop%stress) THEN
-                  CALL virial_pair_force(atprop%atstress(:, :, iatom), -0.5_dp, fdik, rik)
-                  CALL virial_pair_force(atprop%atstress(:, :, katom), -0.5_dp, fdik, rik)
+                  IF (atprop%stress) THEN
+                     CALL virial_pair_force(atprop%atstress(:, :, iatom), -0.5_dp, fdik, rik)
+                     CALL virial_pair_force(atprop%atstress(:, :, katom), -0.5_dp, fdik, rik)
+                  END IF
                END IF
             END DO
             ! jatom
@@ -704,10 +714,10 @@ CONTAINS
                force(kkind)%all_potential(:, atom_c) = force(kkind)%all_potential(:, atom_c)+fdik(:)
                IF (use_virial) THEN
                   CALL virial_pair_force(virial%pv_virial, -1._dp, fdik, rik)
-               END IF
-               IF (atprop%stress) THEN
-                  CALL virial_pair_force(atprop%atstress(:, :, iatom), -0.5_dp, fdik, rik)
-                  CALL virial_pair_force(atprop%atstress(:, :, katom), -0.5_dp, fdik, rik)
+                  IF (atprop%stress) THEN
+                     CALL virial_pair_force(atprop%atstress(:, :, iatom), -0.5_dp, fdik, rik)
+                     CALL virial_pair_force(atprop%atstress(:, :, katom), -0.5_dp, fdik, rik)
+                  END IF
                END IF
             END DO
             IF (diagblock) THEN
@@ -754,14 +764,6 @@ CONTAINS
                END DO
                DEALLOCATE (dfblock)
             END IF
-            IF (use_virial) THEN
-               CALL virial_pair_force(virial%pv_virial, -f0, force_ab, rij)
-               IF (atprop%stress) THEN
-                  f1 = 0.5_dp*f0
-                  CALL virial_pair_force(atprop%atstress(:, :, iatom), -f1, force_ab, rij)
-                  CALL virial_pair_force(atprop%atstress(:, :, jatom), -f1, force_ab, rij)
-               END IF
-            END IF
          END IF
 
          IF (calculate_forces) THEN
@@ -770,6 +772,15 @@ CONTAINS
             IF (irow == iatom) force_ab = -force_ab
             force(ikind)%all_potential(:, atom_a) = force(ikind)%all_potential(:, atom_a)-force_ab(:)
             force(jkind)%all_potential(:, atom_b) = force(jkind)%all_potential(:, atom_b)+force_ab(:)
+            IF (use_virial) THEN
+               f1 = 1.0_dp
+               IF (iatom == jatom) f1 = 0.5_dp
+               CALL virial_pair_force(virial%pv_virial, -f1, force_ab, rij)
+               IF (atprop%stress) THEN
+                  CALL virial_pair_force(atprop%atstress(:, :, iatom), -0.5_dp*f1, force_ab, rij)
+                  CALL virial_pair_force(atprop%atstress(:, :, jatom), -0.5_dp*f1, force_ab, rij)
+               END IF
+            END IF
          END IF
 
          DEALLOCATE (oint, owork, sint)
@@ -789,15 +800,15 @@ CONTAINS
                force_rr(3) = derepij*rij(3)/dr
                atom_a = atom_of_kind(iatom)
                atom_b = atom_of_kind(jatom)
-               force(ikind)%repulsive(:, atom_a) = &
-                  force(ikind)%repulsive(:, atom_a)-force_rr(:)
-               force(jkind)%repulsive(:, atom_b) = &
-                  force(jkind)%repulsive(:, atom_b)+force_rr(:)
+               force(ikind)%repulsive(:, atom_a) = force(ikind)%repulsive(:, atom_a)-force_rr(:)
+               force(jkind)%repulsive(:, atom_b) = force(jkind)%repulsive(:, atom_b)+force_rr(:)
                IF (use_virial) THEN
-                  CALL virial_pair_force(virial%pv_virial, -1._dp, force_rr, rij)
+                  f1 = 1.0_dp
+                  IF (iatom == jatom) f1 = 0.5_dp
+                  CALL virial_pair_force(virial%pv_virial, -f1, force_rr, rij)
                   IF (atprop%stress) THEN
-                     CALL virial_pair_force(atprop%atstress(:, :, iatom), -0.5_dp, force_rr, rij)
-                     CALL virial_pair_force(atprop%atstress(:, :, jatom), -0.5_dp, force_rr, rij)
+                     CALL virial_pair_force(atprop%atstress(:, :, iatom), -0.5_dp*f1, force_rr, rij)
+                     CALL virial_pair_force(atprop%atstress(:, :, jatom), -0.5_dp*f1, force_rr, rij)
                   END IF
                END IF
             END IF
@@ -815,6 +826,7 @@ CONTAINS
 
       exb = 0.0_dp
       IF (xb_inter) THEN
+         CALL xb_neighbors(neighbor_atoms, para_env)
          CALL xb_interaction(exb, neighbor_atoms, atom_of_kind, kind_of, sab_xb, kx, kx2, rcab, &
                              calculate_forces, use_virial, force, virial, atprop)
       END IF
@@ -918,17 +930,18 @@ CONTAINS
 
       INTEGER                                            :: atom_a, handle, iatom, ikind, img, &
                                                             iounit, is, ispin, natom, natorb, &
-                                                            nkind, ns, nspins
+                                                            nimg, nkind, ns, nsgf, nspins
       INTEGER, DIMENSION(25)                             :: lao
       INTEGER, DIMENSION(5)                              :: occ
-      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: aocharge, mcharge
-      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: charges
+      REAL(KIND=dp)                                      :: pc_ener, qmmm_el
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: mcharge
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: aocg, charges
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(cp_para_env_type), POINTER                    :: para_env
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mo_derivs
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_p1, mo_derivs, p_matrix
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: ks_matrix, matrix_h, matrix_p, matrix_s
-      TYPE(dbcsr_type), POINTER                          :: mo_coeff
+      TYPE(dbcsr_type), POINTER                          :: mo_coeff, s_matrix
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(mo_set_p_type), DIMENSION(:), POINTER         :: mo_array
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
@@ -960,52 +973,79 @@ CONTAINS
 
       scf_section => section_vals_get_subs_vals(qs_env%input, "DFT%SCF")
       nspins = dft_control%nspins
+      nimg = dft_control%nimages
       CPASSERT(ASSOCIATED(matrix_h))
       CPASSERT(ASSOCIATED(rho))
       CPASSERT(SIZE(ks_matrix) > 0)
 
       DO ispin = 1, nspins
-         DO img = 1, SIZE(ks_matrix, 2)
+         DO img = 1, nimg
             ! copy the core matrix into the fock matrix
             CALL dbcsr_copy(ks_matrix(ispin, img)%matrix, matrix_h(1, img)%matrix)
          END DO
       END DO
 
-      ! Mulliken charges
-      CALL get_qs_env(qs_env=qs_env, particle_set=particle_set, matrix_s_kp=matrix_s)
-      CALL qs_rho_get(rho, rho_ao_kp=matrix_p)
-      natom = SIZE(particle_set)
-      ALLOCATE (mcharge(natom), charges(natom, 5))
-      charges = 0.0_dp
-      nkind = SIZE(atomic_kind_set)
-      DO ikind = 1, nkind
-         CALL get_atomic_kind(atomic_kind_set(ikind), natom=natom)
-         CALL get_qs_kind(qs_kind_set(ikind), xtb_parameter=xtb_kind)
-         CALL get_xtb_atom_param(xtb_kind, natorb=natorb, lao=lao, occupation=occ)
-         ALLOCATE (aocharge(natorb))
-         DO iatom = 1, natom
-            atom_a = atomic_kind_set(ikind)%atom_list(iatom)
-            CALL ao_charges(matrix_p, matrix_s, aocharge, atom_a, para_env)
-            charges(atom_a, :) = REAL(occ(:), KIND=dp)
-            DO is = 1, natorb
-               ns = lao(is)+1
-               charges(atom_a, ns) = charges(atom_a, ns)-aocharge(is)
+      IF (dft_control%qs_control%xtb_control%coulomb_interaction) THEN
+         ! Mulliken charges
+         CALL get_qs_env(qs_env=qs_env, particle_set=particle_set, matrix_s_kp=matrix_s)
+         CALL qs_rho_get(rho, rho_ao_kp=matrix_p)
+         natom = SIZE(particle_set)
+         ALLOCATE (mcharge(natom), charges(natom, 5))
+         charges = 0.0_dp
+         nkind = SIZE(atomic_kind_set)
+         CALL get_qs_kind_set(qs_kind_set, nsgf=nsgf)
+         natom = SIZE(particle_set)
+         ALLOCATE (aocg(nsgf, natom))
+         aocg = 0.0_dp
+         IF (nimg > 1) THEN
+            CALL ao_charges(matrix_p, matrix_s, aocg, para_env)
+         ELSE
+            p_matrix => matrix_p(:, 1)
+            s_matrix => matrix_s(1, 1)%matrix
+            CALL ao_charges(matrix_p, matrix_s, aocg, para_env)
+         END IF
+         DO ikind = 1, nkind
+            CALL get_atomic_kind(atomic_kind_set(ikind), natom=natom)
+            CALL get_qs_kind(qs_kind_set(ikind), xtb_parameter=xtb_kind)
+            CALL get_xtb_atom_param(xtb_kind, natorb=natorb, lao=lao, occupation=occ)
+            DO iatom = 1, natom
+               atom_a = atomic_kind_set(ikind)%atom_list(iatom)
+               charges(atom_a, :) = REAL(occ(:), KIND=dp)
+               DO is = 1, natorb
+                  ns = lao(is)+1
+                  charges(atom_a, ns) = charges(atom_a, ns)-aocg(is, atom_a)
+               END DO
+               mcharge(atom_a) = SUM(charges(atom_a, :))
             END DO
-            mcharge(atom_a) = SUM(charges(atom_a, :))
          END DO
-         DEALLOCATE (aocharge)
-      END DO
+         DEALLOCATE (aocg)
+!deb
 
-      CALL build_xtb_coulomb(qs_env, ks_matrix, rho, charges, mcharge, energy, &
-                             calculate_forces, just_energy)
+         CALL build_xtb_coulomb(qs_env, ks_matrix, rho, charges, mcharge, energy, &
+                                calculate_forces, just_energy)
 
-      DEALLOCATE (mcharge, charges)
+         CALL efield_tb_matrix(qs_env, ks_matrix, rho, mcharge, energy, calculate_forces, just_energy)
 
-      IF (qs_env%qmmm) THEN
-         CPABORT("QMMM with xTB not implemented")
+         DEALLOCATE (mcharge, charges)
       END IF
 
-      energy%total = energy%core+energy%hartree+ &
+      IF (qs_env%qmmm) THEN
+         CPASSERT(SIZE(ks_matrix, 2) == 1)
+         DO ispin = 1, nspins
+            ! If QM/MM sumup the 1el Hamiltonian
+            CALL dbcsr_add(ks_matrix(ispin, 1)%matrix, qs_env%ks_qmmm_env%matrix_h(1)%matrix, &
+                           1.0_dp, 1.0_dp)
+            CALL qs_rho_get(rho, rho_ao=matrix_p1)
+            ! Compute QM/MM Energy
+            CALL dbcsr_trace(qs_env%ks_qmmm_env%matrix_h(1)%matrix, &
+                             matrix_p1(ispin)%matrix, trace=qmmm_el)
+            energy%qmmm_el = energy%qmmm_el+qmmm_el
+         END DO
+         pc_ener = qs_env%ks_qmmm_env%pc_ener
+         energy%qmmm_el = energy%qmmm_el+pc_ener
+      END IF
+
+      energy%total = energy%core+energy%hartree+energy%efield+ &
                      energy%repulsive+energy%dispersion+energy%dftb3
 
       iounit = cp_print_key_unit_nr(logger, scf_section, "PRINT%DETAILED_ENERGY", &
@@ -1016,6 +1056,10 @@ CONTAINS
             "Zeroth order Hamiltonian energy:               ", energy%core, &
             "Charge fluctuation energy:                     ", energy%hartree, &
             "London dispersion energy:                      ", energy%dispersion
+         IF (ABS(energy%efield) > 1.e-12_dp) THEN
+            WRITE (UNIT=iounit, FMT="(T9,A,T60,F20.10)") &
+               "Electric field interaction energy:             ", energy%efield
+         END IF
          WRITE (UNIT=iounit, FMT="(T9,A,T60,F20.10)") &
             "DFTB3 3rd Order Energy Correction              ", energy%dftb3
       END IF
@@ -1039,6 +1083,56 @@ CONTAINS
 
    END SUBROUTINE build_xtb_ks_matrix
 
+! **************************************************************************************************
+!> \brief  Distributes the neighbor atom information to all processors
+!>
+!> \param neighbor_atoms ...
+!> \param para_env ...
+!> \par History
+!>       1.2019 JGH
+!> \version 1.1
+! **************************************************************************************************
+   SUBROUTINE xb_neighbors(neighbor_atoms, para_env)
+      TYPE(neighbor_atoms_type), DIMENSION(:), &
+         INTENT(INOUT)                                   :: neighbor_atoms
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'xb_neighbors', routineP = moduleN//':'//routineN
+
+      INTEGER                                            :: iatom, ikind, natom, nkind
+      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: matom
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: dmloc
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: coord
+
+      nkind = SIZE(neighbor_atoms)
+      DO ikind = 1, nkind
+         IF (ASSOCIATED(neighbor_atoms(ikind)%rab)) THEN
+            natom = SIZE(neighbor_atoms(ikind)%rab)
+            ALLOCATE (dmloc(2*natom), matom(natom), coord(3, natom))
+            dmloc = 0.0_dp
+            DO iatom = 1, natom
+               dmloc(2*iatom-1) = neighbor_atoms(ikind)%rab(iatom)
+               dmloc(2*iatom) = REAL(para_env%mepos, KIND=dp)
+            END DO
+            CALL mp_minloc(dmloc, para_env%group)
+            coord = 0.0_dp
+            matom = 0
+            DO iatom = 1, natom
+               neighbor_atoms(ikind)%rab(iatom) = dmloc(2*iatom-1)
+               IF (NINT(dmloc(2*iatom)) == para_env%mepos) THEN
+                  coord(1:3, iatom) = neighbor_atoms(ikind)%coord(1:3, iatom)
+                  matom(iatom) = neighbor_atoms(ikind)%katom(iatom)
+               END IF
+            END DO
+            CALL mp_sum(coord, para_env%group)
+            neighbor_atoms(ikind)%coord(1:3, :) = coord(1:3, :)
+            CALL mp_sum(matom, para_env%group)
+            neighbor_atoms(ikind)%katom(:) = matom(:)
+            DEALLOCATE (dmloc, matom, coord)
+         END IF
+      END DO
+
+   END SUBROUTINE xb_neighbors
 ! **************************************************************************************************
 !> \brief  Computes the interaction term between Br/I/At and donor atoms
 !>
@@ -1097,6 +1191,8 @@ CONTAINS
          ! ikind, iatom : Halogen
          ! jkind, jatom : Donor
          atom_a = atom_of_kind(iatom)
+         katom = neighbor_atoms(ikind)%katom(atom_a)
+         IF (katom == 0) CYCLE
          dr = SQRT(rij(1)**2+rij(2)**2+rij(3)**2)
          ddr = rcab(ikind, jkind)/dr
          ddr6 = ddr**6
@@ -1120,7 +1216,6 @@ CONTAINS
          END IF
          !
          IF (calculate_forces) THEN
-            katom = neighbor_atoms(ikind)%katom(atom_a)
             kkind = kind_of(katom)
             atom_b = atom_of_kind(jatom)
             atom_c = atom_of_kind(katom)

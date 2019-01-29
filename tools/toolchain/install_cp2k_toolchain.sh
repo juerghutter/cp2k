@@ -888,6 +888,9 @@ case $GPUVER in
     P100)
         export ARCH_NUM=60
         ;;
+    no)
+        export ARCH_NUM=no
+        ;;
     *)
         report_error ${LINENO} \
         "--gpu-ver currently only supports K20X, K40, K80, P100 as options"
@@ -1096,7 +1099,7 @@ LIBS="${CP_LIBS} -lstdc++"
 # CUDA handling
 CUDA_LIBS="-lcudart -lnvrtc -lcuda -lcufft -lcublas -lrt IF_DEBUG(-lnvToolsExt|)"
 CUDA_DFLAGS="-D__ACC -D__DBCSR_ACC -D__PW_CUDA IF_DEBUG(-D__CUDA_PROFILING|)"
-if [ "$ENABLE_CUDA" = __TRUE__ ] ; then
+if [ "${ENABLE_CUDA}" = __TRUE__ ] && [ "${GPUVER}" != no ] ; then
     LIBS="${LIBS} IF_CUDA(${CUDA_LIBS}|)"
     DFLAGS="IF_CUDA(${CUDA_DFLAGS}|) ${DFLAGS}"
     NVFLAGS="-arch sm_${ARCH_NUM} -Xcompiler='-fopenmp' --std=c++11 \$(DFLAGS)"
@@ -1214,9 +1217,9 @@ if [ "$ENABLE_CUDA" = __TRUE__ ] ; then
 fi
 # valgrind enabled arch files
 if [ "$ENABLE_VALGRIND" = __TRUE__ ] ; then
-      gen_arch_file "local_valgrind.sdbg"      VALGRIND
+      gen_arch_file "local_valgrind.sopt"      VALGRIND
     [ "$MPI_MODE" != no ] && \
-      gen_arch_file "local_valgrind.pdbg"      VALGRIND MPI
+      gen_arch_file "local_valgrind.popt"      VALGRIND MPI
 fi
 # coverage enabled arch files
 if [ "$ENABLE_COVERAGE" = __TRUE__ ]; then

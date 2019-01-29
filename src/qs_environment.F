@@ -628,6 +628,57 @@ CONTAINS
             CALL ewald_env_set(ewald_env, poisson_section=poisson_section)
             ewald_section => section_vals_get_subs_vals(poisson_section, "EWALD")
             print_section => section_vals_get_subs_vals(qs_env%input, "PRINT%GRID_INFORMATION")
+            CALL get_qs_kind_set(qs_kind_set, basis_rcut=ewald_rcut)
+            CALL read_ewald_section(ewald_env, ewald_section)
+            CALL ewald_pw_create(ewald_pw, ewald_env, cell, cell_ref, print_section=print_section)
+            CALL set_qs_env(qs_env, ewald_env=ewald_env, ewald_pw=ewald_pw)
+            CALL ewald_env_release(ewald_env)
+            CALL ewald_pw_release(ewald_pw)
+         END IF
+      ELSEIF (dft_control%qs_control%method_id == do_method_xtb) THEN
+         !   *** Read xTB parameter file ***
+         xtb_control => dft_control%qs_control%xtb_control
+         NULLIFY (ewald_env, ewald_pw)
+         CALL get_qs_env(qs_env, nkind=nkind)
+         DO ikind = 1, nkind
+            qs_kind => qs_kind_set(ikind)
+            ! Setup proper xTB parameters
+            CPASSERT(.NOT. ASSOCIATED(qs_kind%xtb_parameter))
+            CALL allocate_xtb_atom_param(qs_kind%xtb_parameter)
+            ! Set default parameters
+            CALL get_qs_kind(qs_kind, element_symbol=element_symbol)
+            CALL xtb_parameters_init(qs_kind%xtb_parameter, element_symbol, &
+                                     xtb_control%parameter_file_path, xtb_control%parameter_file_name, &
+                                     para_env)
+            ! Read specific parameters from input
+            xtb_section => section_vals_get_subs_vals(qs_section, "xTB")
+            CALL xtb_parameters_read(qs_kind%xtb_parameter, element_symbol, xtb_section, para_env)
+            ! set dependent parameters
+            CALL xtb_parameters_set(qs_kind%xtb_parameter)
+            ! Generate basis set
+            NULLIFY (tmp_basis_set)
+            IF (qs_kind%xtb_parameter%z == 1) THEN
+               ! special case hydrogen
+               ngauss = xtb_control%h_sto_ng
+            ELSE
+               ngauss = xtb_control%sto_ng
+            END IF
+            CALL init_xtb_basis(qs_kind%xtb_parameter, tmp_basis_set, ngauss)
+            CALL add_basis_set_to_container(qs_kind%basis_sets, tmp_basis_set, "ORB")
+            ! potential
+            zeff_correction = 0.0_dp
+            CALL init_potential(qs_kind%all_potential, itype="BARE", &
+                                zeff=qs_kind%xtb_parameter%zeff, zeff_correction=zeff_correction)
+            qs_kind%xtb_parameter%zeff = qs_kind%xtb_parameter%zeff-zeff_correction
+         END DO
+         !
+         ! check for Ewald
+         IF (xtb_control%do_ewald) THEN
+            CALL ewald_env_create(ewald_env, para_env)
+            poisson_section => section_vals_get_subs_vals(dft_section, "POISSON")
+            CALL ewald_env_set(ewald_env, poisson_section=poisson_section)
+            ewald_section => section_vals_get_subs_vals(poisson_section, "EWALD")
+            print_section => section_vals_get_subs_vals(qs_env%input, "PRINT%GRID_INFORMATION")
             CALL read_ewald_section(ewald_env, ewald_section)
             CALL ewald_pw_create(ewald_pw, ewald_env, cell, cell_ref, print_section=print_section)
             CALL set_qs_env(qs_env, ewald_env=ewald_env, ewald_pw=ewald_pw)
