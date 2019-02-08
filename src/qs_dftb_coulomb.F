@@ -304,10 +304,12 @@ CONTAINS
          CALL get_qs_env(qs_env=qs_env, &
                          local_particles=local_particles)
          DO ikind = 1, SIZE(local_particles%n_el)
+            CALL get_qs_kind(qs_kind_set(ikind), dftb_parameter=dftb_kind)
+            CALL get_dftb_atom_param(dftb_kind, zeff=zeff)
             DO ia = 1, local_particles%n_el(ikind)
                iatom = local_particles%list(ikind)%array(ia)
                atprop%atecoul(iatom) = atprop%atecoul(iatom)+ &
-                                       0.5_dp*mcharge(iatom)*gmcharge(iatom, 1)
+                                       0.5_dp*zeff*gmcharge(iatom, 1)
             END DO
          END DO
       END IF
