@@ -7,7 +7,6 @@
 !> \brief Utilities to set up the control types
 ! **************************************************************************************************
 MODULE cp_control_utils
-!qxtb  citation
    USE bibliography,                    ONLY: &
         Andreussi2012, Dewar1977, Dewar1985, Elstner1998, Fattebert2002, Grimme2017, Hu2007, &
         Krack2000, Lippert1997, Lippert1999, Porezag1995, Repasky2002, Rocha2006, Schenter2008, &
