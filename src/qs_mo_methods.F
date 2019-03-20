@@ -927,7 +927,7 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'make_mo_eig', routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, homo, ispin, nmo, output_unit
+      INTEGER                                            :: handle, homo, ispin, nmo, iounut
       REAL(KIND=dp), DIMENSION(:), POINTER               :: mo_eigenvalues
       TYPE(cp_fm_type), POINTER                          :: mo_coeff
       TYPE(dbcsr_type), POINTER                          :: mo_coeff_deriv
@@ -935,17 +935,14 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       NULLIFY (mo_coeff_deriv, mo_coeff, mo_eigenvalues)
-      output_unit = cp_logger_get_default_io_unit()
+      iounut = cp_logger_get_default_io_unit()
 
       DO ispin = 1, nspins
          CALL get_mo_set(mo_set=mos(ispin)%mo_set, mo_coeff=mo_coeff, &
                          eigenvalues=mo_eigenvalues, homo=homo, nmo=nmo)
-         IF (output_unit > 0) WRITE (output_unit, *) " "
-         IF (output_unit > 0) WRITE (output_unit, *) " Eigenvalues of the occupied subspace spin ", ispin
-         !      IF (homo .NE. nmo) THEN
-         !         IF (output_unit>0) WRITE(output_unit,*)" and ",nmo-homo," added MO eigenvalues"
-         !      ENDIF
-         IF (output_unit > 0) WRITE (output_unit, *) "---------------------------------------------"
+         IF (iounut > 0) WRITE (iounut, "(A)") " "
+         IF (iounut > 0) WRITE (iounut, "(T3,A,I1)") "Eigenvalues of the occupied subspace spin ", ispin
+         IF (iounut > 0) WRITE (iounut, "(T3,A)") "---------------------------------------------"
 
          IF (scf_control%use_ot) THEN
             ! Also rotate the OT derivs, since they are needed for force calculations
@@ -961,7 +958,7 @@ CONTAINS
             END IF
 
             CALL calculate_subspace_eigenvalues(mo_coeff, ks_rmpv(ispin)%matrix, mo_eigenvalues, &
-                                                scr=output_unit, ionode=output_unit > 0, do_rotation=.TRUE., &
+                                                scr=iounut, ionode=iounut > 0, do_rotation=.TRUE., &
                                                 co_rotate_dbcsr=mo_coeff_deriv)
 
             ! ** If we do ADMM, we restore the original kohn-sham matrix
@@ -969,11 +966,11 @@ CONTAINS
                CALL admm_uncorrect_for_eigenvalues(ispin, admm_env, ks_rmpv(ispin)%matrix)
             END IF
          ELSE
-            IF (output_unit > 0) WRITE (output_unit, '(4(1X,1F16.8))') mo_eigenvalues(1:homo)
+            IF (iounut > 0) WRITE (iounut, '(5F16.8)') mo_eigenvalues(1:homo)
          END IF
          IF (.NOT. scf_control%diagonalization%mom) &
             CALL set_mo_occupation(mo_set=mos(ispin)%mo_set, smear=scf_control%smear)
-         IF (output_unit > 0) WRITE (output_unit, '(T2,A,F12.6)') &
+         IF (iounut > 0) WRITE (iounut, '(T3,A,F12.6)') &
             "Fermi Energy [eV] :", mos(ispin)%mo_set%mu*evolt
       ENDDO
 

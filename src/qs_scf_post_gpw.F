@@ -238,7 +238,7 @@ CONTAINS
 
       INTEGER                                            :: handle, homo, ispin, min_lumos, n_rep, &
                                                             nhomo, nlumo, nlumo_stm, nlumo_tddft, &
-                                                            nlumos, nmo, output_unit, unit_nr
+                                                            nlumos, nmo, iounit, unit_nr
       INTEGER, DIMENSION(:, :, :), POINTER               :: marked_states
       LOGICAL :: check_write, compute_lumos, do_homo, do_kpoints, do_mo_cubes, do_stm, &
          do_wannier_cubes, has_homo, has_lumo, loc_explicit, loc_print_explicit, my_localized_wfn, &
@@ -278,14 +278,14 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       logger => cp_get_default_logger()
-      output_unit = cp_logger_get_default_io_unit(logger)
+      iounit = cp_logger_get_default_io_unit(logger)
 
       ! Print out the type of wavefunction to distinguish between SCF and post-SCF
       IF (PRESENT(wf_type)) THEN
-         IF (output_unit > 0) THEN
-            WRITE (UNIT=output_unit, FMT='(/,(T1,A))') REPEAT("-", 40)
-            WRITE (UNIT=output_unit, FMT='(/,(T3,A,T19,A,T25,A))') "Properties from ", wf_type, " density"
-            WRITE (UNIT=output_unit, FMT='(/,(T1,A))') REPEAT("-", 40)
+         IF (iounit > 0) THEN
+            WRITE (UNIT=iounit, FMT='(/,(T1,A))') REPEAT("-", 40)
+            WRITE (UNIT=iounit, FMT='(/,(T3,A,T19,A,T25,A))') "Properties from ", wf_type, " density"
+            WRITE (UNIT=iounit, FMT='(/,(T1,A))') REPEAT("-", 40)
          ENDIF
       ENDIF
 
@@ -350,7 +350,7 @@ CONTAINS
       CALL qs_scf_post_charges(input, logger, qs_env)
 
       ! Moments of charge distribution
-      CALL qs_scf_post_moments(input, logger, qs_env, output_unit)
+      CALL qs_scf_post_moments(input, logger, qs_env, iounit)
 
       ! Determine if we need to computer properties using the localized centers
       dft_section => section_vals_get_subs_vals(input, "DFT")
@@ -441,7 +441,7 @@ CONTAINS
                          matrix_ks=ks_rmpv)
          IF ((do_mo_cubes .AND. nhomo /= 0) .OR. do_stm .OR. dft_control%do_tddfpt_calculation) THEN
             IF (dft_control%restricted) THEN
-               IF (output_unit > 0) WRITE (output_unit, *) &
+               IF (iounit > 0) WRITE (iounit, *) &
                   " Unclear how we define MOs in the restricted case ... skipping"
             ELSE
                CALL get_qs_env(qs_env, mo_derivs=mo_derivs)
@@ -477,7 +477,7 @@ CONTAINS
          IF (do_kpoints) THEN
             CPWARN("Localization not implemented for k-point calculations!!")
          ELSEIF (dft_control%restricted) THEN
-            IF (output_unit > 0) WRITE (output_unit, *) &
+            IF (iounit > 0) WRITE (iounit, *) &
                " Unclear how we define MOs / localization in the restricted case ... skipping"
          ELSE
             ALLOCATE (occupied_orbs(dft_control%nspins))
@@ -551,15 +551,17 @@ CONTAINS
                   IF (nlumo .EQ. -1) THEN
                      nlumo = nmo-homo
                   END IF
-                  IF (output_unit > 0) WRITE (output_unit, *) " "
-                  IF (output_unit > 0) WRITE (output_unit, *) " Lowest eigenvalues of the unoccupied subspace spin ", ispin
-                  IF (output_unit > 0) WRITE (output_unit, *) "---------------------------------------------"
-                  IF (output_unit > 0) WRITE (output_unit, '(4(1X,1F16.8))') mo_eigenvalues(homo+1:homo+nlumo)
+                  IF (iounit > 0) WRITE (iounit, "(A)") " "
+                  IF (iounit > 0) WRITE (iounit, "(T3,A,I1)") &
+                                     "Lowest eigenvalues of the unoccupied subspace spin ", ispin
+                  IF (iounit > 0) WRITE (iounit, "(T3,A)") "---------------------------------------------"
+                  IF (iounit > 0) WRITE (iounit, '(5F16.8)') mo_eigenvalues(homo+1:homo+nlumo)
 
                   ! Prints the cube files of UNOCCUPIED ORBITALS
                   CALL get_mo_set(mo_set=mos(ispin)%mo_set, mo_coeff=mo_coeff)
                   CALL qs_scf_post_unocc_cubes(input, dft_section, dft_control, logger, qs_env, &
-                                               mo_coeff, wf_g, wf_r, particles, nlumo, homo, ispin, lumo=homo+1)
+                                               mo_coeff, wf_g, wf_r, particles, nlumo, homo, &
+                                               ispin, lumo=homo+1)
                END IF
             END DO
 
@@ -588,7 +590,8 @@ CONTAINS
                   IF (p_loc_lumo .AND. nlumo .NE. -1) nlumos = MIN(nlumo, nlumos)
                   ! Prints the cube files of UNOCCUPIED ORBITALS
                   CALL qs_scf_post_unocc_cubes(input, dft_section, dft_control, logger, qs_env, &
-                                               unoccupied_orbs(ispin)%matrix, wf_g, wf_r, particles, nlumos, homo, ispin)
+                                               unoccupied_orbs(ispin)%matrix, wf_g, wf_r, &
+                                               particles, nlumos, homo, ispin)
                END IF
             END DO
 
@@ -605,11 +608,12 @@ CONTAINS
             IF (p_loc_lumo) THEN
                ALLOCATE (lumo_localized(dft_control%nspins))
                DO ispin = 1, dft_control%nspins
-                  CALL cp_fm_create(lumo_localized(ispin)%matrix, unoccupied_orbs(ispin)%matrix%matrix_struct)
+                  CALL cp_fm_create(lumo_localized(ispin)%matrix, &
+                                    unoccupied_orbs(ispin)%matrix%matrix_struct)
                   CALL cp_fm_to_fm(unoccupied_orbs(ispin)%matrix, lumo_localized(ispin)%matrix)
                END DO
-               CALL qs_loc_init(qs_env, qs_loc_env_lumo, localize_section, lumo_localized, do_homo, do_mo_cubes, &
-                                evals=unoccupied_evals)
+               CALL qs_loc_init(qs_env, qs_loc_env_lumo, localize_section, &
+                                lumo_localized, do_homo, do_mo_cubes, evals=unoccupied_evals)
                CALL qs_loc_env_init(qs_loc_env_lumo, qs_loc_env_lumo%localized_wfn_control, qs_env, &
                                     loc_coeff=unoccupied_orbs)
                CALL get_localization_info(qs_env, qs_loc_env_lumo, localize_section, &
@@ -622,11 +626,10 @@ CONTAINS
          ENDIF
 
          IF (has_homo .AND. has_lumo) THEN
-            IF (output_unit > 0) WRITE (output_unit, *) " "
             DO ispin = 1, dft_control%nspins
                IF (.NOT. scf_control%smear%do_smear) THEN
                   gap = homo_lumo(ispin, 2)-homo_lumo(ispin, 1)
-                  IF (output_unit > 0) WRITE (output_unit, '(T2,A,F12.6)') &
+                  IF (iounit > 0) WRITE (iounit, '(T3,A,F12.6)') &
                      "HOMO - LUMO gap [eV] :", gap*evolt
                END IF
             ENDDO
@@ -651,7 +654,7 @@ CONTAINS
       ELSE
          CALL get_qs_env(qs_env, matrix_s=matrix_s)
          CALL wfn_mix(mos, particle_set, dft_section, qs_kind_set, &
-                      lumo_ptr, scf_env, matrix_s, output_unit, marked_states)
+                      lumo_ptr, scf_env, matrix_s, iounit, marked_states)
          IF (p_loc_lumo) CALL cp_fm_vect_dealloc(lumo_localized)
       END IF
       IF (ASSOCIATED(marked_states)) THEN
@@ -700,7 +703,7 @@ CONTAINS
       END IF
 
       ! Print coherent X-ray diffraction spectrum
-      CALL qs_scf_post_xray(input, dft_section, logger, qs_env, output_unit)
+      CALL qs_scf_post_xray(input, dft_section, logger, qs_env, iounit)
 
       ! Calculation of Electric Field Gradients
       CALL qs_scf_post_efg(input, logger, qs_env)
@@ -748,7 +751,7 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'make_lumo', routineP = moduleN//':'//routineN
 
       INTEGER                                            :: handle, homo, ispin, n, nao, nmo, &
-                                                            output_unit
+                                                            iounit
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct_tmp
@@ -775,15 +778,17 @@ CONTAINS
                       blacs_env=blacs_env)
 
       logger => cp_get_default_logger()
-      output_unit = cp_logger_get_default_io_unit(logger)
+      iounit = cp_logger_get_default_io_unit(logger)
 
       DO ispin = 1, dft_control%nspins
          NULLIFY (unoccupied_orbs(ispin)%matrix)
          NULLIFY (unoccupied_evals(ispin)%array)
          ! Always write eigenvalues
-         IF (output_unit > 0) WRITE (output_unit, *) " "
-         IF (output_unit > 0) WRITE (output_unit, *) " Lowest Eigenvalues of the unoccupied subspace spin ", ispin
-         IF (output_unit > 0) WRITE (output_unit, FMT='(1X,A)') "-----------------------------------------------------"
+         IF (iounit > 0) WRITE (iounit, "(A)") " "
+         IF (iounit > 0) WRITE (iounit, "(T3,A,I1)") &
+                            " Lowest Eigenvalues of the unoccupied subspace spin ", ispin
+         IF (iounit > 0) WRITE (iounit, FMT='(T3,A)') &
+                            "-----------------------------------------------------"
          CALL get_mo_set(mo_set=mos(ispin)%mo_set, mo_coeff=mo_coeff, homo=homo, nao=nao, nmo=nmo)
          CALL cp_fm_get_info(mo_coeff, nrow_global=n)
          nlumos = MAX(1, MIN(nlumo, nao-nmo))
@@ -819,8 +824,8 @@ CONTAINS
                              size_ortho_space=nmo)
 
          CALL calculate_subspace_eigenvalues(unoccupied_orbs(ispin)%matrix, ks_rmpv(ispin)%matrix, &
-                                             unoccupied_evals(ispin)%array, scr=output_unit, &
-                                             ionode=output_unit > 0)
+                                             unoccupied_evals(ispin)%array, scr=iounit, &
+                                             ionode=iounit > 0)
 
          ! ** If we do ADMM, we restore the original kohn-sham matrix
          IF (dft_control%do_admm) THEN
@@ -979,8 +984,8 @@ CONTAINS
             WRITE (filename, '(a4,I5.5,a1,I1.1)') "WFN_", ivector, "_", ispin
             mpi_io = .TRUE.
             unit_nr = cp_print_key_unit_nr(logger, input, "DFT%PRINT%MO_CUBES", extension=".cube", &
-                                           middle_name=TRIM(filename), file_position=my_pos_cube, log_filename=.FALSE., &
-                                           mpi_io=mpi_io)
+                                           middle_name=TRIM(filename), file_position=my_pos_cube, &
+                                           log_filename=.FALSE., mpi_io=mpi_io)
             WRITE (title, *) "WAVEFUNCTION ", ivector, " spin ", ispin, " i.e. HOMO - ", ivector-homo
             CALL cp_pw_to_cube(wf_r%pw, unit_nr, title, particles=particles, &
                                stride=section_get_ivals(dft_section, "PRINT%MO_CUBES%STRIDE"), mpi_io=mpi_io)
@@ -1083,13 +1088,13 @@ CONTAINS
 !> \param input ...
 !> \param logger ...
 !> \param qs_env the qs_env in which the qs_env lives
-!> \param output_unit ...
+!> \param iounit ...
 ! **************************************************************************************************
-   SUBROUTINE qs_scf_post_moments(input, logger, qs_env, output_unit)
+   SUBROUTINE qs_scf_post_moments(input, logger, qs_env, iounit)
       TYPE(section_vals_type), POINTER                   :: input
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      INTEGER, INTENT(IN)                                :: output_unit
+      INTEGER, INTENT(IN)                                :: iounit
 
       CHARACTER(len=*), PARAMETER :: routineN = 'qs_scf_post_moments', &
          routineP = moduleN//':'//routineN
@@ -1121,14 +1126,14 @@ CONTAINS
                                         print_key_path="DFT%PRINT%MOMENTS", extension=".dat", &
                                         middle_name="moments", log_filename=.FALSE.)
 
-         IF (output_unit > 0) THEN
-            IF (unit_nr /= output_unit) THEN
+         IF (iounit > 0) THEN
+            IF (unit_nr /= iounit) THEN
                INQUIRE (UNIT=unit_nr, NAME=filename)
-               WRITE (UNIT=output_unit, FMT="(/,T2,A,2(/,T3,A),/)") &
+               WRITE (UNIT=iounit, FMT="(/,T2,A,2(/,T3,A),/)") &
                   "MOMENTS", "The electric/magnetic moments are written to file:", &
                   TRIM(filename)
             ELSE
-               WRITE (UNIT=output_unit, FMT="(/,T2,A)") "ELECTRIC/MAGNETIC MOMENTS"
+               WRITE (UNIT=iounit, FMT="(/,T2,A)") "ELECTRIC/MAGNETIC MOMENTS"
             END IF
          END IF
 
@@ -1158,14 +1163,14 @@ CONTAINS
 !> \param dft_section ...
 !> \param logger ...
 !> \param qs_env the qs_env in which the qs_env lives
-!> \param output_unit ...
+!> \param iounit ...
 ! **************************************************************************************************
-   SUBROUTINE qs_scf_post_xray(input, dft_section, logger, qs_env, output_unit)
+   SUBROUTINE qs_scf_post_xray(input, dft_section, logger, qs_env, iounit)
 
       TYPE(section_vals_type), POINTER                   :: input, dft_section
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      INTEGER, INTENT(IN)                                :: output_unit
+      INTEGER, INTENT(IN)                                :: iounit
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'qs_scf_post_xray', &
          routineP = moduleN//':'//routineN
@@ -1189,12 +1194,12 @@ CONTAINS
                                         extension=".dat", &
                                         middle_name="xrd", &
                                         log_filename=.FALSE.)
-         IF (output_unit > 0) THEN
+         IF (iounit > 0) THEN
             INQUIRE (UNIT=unit_nr, NAME=filename)
-            WRITE (UNIT=output_unit, FMT="(/,/,T2,A)") &
+            WRITE (UNIT=iounit, FMT="(/,/,T2,A)") &
                "X-RAY DIFFRACTION SPECTRUM"
-            IF (unit_nr /= output_unit) THEN
-               WRITE (UNIT=output_unit, FMT="(/,T3,A,/,/,T3,A,/)") &
+            IF (unit_nr /= iounit) THEN
+               WRITE (UNIT=iounit, FMT="(/,T3,A,/,/,T3,A,/)") &
                   "The coherent X-ray diffraction spectrum is written to the file:", &
                   TRIM(filename)
             END IF
@@ -1306,7 +1311,7 @@ CONTAINS
 
       CHARACTER(LEN=default_path_length)                 :: filename, mpi_filename, my_pos_cube, &
                                                             title
-      INTEGER                                            :: handle, ispin, output_unit, unit_nr
+      INTEGER                                            :: handle, ispin, iounit, unit_nr
       LOGICAL                                            :: append_cube, do_elf, gapw, mpi_io
       REAL(dp)                                           :: rho_cutoff
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -1319,7 +1324,7 @@ CONTAINS
       TYPE(section_vals_type), POINTER                   :: elf_section
 
       CALL timeset(routineN, handle)
-      output_unit = cp_logger_get_default_io_unit(logger)
+      iounit = cp_logger_get_default_io_unit(logger)
 
       do_elf = .FALSE.
       elf_section => section_vals_get_subs_vals(input, "DFT%PRINT%ELF_CUBE")
@@ -1342,8 +1347,8 @@ CONTAINS
                CALL pw_zero(elf_r(ispin)%pw)
             END DO
 
-            IF (output_unit > 0) THEN
-               WRITE (UNIT=output_unit, FMT="(/,T15,A,/)") &
+            IF (iounit > 0) THEN
+               WRITE (UNIT=iounit, FMT="(/,T15,A,/)") &
                   " ----- ELF is computed on the real space grid -----"
             END IF
             rho_cutoff = section_get_rval(elf_section, "density_cutoff")
@@ -1363,13 +1368,13 @@ CONTAINS
                unit_nr = cp_print_key_unit_nr(logger, input, "DFT%PRINT%ELF_CUBE", extension=".cube", &
                                               middle_name=TRIM(filename), file_position=my_pos_cube, log_filename=.FALSE., &
                                               mpi_io=mpi_io, fout=mpi_filename)
-               IF (output_unit > 0) THEN
+               IF (iounit > 0) THEN
                   IF (.NOT. mpi_io) THEN
                      INQUIRE (UNIT=unit_nr, NAME=filename)
                   ELSE
                      filename = mpi_filename
                   END IF
-                  WRITE (UNIT=output_unit, FMT="(/,T2,A,/,/,T2,A)") &
+                  WRITE (UNIT=iounit, FMT="(/,T2,A,/,/,T2,A)") &
                      "ELF is written in cube file format to the file:", &
                      TRIM(filename)
                END IF
@@ -1544,7 +1549,7 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'write_mo_dependent_results', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, homo, ik, ispin, nmo, output_unit
+      INTEGER                                            :: handle, homo, ik, ispin, nmo, iounit
       LOGICAL                                            :: all_equal, do_kpoints
       REAL(KIND=dp)                                      :: maxocc, s_square, s_square_ideal, &
                                                             total_abs_spin_dens
@@ -1582,7 +1587,7 @@ CONTAINS
                molecule_set, input, particles, subsys, rho_r)
 
       logger => cp_get_default_logger()
-      output_unit = cp_logger_get_default_io_unit(logger)
+      iounit = cp_logger_get_default_io_unit(logger)
 
       CPASSERT(ASSOCIATED(qs_env))
       CALL get_qs_env(qs_env, &
@@ -1704,7 +1709,7 @@ CONTAINS
          CALL pw_copy(rho_r(1)%pw, wf_r%pw)
          CALL pw_axpy(rho_r(2)%pw, wf_r%pw, alpha=-1._dp)
          total_abs_spin_dens = pw_integrate_function(wf_r%pw, oprt="ABS")
-         IF (output_unit > 0) WRITE (UNIT=output_unit, FMT='(/,(T3,A,T61,F20.10))') &
+         IF (iounit > 0) WRITE (UNIT=iounit, FMT='(/,(T3,A,T61,F20.10))') &
             "Integrated absolute spin density  : ", total_abs_spin_dens
          CALL pw_pool_give_back_pw(auxbas_pw_pool, wf_r%pw)
          !
@@ -1729,7 +1734,7 @@ CONTAINS
                END IF
             END DO
             IF (.NOT. all_equal) THEN
-               IF (output_unit > 0) WRITE (UNIT=output_unit, FMT="(T3,A)") &
+               IF (iounit > 0) WRITE (UNIT=iounit, FMT="(T3,A)") &
                   "WARNING: S**2 computation does not yet treat fractional occupied orbitals"
             ELSE
                CALL get_qs_env(qs_env=qs_env, &
@@ -1737,7 +1742,7 @@ CONTAINS
                                energy=energy)
                CALL compute_s_square(mos=mos, matrix_s=matrix_s, s_square=s_square, &
                                      s_square_ideal=s_square_ideal)
-               IF (output_unit > 0) WRITE (UNIT=output_unit, FMT='(T3,A,T51,2F15.6)') &
+               IF (iounit > 0) WRITE (UNIT=iounit, FMT='(T3,A,T51,2F15.6)') &
                   "Ideal and single determinant S**2 : ", s_square_ideal, s_square
                energy%s_square = s_square
             END IF
@@ -1765,7 +1770,7 @@ CONTAINS
       CHARACTER(LEN=default_string_length)               :: name
       INTEGER                                            :: after, handle, i, iat, id, ikind, img, &
                                                             iso, ispin, iw, l, nd(3), ngto, niso, &
-                                                            nkind, np, nr, output_unit, &
+                                                            nkind, np, nr, iounit, &
                                                             print_level, unit_nr
       LOGICAL :: append_cube, do_kpoints, mpi_io, omit_headers, print_it, print_total_density, &
          rho_r_valid, write_ks, write_xc, xrd_interface
@@ -1807,7 +1812,7 @@ CONTAINS
                dft_section, xc_section, input, particles, subsys, matrix_vxc, v_hartree_rspace, vee)
 
       logger => cp_get_default_logger()
-      output_unit = cp_logger_get_default_io_unit(logger)
+      iounit = cp_logger_get_default_io_unit(logger)
 
       CPASSERT(ASSOCIATED(qs_env))
       CALL get_qs_env(qs_env, &
@@ -1889,9 +1894,9 @@ CONTAINS
                                            extension=".xrd", middle_name=TRIM(filename), &
                                            file_position=my_pos_cube, log_filename=.FALSE.)
             ngto = section_get_ival(input, "DFT%PRINT%E_DENSITY_CUBE%NGAUSS")
-            IF (output_unit > 0) THEN
+            IF (iounit > 0) THEN
                INQUIRE (UNIT=unit_nr, NAME=filename)
-               WRITE (UNIT=output_unit, FMT="(/,T2,A,/,/,T2,A)") &
+               WRITE (UNIT=iounit, FMT="(/,T2,A,/,/,T2,A)") &
                   "The electron density (atomic part) is written to the file:", &
                   TRIM(filename)
             END IF
@@ -1914,9 +1919,9 @@ CONTAINS
                qs_kind => qs_kind_set(ikind)
                CALL get_atomic_kind(atomic_kind, name=name, element_symbol=element_symbol)
                CALL calculate_atomic_density(ppdens(:, :, ikind), atomic_kind, qs_kind, ngto, &
-                                             iunit=output_unit, confine=.TRUE.)
+                                             iunit=iounit, confine=.TRUE.)
                CALL calculate_atomic_density(aedens(:, :, ikind), atomic_kind, qs_kind, ngto, &
-                                             iunit=output_unit, allelectron=.TRUE., confine=.TRUE.)
+                                             iunit=iounit, allelectron=.TRUE., confine=.TRUE.)
                ccdens(:, 1, ikind) = aedens(:, 1, ikind)
                ccdens(:, 2, ikind) = 0._dp
                CALL project_function_a(ccdens(1:ngto, 2, ikind), ccdens(1:ngto, 1, ikind), &
@@ -2034,16 +2039,16 @@ CONTAINS
                                            extension=".cube", middle_name=TRIM(filename), &
                                            file_position=my_pos_cube, log_filename=.FALSE., mpi_io=mpi_io, &
                                            fout=mpi_filename)
-            IF (output_unit > 0) THEN
+            IF (iounit > 0) THEN
                IF (.NOT. mpi_io) THEN
                   INQUIRE (UNIT=unit_nr, NAME=filename)
                ELSE
                   filename = mpi_filename
                END IF
-               WRITE (UNIT=output_unit, FMT="(/,T2,A,/,/,T2,A)") &
+               WRITE (UNIT=iounit, FMT="(/,T2,A,/,/,T2,A)") &
                   "The total electron density is written in cube file format to the file:", &
                   TRIM(filename)
-               WRITE (UNIT=output_unit, FMT="(/,(T2,A,F20.10))") &
+               WRITE (UNIT=iounit, FMT="(/,(T2,A,F20.10))") &
                   "q(max) [1/Angstrom]              :", q_max/angstrom, &
                   "Soft electronic charge (G-space) :", rho_soft, &
                   "Hard electronic charge (G-space) :", rho_hard, &
@@ -2075,16 +2080,16 @@ CONTAINS
                                               extension=".cube", middle_name=TRIM(filename), &
                                               file_position=my_pos_cube, log_filename=.FALSE., mpi_io=mpi_io, &
                                               fout=mpi_filename)
-               IF (output_unit > 0) THEN
+               IF (iounit > 0) THEN
                   IF (.NOT. mpi_io) THEN
                      INQUIRE (UNIT=unit_nr, NAME=filename)
                   ELSE
                      filename = mpi_filename
                   END IF
-                  WRITE (UNIT=output_unit, FMT="(/,T2,A,/,/,T2,A)") &
+                  WRITE (UNIT=iounit, FMT="(/,T2,A,/,/,T2,A)") &
                      "The total spin density is written in cube file format to the file:", &
                      TRIM(filename)
-                  WRITE (UNIT=output_unit, FMT="(/,(T2,A,F20.10))") &
+                  WRITE (UNIT=iounit, FMT="(/,(T2,A,F20.10))") &
                      "q(max) [1/Angstrom]                    :", q_max/angstrom, &
                      "Soft part of the spin density (G-space):", rho_soft, &
                      "Hard part of the spin density (G-space):", rho_hard, &
@@ -2118,13 +2123,13 @@ CONTAINS
                                               extension=".cube", middle_name=TRIM(filename), &
                                               file_position=my_pos_cube, log_filename=.FALSE., mpi_io=mpi_io, &
                                               fout=mpi_filename)
-               IF (output_unit > 0) THEN
+               IF (iounit > 0) THEN
                   IF (.NOT. mpi_io) THEN
                      INQUIRE (UNIT=unit_nr, NAME=filename)
                   ELSE
                      filename = mpi_filename
                   END IF
-                  WRITE (UNIT=output_unit, FMT="(/,T2,A,/,/,T2,A)") &
+                  WRITE (UNIT=iounit, FMT="(/,T2,A,/,/,T2,A)") &
                      "The sum of alpha and beta density is written in cube file format to the file:", &
                      TRIM(filename)
                END IF
@@ -2141,13 +2146,13 @@ CONTAINS
                                               extension=".cube", middle_name=TRIM(filename), &
                                               file_position=my_pos_cube, log_filename=.FALSE., mpi_io=mpi_io, &
                                               fout=mpi_filename)
-               IF (output_unit > 0) THEN
+               IF (iounit > 0) THEN
                   IF (.NOT. mpi_io) THEN
                      INQUIRE (UNIT=unit_nr, NAME=filename)
                   ELSE
                      filename = mpi_filename
                   END IF
-                  WRITE (UNIT=output_unit, FMT="(/,T2,A,/,/,T2,A)") &
+                  WRITE (UNIT=iounit, FMT="(/,T2,A,/,/,T2,A)") &
                      "The spin density is written in cube file format to the file:", &
                      TRIM(filename)
                END IF
@@ -2164,13 +2169,13 @@ CONTAINS
                                               extension=".cube", middle_name=TRIM(filename), &
                                               file_position=my_pos_cube, log_filename=.FALSE., mpi_io=mpi_io, &
                                               fout=mpi_filename)
-               IF (output_unit > 0) THEN
+               IF (iounit > 0) THEN
                   IF (.NOT. mpi_io) THEN
                      INQUIRE (UNIT=unit_nr, NAME=filename)
                   ELSE
                      filename = mpi_filename
                   END IF
-                  WRITE (UNIT=output_unit, FMT="(/,T2,A,/,/,T2,A)") &
+                  WRITE (UNIT=iounit, FMT="(/,T2,A,/,/,T2,A)") &
                      "The electron density is written in cube file format to the file:", &
                      TRIM(filename)
                END IF
@@ -2869,7 +2874,7 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       CHARACTER(LEN=default_path_length)                 :: file_name, fileformat
-      INTEGER                                            :: handle, ispin, output_unit, unit_nr
+      INTEGER                                            :: handle, ispin, iounit, unit_nr
       LOGICAL                                            :: bin, do_kpoints, do_ks_csr_write, uptr
       REAL(KIND=dp)                                      :: thld
       TYPE(cp_logger_type), POINTER                      :: logger
@@ -2883,7 +2888,7 @@ CONTAINS
       NULLIFY (dft_section)
 
       logger => cp_get_default_logger()
-      output_unit = cp_logger_get_default_io_unit(logger)
+      iounit = cp_logger_get_default_io_unit(logger)
 
       dft_section => section_vals_get_subs_vals(input, "DFT")
       do_ks_csr_write = BTEST(cp_print_key_should_output(logger%iter_info, dft_section, &
@@ -2946,7 +2951,7 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       CHARACTER(LEN=default_path_length)                 :: file_name, fileformat
-      INTEGER                                            :: handle, ispin, output_unit, unit_nr
+      INTEGER                                            :: handle, ispin, iounit, unit_nr
       LOGICAL                                            :: bin, do_kpoints, do_s_csr_write, uptr
       REAL(KIND=dp)                                      :: thld
       TYPE(cp_logger_type), POINTER                      :: logger
@@ -2960,7 +2965,7 @@ CONTAINS
       NULLIFY (dft_section)
 
       logger => cp_get_default_logger()
-      output_unit = cp_logger_get_default_io_unit(logger)
+      iounit = cp_logger_get_default_io_unit(logger)
 
       dft_section => section_vals_get_subs_vals(input, "DFT")
       do_s_csr_write = BTEST(cp_print_key_should_output(logger%iter_info, dft_section, &
@@ -3024,7 +3029,7 @@ CONTAINS
 
       INTEGER                                            :: adjm_size, colind, handle, iatom, ikind, &
                                                             ind, jatom, jkind, k, natom, nkind, &
-                                                            output_unit, rowind, unit_nr
+                                                            iounit, rowind, unit_nr
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: interact_adjm
       LOGICAL                                            :: do_adjm_write, do_symmetric
       TYPE(cp_logger_type), POINTER                      :: logger
@@ -3043,7 +3048,7 @@ CONTAINS
       NULLIFY (dft_section)
 
       logger => cp_get_default_logger()
-      output_unit = cp_logger_get_default_io_unit(logger)
+      iounit = cp_logger_get_default_io_unit(logger)
 
       dft_section => section_vals_get_subs_vals(input, "DFT")
       do_adjm_write = BTEST(cp_print_key_should_output(logger%iter_info, dft_section, &
