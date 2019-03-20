@@ -325,8 +325,8 @@ CONTAINS
       TYPE(molecule_type), DIMENSION(:), POINTER         :: molecule_set
       TYPE(neighbor_list_set_p_type), DIMENSION(:), POINTER :: saa_list, sab_all, sab_almo, &
          sab_aux_fit, sab_aux_fit_asymm, sab_aux_fit_vs_orb, sab_cn, sab_core, sab_kp, sab_lrc, &
-         sab_orb, sab_orb_mic, sab_scp, sab_se, sab_tbe, sab_vdw, sab_xb, sac_ae, sac_lri, sac_ppl, &
-         sap_oce, sap_ppnl, soa_list, soo_list
+         sab_orb, sab_orb_mic, sab_scp, sab_se, sab_tbe, sab_vdw, sab_xb, sac_ae, sac_lri, &
+         sac_ppl, sap_oce, sap_ppnl, soa_list, soo_list
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(paw_proj_set_type), POINTER                   :: paw_proj
       TYPE(qs_dftb_atom_type), POINTER                   :: dftb_atom
@@ -757,7 +757,7 @@ CONTAINS
                CALL set_ks_env(ks_env=ks_env, sab_se=sab_se)
                CALL write_neighbor_lists(sab_se, particle_set, cell, para_env, neighbor_list_section, &
                                          "/SAB_SE", "sab_se", "HARTREE INTERACTIONS")
-   
+
                CALL pair_radius_setup(orb_present, orb_present, orb_radius, orb_radius, pair_radius)
                CALL build_neighbor_lists(sab_orb_mic, particle_set, atom2d, cell, pair_radius, &
                                          mic=.TRUE., subcells=subcells, molecular=molecule_only, &

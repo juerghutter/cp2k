@@ -13,25 +13,22 @@ MODULE qs_tddfpt_stda_utils
    USE basis_set_types,                 ONLY: gto_basis_set_type
    USE cell_types,                      ONLY: cell_type
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
-   USE cp_control_types,                ONLY: dft_control_type,&
-                                              tddfpt_control_type
+   USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_cp2k_link,              ONLY: cp_dbcsr_alloc_block_from_nbl
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               dbcsr_allocate_matrix_set
-   USE cp_fm_basic_linalg,              ONLY: cp_fm_trace
    USE cp_fm_diag,                      ONLY: cp_fm_power
    USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
                                               cp_fm_struct_release,&
                                               cp_fm_struct_type
    USE cp_fm_types,                     ONLY: cp_fm_create,&
+                                              cp_fm_get_element,&
                                               cp_fm_p_type,&
                                               cp_fm_release,&
-                                              cp_fm_set_submatrix,&
+                                              cp_fm_set_element,&
                                               cp_fm_to_fm,&
                                               cp_fm_to_fm_submat,&
-                                              cp_fm_type, &
-                                              cp_fm_set_element,&
-                                              cp_fm_get_element
+                                              cp_fm_type
    USE cp_gemm_interface,               ONLY: cp_gemm
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_io_unit,&
@@ -46,6 +43,9 @@ MODULE qs_tddfpt_stda_utils
                                               dbcsr_type,&
                                               dbcsr_type_symmetric
    USE ewald_methods_stda,              ONLY: ewald_or_direct_sum
+   USE input_constants,                 ONLY: tddfpt_singlet
+   USE input_section_types,             ONLY: section_vals_type,&
+                                              section_vals_val_get
    USE kinds,                           ONLY: dp
    USE particle_methods,                ONLY: get_particle_set
    USE particle_types,                  ONLY: particle_type
@@ -62,11 +62,6 @@ MODULE qs_tddfpt_stda_utils
    USE qs_p_env_types,                  ONLY: qs_p_env_type
    USE qs_tddfpt_stda_types,            ONLY: stda_env_type
    USE scf_control_types,               ONLY: scf_control_type
-   USE input_section_types,             ONLY: section_vals_get,& 
-                                              section_vals_type,&
-                                              section_vals_val_get
-   USE input_constants,                 ONLY: tddfpt_singlet,&
-                                              tddfpt_triplet
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -133,8 +128,8 @@ CONTAINS
 
       CHARACTER(len=20)                                  :: cstring
       INTEGER                                            :: handle, iatom, icol, ikind, irow, jatom, &
-                                                            jkind, natom, neighbor_list_id, nmat
-      INTEGER                                            :: output_unit
+                                                            jkind, natom, neighbor_list_id, nmat, &
+                                                            output_unit
       INTEGER, DIMENSION(:), POINTER                     :: row_blk_sizes
       LOGICAL                                            :: do_ewald, do_mic, do_periodic, found
       REAL(KIND=dp)                                      :: dr, eta, fcut, r, ralpha, rbeta, rcut, &
@@ -142,8 +137,8 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(3)                        :: rij
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: gblock
       TYPE(cell_type), POINTER                           :: cell
-      TYPE(dbcsr_distribution_type), POINTER             :: dbcsr_dist
       TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(dbcsr_distribution_type), POINTER             :: dbcsr_dist
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(neighbor_list_iterator_p_type), &
          DIMENSION(:), POINTER                           :: nl_iterator
@@ -168,7 +163,7 @@ CONTAINS
       do_ewald = dft_control%tddfpt_control%stda_control%do_ewald
       do_periodic = (.NOT. (ALL(cell%perd == 0)))
 
-      IF (do_mic.and.do_periodic) THEN
+      IF (do_mic .AND. do_periodic) THEN
          CALL get_qs_env(qs_env=qs_env, sab_orb_mic=sab_orb)
       ELSE
          CALL get_qs_env(qs_env=qs_env, sab_orb=sab_orb)
@@ -247,19 +242,19 @@ CONTAINS
             END IF
             IF (lexchange) THEN
                ralpha = dr**stda_env%alpha_param
-               IF (do_periodic.AND.(.NOT.do_mic)) THEN !direct sum
+               IF (do_periodic .AND. (.NOT. do_mic)) THEN !direct sum
                   gblock(:, :) = gblock(:, :)+ &
                                  fcut*(1._dp/(dr**(stda_env%alpha_param)+eta**(-stda_env%alpha_param))) &
                                  **(1._dp/stda_env%alpha_param)-fcut/dr
-               ELSEIF ((do_mic.AND.do_periodic).OR.(.NOT.do_periodic)) THEN !mic or non-periodic 
+               ELSEIF ((do_mic .AND. do_periodic) .OR. (.NOT. do_periodic)) THEN !mic or non-periodic
                   gblock(:, :) = gblock(:, :)+ &
                                  (1._dp/(dr**(stda_env%alpha_param)+eta**(-stda_env%alpha_param))) &
                                  **(1._dp/stda_env%alpha_param)
-               ENDIF 
+               ENDIF
             ELSE
                rbeta = dr**stda_env%beta_param
                IF (stda_env%hfx_fraction > 0._dp) THEN
-                  IF (do_periodic) THEN !both for ewald and direct sum 
+                  IF (do_periodic) THEN !both for ewald and direct sum
                      gblock(:, :) = gblock(:, :)+ &
                                     fcut*(1._dp/(rbeta+(stda_env%hfx_fraction*eta)**(-stda_env%beta_param))) &
                                     **(1._dp/stda_env%beta_param) &
@@ -278,7 +273,7 @@ CONTAINS
             ENDIF
          END IF
 
-          WRITE(output_unit,*) 'gblock(:)', gblock(:,:), lexchange
+         WRITE (output_unit, *) 'gblock(:)', gblock(:, :), lexchange
       END DO
 
       CALL neighbor_list_iterator_release(nl_iterator)
@@ -302,9 +297,8 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'get_lowdin_transition_charges', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, ii, ispin, jj,  &
-                                                            n_occ, ndep, nsgf, nspins, &
-                                                            output_unit
+      INTEGER                                            :: handle, ii, ispin, jj, n_occ, ndep, &
+                                                            nsgf, nspins, output_unit
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: values
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fmstruct
@@ -454,7 +448,6 @@ CONTAINS
                                                             n_occ, nsgf, nspins
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: first_sgf, last_sgf
       INTEGER, DIMENSION(:), POINTER                     :: kind_of
-      TYPE(stda_env_type), POINTER                       :: stda_env
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fmstruct
@@ -465,11 +458,12 @@ CONTAINS
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(qs_kind_type), POINTER                        :: qs_kind
+      TYPE(stda_env_type), POINTER                       :: stda_env
 
       CALL timeset(routineN, handle)
 
       CPASSERT(ASSOCIATED(p_env%stda_env))
-      NULLIFY(stda_env)
+      NULLIFY (stda_env)
       stda_env => p_env%stda_env
 
       NULLIFY (dft_control)
@@ -532,7 +526,7 @@ CONTAINS
 
          DO ispin = 1, nspins
 
-            n_occ = stda_env%n_occ(ispin) 
+            n_occ = stda_env%n_occ(ispin)
 
             NULLIFY (basis_set)
             NULLIFY (qs_kind) ! get orbital basis functions per atom
@@ -660,10 +654,10 @@ CONTAINS
 
          DO ispin = 1, nspins
 
-            n_occ = stda_env%n_occ(ispin) 
+            n_occ = stda_env%n_occ(ispin)
 
             NULLIFY (basis_set)
-            NULLIFY (qs_kind) 
+            NULLIFY (qs_kind)
             ikind = kind_of(iatom)
             qs_kind => qs_kind_set(ikind)
             CALL get_basis_from_container(qs_kind%basis_sets, basis_set=basis_set, basis_type="ORB")
@@ -722,7 +716,7 @@ CONTAINS
             CALL cp_fm_to_fm_submat(ctransformed_occ(ispin)%matrix, fm_work1, basis_set%nsgf, n_occ, &
                                     first_sgf(iatom), 1, 1, 1)
 !
-            CALL cp_fm_to_fm_submat(stda_env%shalf, fm_work2, basis_set%nsgf,nsgf, &   ! p_env%n_ao(ispin), &
+            CALL cp_fm_to_fm_submat(stda_env%shalf, fm_work2, basis_set%nsgf, nsgf, & ! p_env%n_ao(ispin), &
                                     first_sgf(iatom), 1, 1, 1)
 
             CALL cp_gemm(transa="T", &
@@ -768,17 +762,17 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'stda_calculate_kernel', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, iatom, icol, ikind, irow, ispin, &
-                                                            jatom, jkind, natom, nsgf, nspins, &
-                                                            output_unit, jspin
-      INTEGER                                            :: aa,ii,jj, bb, res_etype
-      REAL(KIND=dp)                                      :: tmp_coul, tmp_ex, tmp3
+      INTEGER                                            :: aa, bb, handle, iatom, icol, ii, ikind, &
+                                                            irow, ispin, jatom, jj, jkind, jspin, &
+                                                            natom, nsgf, nspins, output_unit, &
+                                                            res_etype
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: first_sgf
+      INTEGER, DIMENSION(2)                              :: n_occ
       INTEGER, DIMENSION(:), POINTER                     :: kind_of
       LOGICAL                                            :: do_ewald, do_mic, do_periodic, found
-      REAL(KIND=dp)                                      :: tmp, tmp1, tmp2, spinfac
+      REAL(KIND=dp)                                      :: spinfac, tmp, tmp1, tmp2, tmp3, &
+                                                            tmp_coul, tmp_ex
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: coulombblock, exchangeblock
-      TYPE(stda_env_type), POINTER                       :: stda_env
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
@@ -790,12 +784,11 @@ CONTAINS
          DIMENSION(:), POINTER                           :: nl_iterator
       TYPE(neighbor_list_set_p_type), DIMENSION(:), &
          POINTER                                         :: sab_orb
-
-      TYPE(section_vals_type), POINTER                   :: input
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(qs_kind_type), POINTER                        :: qs_kind
-      INTEGER, DIMENSION(2)                              :: n_occ
+      TYPE(section_vals_type), POINTER                   :: input
+      TYPE(stda_env_type), POINTER                       :: stda_env
 
       CALL timeset(routineN, handle)
 
@@ -806,7 +799,7 @@ CONTAINS
       logger => cp_get_default_logger()
       output_unit = cp_logger_get_default_io_unit(logger)
 
-      NULLIFY(stda_env)
+      NULLIFY (stda_env)
       stda_env => p_env%stda_env
       n_occ(:) = stda_env%n_occ(:)
 
@@ -818,8 +811,8 @@ CONTAINS
                       blacs_env=blacs_env)
       natom = SIZE(particle_set)
       nspins = SIZE(X)
-      spinfac=2.0_dp
-      IF (nspins==2) spinfac=1.0_dp
+      spinfac = 2.0_dp
+      IF (nspins == 2) spinfac = 1.0_dp
 
       do_mic = dft_control%tddfpt_control%stda_control%do_mic
       do_ewald = dft_control%tddfpt_control%stda_control%do_ewald
@@ -829,7 +822,7 @@ CONTAINS
 !         CPABORT("Please choose minimum image and ewald for periodic calculations")
 !      ENDIF
 
-      IF (do_mic.AND.do_periodic) THEN !minimum image
+      IF (do_mic .AND. do_periodic) THEN !minimum image
          CALL get_qs_env(qs_env=qs_env, sab_orb_mic=sab_orb)
       ELSE
          CALL get_qs_env(qs_env=qs_env, sab_orb=sab_orb)
@@ -847,10 +840,10 @@ CONTAINS
       CALL get_qs_env(qs_env=qs_env, atomic_kind_set=atomic_kind_set)
       CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set, kind_of=kind_of)
 
-      NULLIFY(input)
+      NULLIFY (input)
       CALL get_qs_env(qs_env=qs_env, input=input)
       CALL section_vals_val_get(input, "DFT%TDDFPT%RES_ETYPE", i_val=res_etype)
-      
+
 ! calculate Loewdin transformed Davidson trial vector tilde(X)=S^1/2*X and tilde(tilde(X))=S^1/2_A*tilde(X)_A
 
       CALL get_lowdin_x(qs_env, p_env, X)
@@ -1106,108 +1099,108 @@ CONTAINS
 !               NULLIFY (Xdoubletilde, tmp_res)
 !-------------------------------------------------------------------------------------------------------------------!
 !!!! TEST explicit loops
-      DO ii=1,n_occ(ispin)
-       DO aa=1,nsgf
+            DO ii = 1, n_occ(ispin)
+               DO aa = 1, nsgf
 
-          tmp_ex=0.0_dp
-          tmp_coul=0.0_dp
-          tmp1=0.0_dp; tmp2=0.0_dp
+                  tmp_ex = 0.0_dp
+                  tmp_coul = 0.0_dp
+                  tmp1 = 0.0_dp; tmp2 = 0.0_dp
 
-! Exchange-like ! 
-      IF ((nspins == 1 .AND. res_etype == tddfpt_singlet ).OR.( nspins == 2 )) THEN
-          tmp=0.0_dp
-           DO jspin = 1, nspins
-            DO jj=1,n_occ(jspin)
-             DO bb=first_sgf(jatom),first_sgf(jatom)-1+basis_set_jatom%nsgf
-              CALL cp_fm_get_element(stda_env%ctransformed(jspin)%matrix,bb,jj,tmp1) 
-              CALL cp_fm_get_element(stda_env%xtransformed(jspin)%matrix,bb,jj,tmp2) 
-              tmp=tmp + tmp1*tmp2  
-             ENDDO
-            ENDDO 
-           ENDDO
-         
-          CALL cp_fm_get_element(stda_env%atom_param_set(iatom)%atom_param%ctransformed_double(ispin)%matrix,&
-               aa,ii,tmp3) 
+! Exchange-like !
+                  IF ((nspins == 1 .AND. res_etype == tddfpt_singlet) .OR. (nspins == 2)) THEN
+                     tmp = 0.0_dp
+                     DO jspin = 1, nspins
+                        DO jj = 1, n_occ(jspin)
+                           DO bb = first_sgf(jatom), first_sgf(jatom)-1+basis_set_jatom%nsgf
+                              CALL cp_fm_get_element(stda_env%ctransformed(jspin)%matrix, bb, jj, tmp1)
+                              CALL cp_fm_get_element(stda_env%xtransformed(jspin)%matrix, bb, jj, tmp2)
+                              tmp = tmp+tmp1*tmp2
+                           ENDDO
+                        ENDDO
+                     ENDDO
 
-          tmp_ex= tmp*(spinfac*exchangeblock(1,1))*tmp3
-          CALL cp_fm_get_element(res(ispin)%matrix,aa,ii,tmp)
-          CALL cp_fm_set_element(res(ispin)%matrix,aa,ii,tmp+tmp_ex)
-         ENDIF
+                     CALL cp_fm_get_element(stda_env%atom_param_set(iatom)%atom_param%ctransformed_double(ispin)%matrix, &
+                                            aa, ii, tmp3)
+
+                     tmp_ex = tmp*(spinfac*exchangeblock(1, 1))*tmp3
+                     CALL cp_fm_get_element(res(ispin)%matrix, aa, ii, tmp)
+                     CALL cp_fm_set_element(res(ispin)%matrix, aa, ii, tmp+tmp_ex)
+                  ENDIF
 
 ! Coulomb-like
-       !  IF (ispin.eq.jspin) THEN
-          tmp=0.0_dp
-          DO jj=1,n_occ(ispin)
-           CALL cp_fm_get_element(stda_env%atom_param_set(iatom)%atom_param%xtransformed_double(ispin)%matrix,&
-                 aa,jj,tmp2) 
-           CALL cp_fm_get_element(stda_env%atom_param_set(jatom)%atom_param%charges(ispin)%matrix,&
-                 jj,ii,tmp1) 
-           tmp=tmp + tmp1*tmp2
-          ENDDO
+                  !  IF (ispin.eq.jspin) THEN
+                  tmp = 0.0_dp
+                  DO jj = 1, n_occ(ispin)
+                     CALL cp_fm_get_element(stda_env%atom_param_set(iatom)%atom_param%xtransformed_double(ispin)%matrix, &
+                                            aa, jj, tmp2)
+                     CALL cp_fm_get_element(stda_env%atom_param_set(jatom)%atom_param%charges(ispin)%matrix, &
+                                            jj, ii, tmp1)
+                     tmp = tmp+tmp1*tmp2
+                  ENDDO
 
-          tmp_coul = -coulombblock(1,1)*tmp
+                  tmp_coul = -coulombblock(1, 1)*tmp
 
 !         WRITE(output_unit,*) '-------------------------------------------------'
 !         WRITE(UNIT=output_unit,FMT="(A,F18.6,F18.6,F18.6)") "tmp_coulomb, tmp", tmp_coul ,tmp,coulombblock(1,1)
 !         WRITE(output_unit,*) '-------------------------------------------------'
 
-          CALL cp_fm_get_element(res(ispin)%matrix,aa,ii,tmp)
-          CALL cp_fm_set_element(res(ispin)%matrix,aa,ii,tmp+tmp_coul)
-       !  ENDIF
-       ENDDO
+                  CALL cp_fm_get_element(res(ispin)%matrix, aa, ii, tmp)
+                  CALL cp_fm_set_element(res(ispin)%matrix, aa, ii, tmp+tmp_coul)
+                  !  ENDIF
+               ENDDO
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!IATOM.NE.JATOM
-       IF (iatom.NE.jatom) THEN
-         DO aa=1,nsgf
+               IF (iatom .NE. jatom) THEN
+                  DO aa = 1, nsgf
 
-          tmp_ex=0.0_dp
-          tmp_coul=0.0_dp
-          tmp1=0.0_dp; tmp2=0.0_dp
+                     tmp_ex = 0.0_dp
+                     tmp_coul = 0.0_dp
+                     tmp1 = 0.0_dp; tmp2 = 0.0_dp
 
-! Exchange-like 
-         IF ((nspins == 1 .AND. res_etype == tddfpt_singlet ).OR.( nspins == 2 )) THEN
-          tmp=0.0_dp
-           DO jspin=1, nspins
-            DO jj=1,n_occ(jspin)
-             DO bb=first_sgf(iatom),first_sgf(iatom)-1+basis_set_iatom%nsgf
-              CALL cp_fm_get_element(stda_env%ctransformed(jspin)%matrix,bb,jj,tmp1) 
-              CALL cp_fm_get_element(stda_env%xtransformed(jspin)%matrix,bb,jj,tmp2)
-              tmp=tmp + tmp1*tmp2
-             ENDDO
-            ENDDO
-           ENDDO
+! Exchange-like
+                     IF ((nspins == 1 .AND. res_etype == tddfpt_singlet) .OR. (nspins == 2)) THEN
+                        tmp = 0.0_dp
+                        DO jspin = 1, nspins
+                           DO jj = 1, n_occ(jspin)
+                              DO bb = first_sgf(iatom), first_sgf(iatom)-1+basis_set_iatom%nsgf
+                                 CALL cp_fm_get_element(stda_env%ctransformed(jspin)%matrix, bb, jj, tmp1)
+                                 CALL cp_fm_get_element(stda_env%xtransformed(jspin)%matrix, bb, jj, tmp2)
+                                 tmp = tmp+tmp1*tmp2
+                              ENDDO
+                           ENDDO
+                        ENDDO
 
-          CALL cp_fm_get_element(stda_env%atom_param_set(jatom)%atom_param%ctransformed_double(ispin)%matrix,&
-               aa,ii,tmp3)
+                        CALL cp_fm_get_element(stda_env%atom_param_set(jatom)%atom_param%ctransformed_double(ispin)%matrix, &
+                                               aa, ii, tmp3)
 
-          tmp_ex= tmp*(spinfac*exchangeblock(1,1))*tmp3
-          CALL cp_fm_get_element(res(ispin)%matrix,aa,ii,tmp)
-          CALL cp_fm_set_element(res(ispin)%matrix,aa,ii,tmp+tmp_ex)
-         ENDIF
+                        tmp_ex = tmp*(spinfac*exchangeblock(1, 1))*tmp3
+                        CALL cp_fm_get_element(res(ispin)%matrix, aa, ii, tmp)
+                        CALL cp_fm_set_element(res(ispin)%matrix, aa, ii, tmp+tmp_ex)
+                     ENDIF
 
 ! Coulomb-like
-       !  IF (ispin.eq.jspin) THEN
-          tmp=0.0_dp
-          DO jj=1,n_occ(ispin)
-           CALL cp_fm_get_element(stda_env%atom_param_set(jatom)%atom_param%xtransformed_double(ispin)%matrix,&
-                 aa,jj,tmp2)
-           CALL cp_fm_get_element(stda_env%atom_param_set(iatom)%atom_param%charges(ispin)%matrix,&
-                 jj,ii,tmp1)
-           tmp=tmp + tmp1*tmp2
-          ENDDO
+                     !  IF (ispin.eq.jspin) THEN
+                     tmp = 0.0_dp
+                     DO jj = 1, n_occ(ispin)
+                        CALL cp_fm_get_element(stda_env%atom_param_set(jatom)%atom_param%xtransformed_double(ispin)%matrix, &
+                                               aa, jj, tmp2)
+                        CALL cp_fm_get_element(stda_env%atom_param_set(iatom)%atom_param%charges(ispin)%matrix, &
+                                               jj, ii, tmp1)
+                        tmp = tmp+tmp1*tmp2
+                     ENDDO
 
-          tmp_coul = -coulombblock(1,1)*tmp
+                     tmp_coul = -coulombblock(1, 1)*tmp
 
 !         WRITE(output_unit,*) '-------------------------------------------------'
 !         WRITE(UNIT=output_unit,FMT="(A,F18.6,F18.6,F18.6)") "tmp_coulomb, tmp", tmp_coul ,tmp,coulombblock(1,1)
 !         WRITE(output_unit,*) '-------------------------------------------------'
 
-          CALL cp_fm_get_element(res(ispin)%matrix,aa,ii,tmp)
-          CALL cp_fm_set_element(res(ispin)%matrix,aa,ii,tmp+tmp_coul)
-     !    ENDIF
-      ENDDO !!aa
+                     CALL cp_fm_get_element(res(ispin)%matrix, aa, ii, tmp)
+                     CALL cp_fm_set_element(res(ispin)%matrix, aa, ii, tmp+tmp_coul)
+                     !    ENDIF
+                  ENDDO !!aa
 
-     ENDIF !iatom.NE.jatom
-      ENDDO !!ii
+               ENDIF !iatom.NE.jatom
+            ENDDO !!ii
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!IATOM.NE.JATOM
 !!!! TEST explicit loops
 !-------------------------------------------------------------------------------------------------------------------!
@@ -1218,7 +1211,7 @@ CONTAINS
 
 ! Ewald sum for Coulomb-like contribution
       IF (do_periodic) THEN
-            CALL ewald_or_direct_sum(qs_env, p_env, stda_env, res)
+         CALL ewald_or_direct_sum(qs_env, p_env, stda_env, res)
       ENDIF
 !
       DEALLOCATE (kind_of)

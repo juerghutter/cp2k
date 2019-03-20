@@ -190,9 +190,9 @@ CONTAINS
 
       CHARACTER                                          :: mode
       INTEGER                                            :: col, handle, i, iev, iter, j, k, &
-                                                            max_krylovspace_dim, max_kv, n_ev, &
-                                                            n_kv, nspins, output_unit, row, spin,&
-                                                            max_excitations
+                                                            max_excitations, max_krylovspace_dim, &
+                                                            max_kv, n_ev, n_kv, nspins, &
+                                                            output_unit, row, spin
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: must_improve
       REAL(dp)                                           :: Atilde_ij, convergence, tmp, tmp2
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals_difference, evals_tmp
@@ -252,8 +252,8 @@ CONTAINS
          n_ev = tddfpt_control%n_ev
          WRITE (output_unit, *) "  The maximum number of excitations is limited to ", max_excitations, "!!"
       END IF
-      IF (max_kv <= n_ev) THEN 
-        CPABORT("Please increase # krylov vectors (to at least # requested excitations)")
+      IF (max_kv <= n_ev) THEN
+         CPABORT("Please increase # krylov vectors (to at least # requested excitations)")
       ENDIF
 
 !    CPPostcondition(max_krylovspace_dim>=max_kv,cp_failure_level,routineP,failure)
@@ -572,8 +572,9 @@ CONTAINS
       INTEGER                                            :: handle, nspins, spin
       INTEGER, SAVE                                      :: counter = 0
       TYPE(dft_control_type), POINTER                    :: dft_control
+
       INTEGER:: output_unit
-       
+
       output_unit = cp_logger_get_default_io_unit()
 
       NULLIFY (dft_control)

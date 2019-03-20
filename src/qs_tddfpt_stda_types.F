@@ -34,9 +34,7 @@ MODULE qs_tddfpt_stda_types
                                               cp_logger_type
    USE cp_para_types,                   ONLY: cp_para_env_type
    USE dbcsr_api,                       ONLY: dbcsr_p_type
-   USE input_constants,                 ONLY: tddfpt_excitations
-   USE input_section_types,             ONLY: section_vals_get,&
-                                              section_vals_get_subs_vals,&
+   USE input_section_types,             ONLY: section_vals_get_subs_vals,&
                                               section_vals_type,&
                                               section_vals_val_get
    USE kinds,                           ONLY: dp
@@ -90,9 +88,9 @@ MODULE qs_tddfpt_stda_types
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER    :: ctransformed => Null() !Lowdin MO coefficients !NAO*NOCC
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER    :: xtransformed => Null() !Lowdin transformed Davidson trial vector X  !NAO*NOCC
       TYPE(cp_fm_type), POINTER                    :: shalf => Null() !Lowdin MO coefficients !for debugging !NAO*NAO
-      INTEGER,DIMENSION(2)                         :: n_ao !number of atomic orbitals
-      INTEGER,DIMENSION(2)                         :: n_occ !number of occupied orbitals
-    !  INTEGER,DIMENSION(2)                         :: n_unocc !number of unoccupied orbitals
+      INTEGER, DIMENSION(2)                         :: n_ao !number of atomic orbitals
+      INTEGER, DIMENSION(2)                         :: n_occ !number of occupied orbitals
+      !  INTEGER,DIMENSION(2)                         :: n_unocc !number of unoccupied orbitals
    END TYPE
 
 !PARAMETERS
@@ -176,8 +174,7 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'stda_init_param', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, ikind, nkind, &
-                                                            iounit
+      INTEGER                                            :: handle, ikind, iounit, nkind
       LOGICAL                                            :: explicit
       REAL(KIND=dp)                                      :: rc
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
@@ -236,20 +233,20 @@ CONTAINS
       IF (iounit > 0) THEN
          WRITE (iounit, *)
          WRITE (iounit, '(A,T71,F10.3)') " STDA | Fraction a_x [a.u.]", &
-            stda_env%hfx_fraction   
-      END IF              
-!      ENDIF                  
-                             
-! alpha and beta parameter   
-      stda_env%alpha_param   = alpha(1)+stda_env%hfx_fraction*alpha(2)
-      stda_env%beta_param    = beta(1)+stda_env%hfx_fraction*beta(2)
+            stda_env%hfx_fraction
+      END IF
+!      ENDIF
+
+! alpha and beta parameter
+      stda_env%alpha_param = alpha(1)+stda_env%hfx_fraction*alpha(2)
+      stda_env%beta_param = beta(1)+stda_env%hfx_fraction*beta(2)
 
       IF (iounit > 0) THEN
          WRITE (iounit, '(A,T71,F10.3)') " STDA | Alpha parameter [a.u.]", &
-            stda_env%alpha_param 
+            stda_env%alpha_param
          WRITE (iounit, '(A,T71,F10.3)') " STDA | Beta parameter [a.u.]", &
-            stda_env%beta_param 
-      END IF              
+            stda_env%beta_param
+      END IF
 
       DO ikind = 1, nkind
 ! hardness parameter
@@ -297,7 +294,7 @@ CONTAINS
             END IF
          END IF
          stda_control%cutoff_cou = rc
-      ELSE 
+      ELSE
          IF (iounit > 0) THEN
             WRITE (iounit, *)
             WRITE (iounit, '(A,T50,A)') " STDA |", &
@@ -307,7 +304,6 @@ CONTAINS
             WRITE (iounit, *)
          END IF
       ENDIF
-
 
       CALL timestop(handle)
 
@@ -325,42 +321,41 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'allocate_stda_env', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, ii, natoms, nkind, nsgf
+      INTEGER                                            :: handle, ii, ispin, n_ao, n_occ, natoms, &
+                                                            nkind, nsgf, nspins
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_pool_p_type), DIMENSION(:), POINTER     :: ao_mo_fm_pools
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
+      TYPE(cp_fm_type), POINTER                          :: qs_env_c
       TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(stda_atom_type), POINTER                      :: atom_param
       TYPE(stda_kind_type), POINTER                      :: kind_param
-      TYPE(dft_control_type), POINTER                    :: dft_control
-      TYPE(cp_fm_type), POINTER                          :: qs_env_c
-      INTEGER                                            :: ispin, nspins, n_ao, n_occ
 
       CALL timeset(routineN, handle)
 
-
       ALLOCATE (stda_env)
 
-      NULLIFY (dft_control) 
+      NULLIFY (dft_control)
       CALL get_qs_env(qs_env, dft_control=dft_control)
       nspins = dft_control%nspins
-      
+
       stda_env%hfx_fraction = 0.0d0
       stda_env%alpha_param = 0.0d0
       stda_env%beta_param = 0.0d0
       stda_env%n_occ = 0
 
 ! get number of occ orbitals / atomic orbitals
-      DO ispin=1,nspins
+      DO ispin = 1, nspins
          CALL get_mo_set(qs_env%mos(ispin)%mo_set, mo_coeff=qs_env_c)
          CALL cp_fm_get_info(qs_env_c, ncol_global=n_occ, nrow_global=n_ao)
-         stda_env%n_occ(ispin)=n_occ
-        ! stda_env%n_unocc(ispin) =tddfpt_control%lumos(ispin)%matrix%matrix_struct%ncol_global
-         stda_env%n_ao(ispin)=n_ao
+         stda_env%n_occ(ispin) = n_occ
+         ! stda_env%n_unocc(ispin) =tddfpt_control%lumos(ispin)%matrix%matrix_struct%ncol_global
+         stda_env%n_ao(ispin) = n_ao
       ENDDO
-      
+
 ! initialize stda_kind_parameters
       NULLIFY (qs_kind_set) !get different kinds
       CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set)
@@ -518,6 +513,7 @@ CONTAINS
 ! **************************************************************************************************
 !> \brief Allocate sTDA atom parameter
 !> \param qs_env ...
+!> \param stda_env ...
 !> \param atom_param ...
 ! **************************************************************************************************
    SUBROUTINE allocate_stda_atom_param(qs_env, stda_env, atom_param)
@@ -529,14 +525,15 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER :: routineN = 'allocate_stda_atom_param', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: ispin, n_ao, n_occ,nspins ! n_unocc
-      INTEGER                                            :: iounit
+      INTEGER                                            :: iounit, ispin, n_ao, n_occ, nspins
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
+      TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(tddfpt_control_type), POINTER                 :: tddfpt_control
-      TYPE(cp_logger_type), POINTER                      :: logger
+
+! n_unocc
 
       NULLIFY (logger)
       logger => cp_get_default_logger()
@@ -562,8 +559,8 @@ CONTAINS
       ALLOCATE (atom_param%gmcharge(nspins))
 
       DO ispin = 1, nspins
-         n_occ=stda_env%n_occ(ispin)
-         n_ao=stda_env%n_ao(ispin)
+         n_occ = stda_env%n_occ(ispin)
+         n_ao = stda_env%n_ao(ispin)
 !charges
          NULLIFY (fm_struct)
          CALL cp_fm_struct_create(fm_struct, para_env, blacs_env, n_occ, n_occ)

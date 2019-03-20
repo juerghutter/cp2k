@@ -8,7 +8,11 @@
 !> \author JGH
 ! **************************************************************************************************
 MODULE ewald_methods_stda
+   USE atomic_kind_types,               ONLY: atomic_kind_type,&
+                                              get_atomic_kind_set
    USE atprop_types,                    ONLY: atprop_type
+   USE basis_set_container_types,       ONLY: get_basis_from_container
+   USE basis_set_types,                 ONLY: gto_basis_set_type
    USE cell_types,                      ONLY: cell_type,&
                                               get_cell,&
                                               pbc
@@ -23,14 +27,17 @@ MODULE ewald_methods_stda
    USE cp_para_types,                   ONLY: cp_para_env_type
    USE dgs,                             ONLY: dg_sum_patch,&
                                               dg_sum_patch_force_1d
-   USE distribution_1d_types,           ONLY: distribution_1d_type
    USE ewald_environment_types,         ONLY: ewald_env_get,&
                                               ewald_environment_type
    USE ewald_pw_types,                  ONLY: ewald_pw_get,&
                                               ewald_pw_type
+   USE input_constants,                 ONLY: tddfpt_singlet
+   USE input_section_types,             ONLY: section_vals_type,&
+                                              section_vals_val_get
    USE kinds,                           ONLY: dp
    USE mathconstants,                   ONLY: oorootpi,&
                                               pi
+   USE particle_methods,                ONLY: get_particle_set
    USE particle_types,                  ONLY: particle_type
    USE pme_tools,                       ONLY: get_center,&
                                               set_list
@@ -71,16 +78,6 @@ MODULE ewald_methods_stda
         rs_grid_create, rs_grid_release, rs_grid_set_box, rs_grid_zero, rs_pw_transfer
    USE spme,                            ONLY: get_patch
    USE virial_types,                    ONLY: virial_type
-   USE basis_set_container_types,       ONLY: get_basis_from_container
-   USE basis_set_types,                 ONLY: gto_basis_set_type
-   USE particle_methods,                ONLY: get_particle_set
-   USE atomic_kind_types,               ONLY: atomic_kind_type,&
-                                              get_atomic_kind_set
-   USE input_section_types,             ONLY: section_vals_get,& 
-                                              section_vals_type,&
-                                              section_vals_val_get
-   USE input_constants,                 ONLY: tddfpt_singlet,&
-                                              tddfpt_triplet
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -433,11 +430,11 @@ CONTAINS
             dr = SQRT(SUM(rij(:)**2))
             IF (dr > 1.e-10_dp) THEN
 !       IF (dr > 1.e-6_dp) THEN  !!! WITH THIS CANCELLATION OF 1/r TERM
-      !         WRITE (output_unit, *) 'iatom, jatom', iatom, jatom !
+               !         WRITE (output_unit, *) 'iatom, jatom', iatom, jatom !
 !         fr = 1/dr !!! WITH THIS CANCELLATION OF 1/r TERM
-      !         WRITE (output_unit, *) 'dr', dr, 1/dr
+               !         WRITE (output_unit, *) 'dr', dr, 1/dr
                fr = erfc(alpha*dr)/dr
-      !         WRITE (output_unit, *) 'alpha', alpha
+               !         WRITE (output_unit, *) 'alpha', alpha
 
                CALL cp_fm_set_all(stda_env%atom_param_set(iatom)%atom_param%gmcharge(ispin)%matrix, 0.0_dp, 0.0_dp)
                CALL cp_fm_set_all(stda_env%atom_param_set(jatom)%atom_param%gmcharge(ispin)%matrix, 0.0_dp, 0.0_dp)
@@ -530,37 +527,37 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'ewald_or_direct_sum', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: aa, ewald_type, handle, iatom, ii, &
-                                                            ispin, jatom, jj, natom, nsgf, &
-                                                            nspins, output_unit, jkind, kkind, bb, &
-                                                            res_etype, jspin
-      INTEGER, DIMENSION(3)                              :: periodic
+      INTEGER                                            :: aa, bb, ewald_type, handle, iatom, ii, &
+                                                            ispin, jatom, jj, jkind, jspin, kkind, &
+                                                            natom, nsgf, nspins, output_unit, &
+                                                            res_etype
+      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: first_sgf
       INTEGER, DIMENSION(2)                              :: n_occ
+      INTEGER, DIMENSION(3)                              :: periodic
+      INTEGER, DIMENSION(:), POINTER                     :: kind_of
       LOGICAL                                            :: do_ewald, do_mic
       REAL(KIND=dp) :: alpha, charge, deth, dr, gmcharge, loewdincharge_i, loewdincharge_j, tmp, &
-         tmp1, tmp_1_r, tmp2, tmp_coul, xmat, xtransformed_double_i, &
-         xtransformed_double_j, tmp_ex, tmpintern, tmp3, tmpintern2
+         tmp1, tmp2, tmp3, tmp_1_r, tmp_coul, tmp_ex, tmpintern, tmpintern2, xmat, &
+         xtransformed_double_i, xtransformed_double_j
       REAL(KIND=dp), DIMENSION(3)                        :: rij
+      TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(ewald_environment_type), POINTER              :: ewald_env
       TYPE(ewald_pw_type), POINTER                       :: ewald_pw
+      TYPE(gto_basis_set_type), POINTER                  :: basis_set_iatom, basis_set_jatom
       TYPE(neighbor_list_set_p_type), DIMENSION(:), &
          POINTER                                         :: n_list
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
-      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: first_sgf
       TYPE(qs_kind_type), POINTER                        :: qs_kind
-      TYPE(gto_basis_set_type), POINTER                  :: basis_set_iatom, basis_set_jatom
-      TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(section_vals_type), POINTER                   :: input
-      INTEGER, DIMENSION(:), POINTER                     :: kind_of
 
       CALL timeset(routineN, handle)
       CPASSERT(ASSOCIATED(stda_env))
 
-      NULLIFY (logger) 
+      NULLIFY (logger)
       logger => cp_get_default_logger()
       output_unit = cp_logger_get_default_io_unit(logger)
 
@@ -568,14 +565,14 @@ CONTAINS
       NULLIFY (cell)
       NULLIFY (particle_set)
       NULLIFY (qs_kind_set)
-      NULLIFY(atomic_kind_set)
-      NULLIFY(input)
+      NULLIFY (atomic_kind_set)
+      NULLIFY (input)
       CALL get_qs_env(qs_env, &
                       dft_control=dft_control, &
                       cell=cell, &
-                      particle_set=particle_set,&
-                      qs_kind_set=qs_kind_set,& 
-                      atomic_kind_set=atomic_kind_set,&
+                      particle_set=particle_set, &
+                      qs_kind_set=qs_kind_set, &
+                      atomic_kind_set=atomic_kind_set, &
                       input=input)
 
       natom = SIZE(particle_set)
@@ -637,7 +634,7 @@ CONTAINS
                         CALL cp_fm_get_element(stda_env%atom_param_set(iatom)%atom_param%xtransformed_double(ispin)%matrix, &
                                                aa, jj, xmat)
                         !    tmp_1_r = tmp_1_r + 0.5_dp*gmcharge*xmat
-                        tmp_1_r = tmp_1_r-gmcharge*xmat  !! Coulomb contribution
+                        tmp_1_r = tmp_1_r-gmcharge*xmat !! Coulomb contribution
 !   energy = energy+0.5_dp*SUM(mcharge(:)*gmcharge(:, 1))
                      ENDDO !jj
 
@@ -651,102 +648,102 @@ CONTAINS
          ENDDO !ispin
       ENDIF !do_ewald
 
-      IF ((.NOT.do_ewald).OR.(.NOT.do_mic)) THEN ! if not ewald: direct sum for coulomb part
-                                                 ! if not mic:   direct sum for exchange part
+      IF ((.NOT. do_ewald) .OR. (.NOT. do_mic)) THEN ! if not ewald: direct sum for coulomb part
+         ! if not mic:   direct sum for exchange part
 ! DIRECT SUM
-         tmp_coul=0.0_dp
-         tmp_ex=0.0_dp
-            DO iatom = 1, natom
-             DO jatom = 1, iatom-1 !natom
+         tmp_coul = 0.0_dp
+         tmp_ex = 0.0_dp
+         DO iatom = 1, natom
+            DO jatom = 1, iatom-1 !natom
 !                     CALL get_qs_env(qs_env=qs_env, local_particles=local_particles) !which particles are local to this processor
 !                     DO ikind = 1, SIZE(local_particles%n_el)
 !                        DO ia = 1, local_particles%n_el(ikind)
 !                           iatom = local_particles%list(ikind)%array(ia)
-                          WRITE(output_unit,*) 'iatom, jatom,', iatom, jatom
+               WRITE (output_unit, *) 'iatom, jatom,', iatom, jatom
 
-                          rij = particle_set(iatom)%r-particle_set(jatom)%r
-                          rij = pbc(rij, cell)
-                          dr = SQRT(SUM(rij(:)**2))
+               rij = particle_set(iatom)%r-particle_set(jatom)%r
+               rij = pbc(rij, cell)
+               dr = SQRT(SUM(rij(:)**2))
 
-                          IF (dr > 1.e-6_dp) THEN
+               IF (dr > 1.e-6_dp) THEN
 ! only non-diagonal terms need to be corrected for
-                            NULLIFY (basis_set_iatom)
-                            NULLIFY (qs_kind)
-                            kkind = kind_of(iatom) 
-                            qs_kind => qs_kind_set(kkind)
-                            CALL get_basis_from_container(qs_kind%basis_sets, basis_set=basis_set_iatom, basis_type="ORB")
+                  NULLIFY (basis_set_iatom)
+                  NULLIFY (qs_kind)
+                  kkind = kind_of(iatom)
+                  qs_kind => qs_kind_set(kkind)
+                  CALL get_basis_from_container(qs_kind%basis_sets, basis_set=basis_set_iatom, basis_type="ORB")
 !
-                            NULLIFY (basis_set_jatom)
-                            NULLIFY (qs_kind)
-                            jkind = kind_of(jatom) 
-                            qs_kind => qs_kind_set(jkind)
-                            CALL get_basis_from_container(qs_kind%basis_sets, basis_set=basis_set_jatom, basis_type="ORB")
+                  NULLIFY (basis_set_jatom)
+                  NULLIFY (qs_kind)
+                  jkind = kind_of(jatom)
+                  qs_kind => qs_kind_set(jkind)
+                  CALL get_basis_from_container(qs_kind%basis_sets, basis_set=basis_set_jatom, basis_type="ORB")
 
-         DO ispin = 1, nspins
-          DO jspin = 1, nspins
-             DO ii = 1, n_occ(ispin)
-              DO aa = 1, nsgf
-                             tmp_1_r = 0.0_dp
-                             tmpintern2=0.0_dp
-                             tmpintern=0.0_dp
-                             DO jj = 1, n_occ(jspin)
+                  DO ispin = 1, nspins
+                     DO jspin = 1, nspins
+                        DO ii = 1, n_occ(ispin)
+                           DO aa = 1, nsgf
+                              tmp_1_r = 0.0_dp
+                              tmpintern2 = 0.0_dp
+                              tmpintern = 0.0_dp
+                              DO jj = 1, n_occ(jspin)
 ! coulomb-part
-                              IF (ispin.EQ.jspin) THEN
-                               CALL cp_fm_get_element(stda_env%atom_param_set(iatom)%atom_param%charges(ispin)%matrix, &
-                                                        jj, ii, loewdincharge_i)
-                               CALL cp_fm_get_element(stda_env%atom_param_set(jatom)%atom_param%charges(ispin)%matrix, &
-                                                        jj, ii, loewdincharge_j)
+                                 IF (ispin .EQ. jspin) THEN
+                                    CALL cp_fm_get_element(stda_env%atom_param_set(iatom)%atom_param%charges(ispin)%matrix, &
+                                                           jj, ii, loewdincharge_i)
+                                    CALL cp_fm_get_element(stda_env%atom_param_set(jatom)%atom_param%charges(ispin)%matrix, &
+                                                           jj, ii, loewdincharge_j)
                                CALL cp_fm_get_element(stda_env%atom_param_set(iatom)%atom_param%xtransformed_double(ispin)%matrix, &
-                                                        aa, jj, xtransformed_double_i)
+                                                           aa, jj, xtransformed_double_i)
                                CALL cp_fm_get_element(stda_env%atom_param_set(jatom)%atom_param%xtransformed_double(ispin)%matrix, &
-                                                        aa, jj, xtransformed_double_j)
+                                                           aa, jj, xtransformed_double_j)
 
-                               tmp1 = xtransformed_double_i*loewdincharge_j
-                               tmp2 = xtransformed_double_j*loewdincharge_i
+                                    tmp1 = xtransformed_double_i*loewdincharge_j
+                                    tmp2 = xtransformed_double_j*loewdincharge_i
 
-                               tmp_1_r = tmp_1_r+(tmp1+tmp2)
-                              ENDIF !ispin.eq.jspin
+                                    tmp_1_r = tmp_1_r+(tmp1+tmp2)
+                                 ENDIF !ispin.eq.jspin
 ! exchange part
-                               DO bb=first_sgf(jatom),first_sgf(jatom)-1+basis_set_jatom%nsgf
-                                 CALL cp_fm_get_element(stda_env%ctransformed(jspin)%matrix,bb,jj,tmp1) 
-                                 CALL cp_fm_get_element(stda_env%xtransformed(jspin)%matrix,bb,jj,tmp2)
-                                 tmpintern=tmpintern + tmp1*tmp2
-                               ENDDO
-                               DO bb=first_sgf(iatom),first_sgf(iatom)-1+basis_set_iatom%nsgf
-                                 CALL cp_fm_get_element(stda_env%ctransformed(jspin)%matrix,bb,jj,tmp1) 
-                                 CALL cp_fm_get_element(stda_env%xtransformed(jspin)%matrix,bb,jj,tmp2)
-                                 tmpintern2=tmpintern2 + tmp1*tmp2
-                               ENDDO
-                             ENDDO !jj
-                             CALL cp_fm_get_element(stda_env%atom_param_set(iatom)%atom_param%ctransformed_double(ispin)%matrix,&
-                                                    aa,ii,tmp3)
-                             tmpintern=tmpintern*tmp3
-                             CALL cp_fm_get_element(stda_env%atom_param_set(jatom)%atom_param%ctransformed_double(ispin)%matrix,&
-                                                    aa,ii,tmp3)
-                             tmpintern2=tmpintern2*tmp3
+                                 DO bb = first_sgf(jatom), first_sgf(jatom)-1+basis_set_jatom%nsgf
+                                    CALL cp_fm_get_element(stda_env%ctransformed(jspin)%matrix, bb, jj, tmp1)
+                                    CALL cp_fm_get_element(stda_env%xtransformed(jspin)%matrix, bb, jj, tmp2)
+                                    tmpintern = tmpintern+tmp1*tmp2
+                                 ENDDO
+                                 DO bb = first_sgf(iatom), first_sgf(iatom)-1+basis_set_iatom%nsgf
+                                    CALL cp_fm_get_element(stda_env%ctransformed(jspin)%matrix, bb, jj, tmp1)
+                                    CALL cp_fm_get_element(stda_env%xtransformed(jspin)%matrix, bb, jj, tmp2)
+                                    tmpintern2 = tmpintern2+tmp1*tmp2
+                                 ENDDO
+                              ENDDO !jj
+                              CALL cp_fm_get_element(stda_env%atom_param_set(iatom)%atom_param%ctransformed_double(ispin)%matrix, &
+                                                     aa, ii, tmp3)
+                              tmpintern = tmpintern*tmp3
+                              CALL cp_fm_get_element(stda_env%atom_param_set(jatom)%atom_param%ctransformed_double(ispin)%matrix, &
+                                                     aa, ii, tmp3)
+                              tmpintern2 = tmpintern2*tmp3
 
-                            CALL cp_fm_get_element(res(ispin)%matrix, aa, ii, tmp)
+                              CALL cp_fm_get_element(res(ispin)%matrix, aa, ii, tmp)
 ! coulomb-part
-                            IF (ispin.EQ.jspin) THEN
-                             IF (.NOT.do_ewald) tmp_coul = -stda_env%hfx_fraction*tmp_1_r/dr !direct sum for coulomb part
-                            ENDIF
+                              IF (ispin .EQ. jspin) THEN
+                                 IF (.NOT. do_ewald) tmp_coul = -stda_env%hfx_fraction*tmp_1_r/dr !direct sum for coulomb part
+                              ENDIF
 ! exchange-part
-                            IF ((nspins == 1 .AND. res_etype == tddfpt_singlet ).OR.( nspins == 2 )) THEN
-                             IF (.NOT.do_mic) tmp_ex= (tmpintern+ tmpintern2)*(2.0_dp/dr) !direct sum for exchange part
-                            ENDIF
+                              IF ((nspins == 1 .AND. res_etype == tddfpt_singlet) .OR. (nspins == 2)) THEN
+                                 IF (.NOT. do_mic) tmp_ex = (tmpintern+tmpintern2)*(2.0_dp/dr) !direct sum for exchange part
+                              ENDIF
 
-                            CALL cp_fm_set_element(res(ispin)%matrix,aa,ii,tmp+tmp_coul+tmp_ex)
-               ENDDO !aa
-            ENDDO !ii
-          ENDDO !jspin
-         ENDDO !ispin
-                          END IF
-                        END DO !jatom
-                     END DO !iatom
+                              CALL cp_fm_set_element(res(ispin)%matrix, aa, ii, tmp+tmp_coul+tmp_ex)
+                           ENDDO !aa
+                        ENDDO !ii
+                     ENDDO !jspin
+                  ENDDO !ispin
+               END IF
+            END DO !jatom
+         END DO !iatom
 
       END IF !do_ewald , do_mic
 
-     DEALLOCATE(kind_of,first_sgf)
+      DEALLOCATE (kind_of, first_sgf)
 
       CALL timestop(handle)
 

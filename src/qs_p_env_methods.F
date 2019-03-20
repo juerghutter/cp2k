@@ -38,8 +38,7 @@ MODULE qs_p_env_methods
                                               cp_fm_retain,&
                                               cp_fm_set_all,&
                                               cp_fm_to_fm,&
-                                              cp_fm_type,&
-                                              cp_fm_write_formatted
+                                              cp_fm_type
    USE cp_fm_vect,                      ONLY: cp_fm_vect_copy,&
                                               cp_fm_vect_dealloc
    USE cp_gemm_interface,               ONLY: cp_gemm
@@ -54,8 +53,7 @@ MODULE qs_p_env_methods
                                               dbcsr_p_type,&
                                               dbcsr_scale,&
                                               dbcsr_set,&
-                                              dbcsr_type,&
-                                              dbcsr_print
+                                              dbcsr_type
    USE hartree_local_methods,           ONLY: init_coulomb_local
    USE hartree_local_types,             ONLY: hartree_local_create
    USE input_constants,                 ONLY: ot_precond_none
@@ -245,7 +243,7 @@ CONTAINS
          p_env%n_ao(spin) = n_ao
       END DO
 
-      write(output_unit,*) "orthogonal_orbitals", orthogonal_orbitals
+      WRITE (output_unit, *) "orthogonal_orbitals", orthogonal_orbitals
       p_env%orthogonal_orbitals = .FALSE.
       IF (PRESENT(orthogonal_orbitals)) &
          p_env%orthogonal_orbitals = orthogonal_orbitals
@@ -675,11 +673,12 @@ CONTAINS
 
       INTEGER                                            :: handle, ncol
       TYPE(cp_fm_type), POINTER                          :: tmp
+      TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks, matrix_s
       TYPE(dbcsr_type), POINTER                          :: k_p
       TYPE(dft_control_type), POINTER                    :: dft_control
-      TYPE(cp_logger_type), POINTER                      :: logger
+
       INTEGER:: output_unit
 
 ! code
@@ -719,9 +718,9 @@ CONTAINS
       CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, tmp, &
                                    res, p_env%n_mo(spin), alpha=1.0_dp, beta=1.0_dp)
 
-  !    CALL cp_fm_write_formatted(res,output_unit,"smatrix")
-  !    CALL cp_fm_write_formatted(p_env%m_epsilon(spin)%matrix,output_unit,"smatrix")
- !     CALL dbcsr_print(res,UNIT=output_unit)
+      !    CALL cp_fm_write_formatted(res,output_unit,"smatrix")
+      !    CALL cp_fm_write_formatted(p_env%m_epsilon(spin)%matrix,output_unit,"smatrix")
+      !     CALL dbcsr_print(res,UNIT=output_unit)
 
       CALL cp_fm_release(tmp)
       CALL timestop(handle)

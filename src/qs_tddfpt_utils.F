@@ -24,7 +24,6 @@ MODULE qs_tddfpt_utils
                                               cp_fm_release,&
                                               cp_fm_set_all,&
                                               cp_fm_set_submatrix,&
-                                              cp_fm_get_submatrix,&
                                               cp_fm_to_fm
    USE cp_log_handling,                 ONLY: cp_logger_get_default_io_unit
    USE dbcsr_api,                       ONLY: dbcsr_p_type
@@ -289,8 +288,8 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER :: routineN = 'find_contributions', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: i, j, n_ev, n_spins, occ, output_unit, &
-                                                            spin,virt,jspin,ii, n_ev_from_lumos
+      INTEGER                                            :: i, ii, j, jspin, n_ev, n_ev_from_lumos, &
+                                                            n_spins, occ, output_unit, spin, virt
       INTEGER, DIMENSION(2)                              :: nhomos, nlumos, nrows
       REAL(KIND=dp)                                      :: contribution, summed_contributions
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: homo_coeff_col, lumo_coeff_col
@@ -322,66 +321,65 @@ CONTAINS
          CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, t_control%lumos(spin)%matrix, &
                                       S_lumos(spin)%matrix, nlumos(spin), 1.0_dp, 0.0_dp)
       END DO
- 
 
       ALLOCATE (homo_coeff_col(MAXVAL(nrows(1:n_spins)), 1), &
                 lumo_coeff_col(MAXVAL(nrows(1:n_spins)), 1))
-      ii=0
-      DO spin=1,n_spins
-       DO i = 1, nhomos(spin)*nlumos(spin) !n_ev
-         ii = ii + 1
-         IF (ii .LE. n_ev) THEN
-         IF (output_unit > 0) THEN
-            WRITE (output_unit, '(A,I3,5X,F15.6)') "  excited state : ", ii, t_env%evals(ii)*evolt
-            WRITE (output_unit, *)
-         END IF
-           DO jspin=1,n_spins
-            summed_contributions = 0.0_dp
-            IF (n_spins == 2) THEN
-             IF (jspin == 1) THEN
-                IF (output_unit > 0) WRITE (output_unit, *) 'alpha:'
-             ELSE
-                IF (output_unit > 0) WRITE (output_unit, *) 'beta:'
-             END IF
+      ii = 0
+      DO spin = 1, n_spins
+         DO i = 1, nhomos(spin)*nlumos(spin) !n_ev
+            ii = ii+1
+            IF (ii .LE. n_ev) THEN
+            IF (output_unit > 0) THEN
+               WRITE (output_unit, '(A,I3,5X,F15.6)') "  excited state : ", ii, t_env%evals(ii)*evolt
+               WRITE (output_unit, *)
             END IF
-            searchloop: DO occ = nhomos(jspin), 1, -1
-              CALL cp_fm_get_submatrix(t_env%evecs(ii, jspin)%matrix, homo_coeff_col, &
-                                       1, occ, nrows(jspin),1) 
-              DO virt = 1, nlumos(jspin)
-                 CALL cp_fm_get_submatrix(S_lumos(jspin)%matrix, lumo_coeff_col, &
-                                          1, virt, nrows(jspin),1) 
-                 contribution = 0.0_dp
-                 DO j = 1, nrows(jspin) 
-                    contribution = contribution+homo_coeff_col(j, 1)*lumo_coeff_col(j, 1)
-                 END DO
-                 summed_contributions = summed_contributions+(contribution)**2
-                 IF (ABS(contribution) > 5.0e-2_dp) THEN
-                  IF (output_unit > 0) WRITE (output_unit, '(14X,I5,A,I5,10X,F8.3,5X,F8.3)') &
-                     occ, " ->", nhomos(spin)+virt, ABS(contribution), summed_contributions
-                 END IF
-                 IF (ABS(summed_contributions-1.0_dp) < 1.0e-3_dp) CYCLE searchloop
-              END DO
-            END DO searchloop
-           END DO
-         IF (output_unit > 0) WRITE (output_unit, *)
-         ENDIF
-       END DO
+            DO jspin = 1, n_spins
+               summed_contributions = 0.0_dp
+               IF (n_spins == 2) THEN
+                  IF (jspin == 1) THEN
+                     IF (output_unit > 0) WRITE (output_unit, *) 'alpha:'
+                  ELSE
+                     IF (output_unit > 0) WRITE (output_unit, *) 'beta:'
+                  END IF
+               END IF
+               searchloop: DO occ = nhomos(jspin), 1, -1
+                  CALL cp_fm_get_submatrix(t_env%evecs(ii, jspin)%matrix, homo_coeff_col, &
+                                           1, occ, nrows(jspin), 1)
+                  DO virt = 1, nlumos(jspin)
+                     CALL cp_fm_get_submatrix(S_lumos(jspin)%matrix, lumo_coeff_col, &
+                                              1, virt, nrows(jspin), 1)
+                     contribution = 0.0_dp
+                     DO j = 1, nrows(jspin)
+                        contribution = contribution+homo_coeff_col(j, 1)*lumo_coeff_col(j, 1)
+                     END DO
+                     summed_contributions = summed_contributions+(contribution)**2
+                     IF (ABS(contribution) > 5.0e-2_dp) THEN
+                        IF (output_unit > 0) WRITE (output_unit, '(14X,I5,A,I5,10X,F8.3,5X,F8.3)') &
+                           occ, " ->", nhomos(spin)+virt, ABS(contribution), summed_contributions
+                     END IF
+                     IF (ABS(summed_contributions-1.0_dp) < 1.0e-3_dp) CYCLE searchloop
+                  END DO
+               END DO searchloop
+            END DO
+            IF (output_unit > 0) WRITE (output_unit, *)
+            ENDIF
+         END DO
       END DO
 
-      n_ev_from_lumos=SUM(nhomos(1:n_spins)*nlumos(1:n_spins))
-      IF (n_ev.GT.n_ev_from_lumos) THEN
-        IF (output_unit > 0) THEN
-           WRITE (output_unit,'(A)') " No lumos available for the remaining excitation energies."
-           WRITE (output_unit,'(A)') " -> From now on printing only excitation energies without further assignment."
-           WRITE (output_unit,'(A)') " Increase # lumos with keyword NLUMO if desired otherwise."
-           WRITE (output_unit,*) 
-        END IF
-       DO ii=n_ev_from_lumos+1,n_ev
-        IF (output_unit > 0) THEN
-           WRITE (output_unit, '(A,I3,5X,F15.6)') "  excited state : ", ii, t_env%evals(ii)*evolt
-           WRITE (output_unit, *)
-        END IF
-       ENDDO
+      n_ev_from_lumos = SUM(nhomos(1:n_spins)*nlumos(1:n_spins))
+      IF (n_ev .GT. n_ev_from_lumos) THEN
+         IF (output_unit > 0) THEN
+            WRITE (output_unit, '(A)') " No lumos available for the remaining excitation energies."
+            WRITE (output_unit, '(A)') " -> From now on printing only excitation energies without further assignment."
+            WRITE (output_unit, '(A)') " Increase # lumos with keyword NLUMO if desired otherwise."
+            WRITE (output_unit, *)
+         END IF
+         DO ii = n_ev_from_lumos+1, n_ev
+            IF (output_unit > 0) THEN
+               WRITE (output_unit, '(A,I3,5X,F15.6)') "  excited state : ", ii, t_env%evals(ii)*evolt
+               WRITE (output_unit, *)
+            END IF
+         ENDDO
       ENDIF
 
       !
