@@ -207,8 +207,10 @@ CONTAINS
 
       IF (PRESENT(stda_env)) THEN
          p_env%stda_env => stda_env
-      ELSEIF (dft_control%tddfpt_control%kernel .EQ. 0) THEN
-         CALL allocate_stda_env(qs_env, p_env%stda_env)
+      ELSEIF (ASSOCIATED(dft_control%tddfpt_control)) THEN
+         IF (dft_control%tddfpt_control%kernel .EQ. 0) THEN
+            CALL allocate_stda_env(qs_env, p_env%stda_env)
+         END IF
       END IF
 
       IF (PRESENT(p1_option)) THEN
@@ -314,11 +316,15 @@ CONTAINS
 
       END IF
 
-! stda initialization
-      IF (dft_control%tddfpt_control%kernel .EQ. 0) THEN
-! initialize Ewald for stda ! do this in qs_environment
-         IF (dft_control%tddfpt_control%stda_control%do_ewald) CPABORT("ewald not working yet")
-         CALL stda_init_param(qs_env, p_env%n_mo, p_env%stda_env)
+      ! stda initialization
+      IF (ASSOCIATED(dft_control%tddfpt_control)) THEN
+         IF (dft_control%tddfpt_control%kernel == 0) THEN
+            ! initialize Ewald for stda ! do this in qs_environment
+            IF (dft_control%tddfpt_control%stda_control%do_ewald) THEN
+               CPABORT("ewald not working yet")
+            END IF
+            CALL stda_init_param(qs_env, p_env%stda_env)
+         ENDIF
       ENDIF
 
       CALL timestop(handle)
@@ -595,8 +601,10 @@ CONTAINS
       CALL kpp1_did_change(p_env%kpp1_env, psi0_changed=.TRUE.)
 
 ! stda initialization
-      IF (dft_control%tddfpt_control%kernel .EQ. 0) THEN
-         CALL stda_init_matrices(qs_env, p_env)
+      IF (ASSOCIATED(dft_control%tddfpt_control)) THEN
+         IF (dft_control%tddfpt_control%kernel .EQ. 0) THEN
+            CALL stda_init_matrices(qs_env, p_env)
+         ENDIF
       ENDIF
 
       CALL timestop(handle)

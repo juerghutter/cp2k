@@ -168,17 +168,16 @@ CONTAINS
 !> \param qs_env ...
 !> \param stda_env ...
 ! **************************************************************************************************
-   SUBROUTINE stda_init_param(qs_env, n_occ, stda_env)
+   SUBROUTINE stda_init_param(qs_env, stda_env)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      INTEGER,DIMENSION(2)                               :: n_occ
       TYPE(stda_env_type), POINTER                       :: stda_env
 
       CHARACTER(len=*), PARAMETER :: routineN = 'stda_init_param', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: excitations, handle, ikind, nkind, &
-                                                            output_unit, ispin, nspins
+      INTEGER                                            :: handle, ikind, nkind, &
+                                                            iounit
       LOGICAL                                            :: explicit
       REAL(KIND=dp)                                      :: rc
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
@@ -189,8 +188,7 @@ CONTAINS
       TYPE(gto_basis_set_type), POINTER                  :: tmp_basis_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(qs_kind_type), POINTER                        :: qs_kind
-      TYPE(section_vals_type), POINTER                   :: hfx_section, input, stda_section, &
-                                                            xc_section
+      TYPE(section_vals_type), POINTER                   :: input, stda_section
       TYPE(stda_control_type), POINTER                   :: stda_control
       TYPE(stda_kind_type), POINTER                      :: kind_param
 
@@ -198,7 +196,7 @@ CONTAINS
 
       NULLIFY (logger)
       logger => cp_get_default_logger()
-      output_unit = cp_logger_get_default_io_unit(logger)
+      iounit = cp_logger_get_default_io_unit(logger)
 
       CPASSERT(ASSOCIATED(stda_env))
       CPASSERT(ASSOCIATED(stda_env%kind_param_set))
@@ -235,9 +233,9 @@ CONTAINS
 !         END IF
 !         hfx_section => section_vals_get_subs_vals(xc_section, "HF")
 !         CALL section_vals_val_get(hfx_section, "FRACTION", r_val=stda_env%hfx_fraction)
-      IF (output_unit > 0) THEN
-         WRITE (output_unit, *)
-         WRITE (output_unit, '(A,T71,F10.3)') " STDA | Fraction a_x [a.u.]", &
+      IF (iounit > 0) THEN
+         WRITE (iounit, *)
+         WRITE (iounit, '(A,T71,F10.3)') " STDA | Fraction a_x [a.u.]", &
             stda_env%hfx_fraction   
       END IF              
 !      ENDIF                  
@@ -246,10 +244,10 @@ CONTAINS
       stda_env%alpha_param   = alpha(1)+stda_env%hfx_fraction*alpha(2)
       stda_env%beta_param    = beta(1)+stda_env%hfx_fraction*beta(2)
 
-      IF (output_unit > 0) THEN
-         WRITE (output_unit, '(A,T71,F10.3)') " STDA | Alpha parameter [a.u.]", &
+      IF (iounit > 0) THEN
+         WRITE (iounit, '(A,T71,F10.3)') " STDA | Alpha parameter [a.u.]", &
             stda_env%alpha_param 
-         WRITE (output_unit, '(A,T71,F10.3)') " STDA | Beta parameter [a.u.]", &
+         WRITE (iounit, '(A,T71,F10.3)') " STDA | Beta parameter [a.u.]", &
             stda_env%beta_param 
       END IF              
 
@@ -272,14 +270,14 @@ CONTAINS
                   0.5*plane_distance(0, 1, 0, cell), &
                   0.5*plane_distance(0, 0, 1, cell))
          IF (rc /= stda_control%cutoff_cou) THEN
-            IF (output_unit > 0) THEN
-               WRITE (output_unit, *)
-               WRITE (output_unit, '(A,T43,A)') " STDA |", &
+            IF (iounit > 0) THEN
+               WRITE (iounit, *)
+               WRITE (iounit, '(A,T43,A)') " STDA |", &
                   " Coulomb Integral cutoff was redefined"
-               WRITE (output_unit, '(A,T71,F10.3)') " STDA | Old value [a.u.]", &
+               WRITE (iounit, '(A,T71,F10.3)') " STDA | Old value [a.u.]", &
                   stda_control%cutoff_cou
-               WRITE (output_unit, '(A,T71,F10.3)') " STDA | New value [a.u.]", rc
-               WRITE (output_unit, *)
+               WRITE (iounit, '(A,T71,F10.3)') " STDA | New value [a.u.]", rc
+               WRITE (iounit, *)
             END IF
          END IF
          stda_control%cutoff_cou = rc
@@ -288,25 +286,25 @@ CONTAINS
                   plane_distance(0, 1, 0, cell), &
                   plane_distance(0, 0, 1, cell))
          IF (rc /= stda_control%cutoff_cou) THEN
-            IF (output_unit > 0) THEN
-               WRITE (output_unit, *)
-               WRITE (output_unit, '(A,T37,A)') " STDA |", &
+            IF (iounit > 0) THEN
+               WRITE (iounit, *)
+               WRITE (iounit, '(A,T37,A)') " STDA |", &
                   " Coulomb Integral cutoff was redefined"
-               WRITE (output_unit, '(A,T71,F10.3)') " STDA | Old value [a.u.]", &
+               WRITE (iounit, '(A,T71,F10.3)') " STDA | Old value [a.u.]", &
                   stda_control%cutoff_cou
-               WRITE (output_unit, '(A,T71,F10.3)') " STDA | New value [a.u.]", rc
-               WRITE (output_unit, *)
+               WRITE (iounit, '(A,T71,F10.3)') " STDA | New value [a.u.]", rc
+               WRITE (iounit, *)
             END IF
          END IF
          stda_control%cutoff_cou = rc
       ELSE 
-         IF (output_unit > 0) THEN
-            WRITE (output_unit, *)
-            WRITE (output_unit, '(A,T50,A)') " STDA |", &
+         IF (iounit > 0) THEN
+            WRITE (iounit, *)
+            WRITE (iounit, '(A,T50,A)') " STDA |", &
                " Coulomb Integral cutoff values"
-            WRITE (output_unit, '(A,T71,F10.3)') " STDA | Cutoff [a.u.]", &
+            WRITE (iounit, '(A,T71,F10.3)') " STDA | Cutoff [a.u.]", &
                stda_control%cutoff_cou
-            WRITE (output_unit, *)
+            WRITE (iounit, *)
          END IF
       ENDIF
 
@@ -532,7 +530,7 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       INTEGER                                            :: ispin, n_ao, n_occ,nspins ! n_unocc
-      INTEGER                                            :: output_unit
+      INTEGER                                            :: iounit
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
       TYPE(cp_para_env_type), POINTER                    :: para_env
@@ -542,7 +540,7 @@ CONTAINS
 
       NULLIFY (logger)
       logger => cp_get_default_logger()
-      output_unit = cp_logger_get_default_io_unit(logger)
+      iounit = cp_logger_get_default_io_unit(logger)
 
       IF (ASSOCIATED(atom_param)) &
          CALL deallocate_stda_atom_param(atom_param)

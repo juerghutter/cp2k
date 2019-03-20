@@ -744,24 +744,28 @@ CONTAINS
          END IF
       END IF
 
-      IF ((dft_control%tddfpt_control%do_kernel) .AND. (dft_control%tddfpt_control%kernel .EQ. 0)) THEN
-         IF (dft_control%tddfpt_control%stda_control%do_mic) THEN
-            default_present = .TRUE.
-            c_radius = dft_control%tddfpt_control%stda_control%cutoff_cou
-            ! Build the minimum image neighbor lists
-            CALL pair_radius_setup(default_present, default_present, c_radius, c_radius, pair_radius)
-            CALL build_neighbor_lists(sab_se, particle_set, atom2d, cell, pair_radius, mic=mic, &
-                                      subcells=subcells, nlname="sab_se")
-            CALL set_ks_env(ks_env=ks_env, sab_se=sab_se)
-            CALL write_neighbor_lists(sab_se, particle_set, cell, para_env, neighbor_list_section, &
-                                      "/SAB_SE", "sab_se", "HARTREE INTERACTIONS")
-
-            CALL pair_radius_setup(orb_present, orb_present, orb_radius, orb_radius, pair_radius)
-            CALL build_neighbor_lists(sab_orb_mic, particle_set, atom2d, cell, pair_radius, &
-                                      mic=.TRUE., subcells=subcells, molecular=molecule_only, nlname="sab_orb_mic")
-            CALL set_ks_env(ks_env=ks_env, sab_orb_mic=sab_orb_mic)
-            CALL write_neighbor_lists(sab_orb_mic, particle_set, cell, para_env, neighbor_list_section, &
-                                      "/SAB_ORB_MIC", "sab_orb_mic", "ORBITAL ORBITAL")
+      IF (ASSOCIATED(dft_control%tddfpt_control)) THEN
+         IF ((dft_control%tddfpt_control%do_kernel) .AND. &
+             (dft_control%tddfpt_control%kernel .EQ. 0)) THEN
+            IF (dft_control%tddfpt_control%stda_control%do_mic) THEN
+               default_present = .TRUE.
+               c_radius = dft_control%tddfpt_control%stda_control%cutoff_cou
+               ! Build the minimum image neighbor lists
+               CALL pair_radius_setup(default_present, default_present, c_radius, c_radius, pair_radius)
+               CALL build_neighbor_lists(sab_se, particle_set, atom2d, cell, pair_radius, mic=mic, &
+                                         subcells=subcells, nlname="sab_se")
+               CALL set_ks_env(ks_env=ks_env, sab_se=sab_se)
+               CALL write_neighbor_lists(sab_se, particle_set, cell, para_env, neighbor_list_section, &
+                                         "/SAB_SE", "sab_se", "HARTREE INTERACTIONS")
+   
+               CALL pair_radius_setup(orb_present, orb_present, orb_radius, orb_radius, pair_radius)
+               CALL build_neighbor_lists(sab_orb_mic, particle_set, atom2d, cell, pair_radius, &
+                                         mic=.TRUE., subcells=subcells, molecular=molecule_only, &
+                                         nlname="sab_orb_mic")
+               CALL set_ks_env(ks_env=ks_env, sab_orb_mic=sab_orb_mic)
+               CALL write_neighbor_lists(sab_orb_mic, particle_set, cell, para_env, neighbor_list_section, &
+                                         "/SAB_ORB_MIC", "sab_orb_mic", "ORBITAL ORBITAL")
+            ENDIF
          ENDIF
       ENDIF
 
@@ -822,20 +826,23 @@ CONTAINS
          END DO
          CALL pair_radius_setup(xb1_atom, xb2_atom, c_radius, c_radius, pair_radius)
          CALL build_neighbor_lists(sab_xb, particle_set, atom2d, cell, pair_radius, &
-                                   symmetric=.FALSE., subcells=subcells, operator_type="PP", nlname="sab_xb")
+                                   symmetric=.FALSE., subcells=subcells, &
+                                   operator_type="PP", nlname="sab_xb")
          CALL set_ks_env(ks_env=ks_env, sab_xb=sab_xb)
       END IF
 
-      IF ((dft_control%tddfpt_control%do_kernel) .AND. &
-          (dft_control%tddfpt_control%kernel .EQ. 0)) THEN
-         IF (dft_control%tddfpt_control%stda_control%do_ewald) THEN
-            CALL get_qs_env(qs_env=qs_env, ewald_env=ewald_env)
-            CALL ewald_env_get(ewald_env, alpha=alpha)
-            c_radius = 0.5_dp*SQRT(-LOG(3.5_dp*alpha**3*1.e-12_dp))/alpha
-            CALL pair_radius_setup(orb_present, orb_present, c_radius, c_radius, pair_radius)
-            CALL build_neighbor_lists(sab_tbe, particle_set, atom2d, cell, pair_radius, mic=mic, &
-                                      subcells=subcells, nlname="sab_tbe")
-            CALL set_ks_env(ks_env=ks_env, sab_tbe=sab_tbe)
+      IF (ASSOCIATED(dft_control%tddfpt_control)) THEN
+         IF ((dft_control%tddfpt_control%do_kernel) .AND. &
+             (dft_control%tddfpt_control%kernel == 0)) THEN
+            IF (dft_control%tddfpt_control%stda_control%do_ewald) THEN
+               CALL get_qs_env(qs_env=qs_env, ewald_env=ewald_env)
+               CALL ewald_env_get(ewald_env, rcut=rcut)
+               c_radius = rcut
+               CALL pair_radius_setup(orb_present, orb_present, c_radius, c_radius, pair_radius)
+               CALL build_neighbor_lists(sab_tbe, particle_set, atom2d, cell, pair_radius, mic=mic, &
+                                         subcells=subcells, nlname="sab_tbe")
+               CALL set_ks_env(ks_env=ks_env, sab_tbe=sab_tbe)
+            END IF
          END IF
       END IF
 

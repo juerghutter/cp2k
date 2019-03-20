@@ -530,26 +530,24 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'ewald_or_direct_sum', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: aa, ewald_type, handle, ia, iatom, ii, &
-                                                            ikind, ispin, jatom, jj, natom, nsgf, &
+      INTEGER                                            :: aa, ewald_type, handle, iatom, ii, &
+                                                            ispin, jatom, jj, natom, nsgf, &
                                                             nspins, output_unit, jkind, kkind, bb, &
                                                             res_etype, jspin
       INTEGER, DIMENSION(3)                              :: periodic
       INTEGER, DIMENSION(2)                              :: n_occ
       LOGICAL                                            :: do_ewald, do_mic
       REAL(KIND=dp) :: alpha, charge, deth, dr, gmcharge, loewdincharge_i, loewdincharge_j, tmp, &
-         tmp1, tmp_1_r, tmp2, tmp_coul, tmpa, tmpb, xmat, xtransformed_double_i, &
+         tmp1, tmp_1_r, tmp2, tmp_coul, xmat, xtransformed_double_i, &
          xtransformed_double_j, tmp_ex, tmpintern, tmp3, tmpintern2
-      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: r_pbc
       REAL(KIND=dp), DIMENSION(3)                        :: rij
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dft_control_type), POINTER                    :: dft_control
-      TYPE(distribution_1d_type), POINTER                :: local_particles
       TYPE(ewald_environment_type), POINTER              :: ewald_env
       TYPE(ewald_pw_type), POINTER                       :: ewald_pw
       TYPE(neighbor_list_set_p_type), DIMENSION(:), &
-         POINTER                                         :: n_list, sab_tbe
+         POINTER                                         :: n_list
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: first_sgf

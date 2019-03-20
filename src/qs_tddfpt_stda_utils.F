@@ -431,7 +431,7 @@ CONTAINS
       CALL cp_fm_release(matrix=fm_work1)
       NULLIFY (fm_work1, fm_s_half)
 
-      CALL lowdin_charges_fm(qs_env, p_env, stda_env, stda_env%ctransformed)
+      CALL lowdin_charges_fm(qs_env, stda_env, stda_env%ctransformed)
 
       CALL timestop(handle)
 
@@ -465,7 +465,6 @@ CONTAINS
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(qs_kind_type), POINTER                        :: qs_kind
-      TYPE(tddfpt_control_type), POINTER                 :: tddfpt_control
 
       CALL timeset(routineN, handle)
 
@@ -596,14 +595,12 @@ CONTAINS
 ! **************************************************************************************************
 !> \brief ...
 !> \param qs_env ...
-!> \param p_env ...
 !> \param stda_env ...
 !> \param ctransformed_occ ...
 ! **************************************************************************************************
-   SUBROUTINE lowdin_charges_fm(qs_env, p_env, stda_env, ctransformed_occ)
+   SUBROUTINE lowdin_charges_fm(qs_env, stda_env, ctransformed_occ)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      TYPE(qs_p_env_type), POINTER                       :: p_env
       TYPE(stda_env_type), POINTER                       :: stda_env
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: ctransformed_occ
 
@@ -779,15 +776,12 @@ CONTAINS
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: first_sgf
       INTEGER, DIMENSION(:), POINTER                     :: kind_of
       LOGICAL                                            :: do_ewald, do_mic, do_periodic, found
-      REAL(KIND=dp)                                      :: alpha, beta, kernel, tmp, tmp1, tmp2, spinfac
+      REAL(KIND=dp)                                      :: tmp, tmp1, tmp2, spinfac
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: coulombblock, exchangeblock
       TYPE(stda_env_type), POINTER                       :: stda_env
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
-      TYPE(cp_fm_struct_type), POINTER                   :: fmstruct
-      TYPE(cp_fm_type), POINTER                          :: ctilde, tmp_res, &
-                                                            Xdoubletilde, Xtilde
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(dft_control_type), POINTER                    :: dft_control

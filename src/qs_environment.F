@@ -693,23 +693,25 @@ CONTAINS
          END IF
       END IF
 ! initialize Ewald for stda ; for now done here
-      IF (dft_control%tddfpt_control%stda_control%do_ewald) THEN
-         WRITE (output_unit, *) 'do_ewald in qs_env', dft_control%tddfpt_control%stda_control%do_ewald
-         NULLIFY (ewald_env, ewald_pw)
-         CALL ewald_env_create(ewald_env, para_env)
-         poisson_section => section_vals_get_subs_vals(dft_section, "POISSON")
-         CALL ewald_env_set(ewald_env, poisson_section=poisson_section)
-         ewald_section => section_vals_get_subs_vals(poisson_section, "EWALD")
-         print_section => section_vals_get_subs_vals(qs_env%input, "PRINT%GRID_INFORMATION")
-         !  CALL get_qs_kind_set(qs_kind_set, basis_rcut=ewald_rcut)
-         CALL read_ewald_section(ewald_env, ewald_section)
-         ! create Ewald grids
-         CALL ewald_pw_create(ewald_pw, ewald_env, cell, cell_ref, print_section=print_section)
+      IF (ASSOCIATED(dft_control%tddfpt_control)) THEN
+         IF (dft_control%tddfpt_control%stda_control%do_ewald) THEN
+            WRITE (output_unit, *) 'do_ewald in qs_env', dft_control%tddfpt_control%stda_control%do_ewald
+            NULLIFY (ewald_env, ewald_pw)
+            CALL ewald_env_create(ewald_env, para_env)
+            poisson_section => section_vals_get_subs_vals(dft_section, "POISSON")
+            CALL ewald_env_set(ewald_env, poisson_section=poisson_section)
+            ewald_section => section_vals_get_subs_vals(poisson_section, "EWALD")
+            print_section => section_vals_get_subs_vals(qs_env%input, "PRINT%GRID_INFORMATION")
+            !  CALL get_qs_kind_set(qs_kind_set, basis_rcut=ewald_rcut)
+            CALL read_ewald_section(ewald_env, ewald_section)
+            ! create Ewald grids
+            CALL ewald_pw_create(ewald_pw, ewald_env, cell, cell_ref, print_section=print_section)
 !          ! initialize Ewald grids?
 !          ! setup the nonbond environment (real space part of Ewald)
-         CALL set_qs_env(qs_env, ewald_env=ewald_env, ewald_pw=ewald_pw)
-         CALL ewald_env_release(ewald_env)
-         CALL ewald_pw_release(ewald_pw)
+            CALL set_qs_env(qs_env, ewald_env=ewald_env, ewald_pw=ewald_pw)
+            CALL ewald_env_release(ewald_env)
+            CALL ewald_pw_release(ewald_pw)
+         ENDIF
       ENDIF
 
       ! lri or ri env initialization

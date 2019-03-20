@@ -46,7 +46,7 @@ MODULE input_cp2k_dft
         do_gapw_gct, do_gapw_log, do_loc_both, do_loc_crazy, do_loc_direct, do_loc_homo, &
         do_loc_jacobi, do_loc_l1_norm_sd, do_loc_lumo, do_loc_max, do_loc_min, do_loc_none, &
         do_lri_inv, do_lri_inv_auto, do_lri_opt_all, do_lri_opt_coeff, do_lri_opt_exps, &
-        do_lri_pseudoinv_diag, do_lri_pseudoinv_svd, do_method_am1, do_method_dftb, &
+        do_lri_pseudoinv_diag, do_lri_pseudoinv_svd, do_method_am1, do_method_dftb, do_method_xtb, &
         do_method_gapw, do_method_gapw_xc, do_method_gpw, do_method_lrigpw, do_method_mndo, &
         do_method_mndod, do_method_ofgpw, do_method_pdg, do_method_pm3, do_method_pm6, &
         do_method_pm6fm, do_method_pnnl, do_method_rigpw, do_method_rm1, do_pade, do_ppl_analytic, &
