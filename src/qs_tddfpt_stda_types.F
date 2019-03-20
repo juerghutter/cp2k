@@ -352,7 +352,6 @@ CONTAINS
          CALL get_mo_set(qs_env%mos(ispin)%mo_set, mo_coeff=qs_env_c)
          CALL cp_fm_get_info(qs_env_c, ncol_global=n_occ, nrow_global=n_ao)
          stda_env%n_occ(ispin) = n_occ
-         ! stda_env%n_unocc(ispin) =tddfpt_control%lumos(ispin)%matrix%matrix_struct%ncol_global
          stda_env%n_ao(ispin) = n_ao
       ENDDO
 

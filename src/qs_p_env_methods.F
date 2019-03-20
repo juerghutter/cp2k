@@ -89,7 +89,6 @@ MODULE qs_p_env_methods
    USE qs_tddfpt_stda_types,            ONLY: allocate_stda_env,&
                                               stda_env_type,&
                                               stda_init_param
-   USE qs_tddfpt_stda_utils,            ONLY: stda_init_matrices
    USE string_utilities,                ONLY: compress
 #include "./base/base_uses.f90"
 
@@ -243,7 +242,6 @@ CONTAINS
          p_env%n_ao(spin) = n_ao
       END DO
 
-      WRITE (output_unit, *) "orthogonal_orbitals", orthogonal_orbitals
       p_env%orthogonal_orbitals = .FALSE.
       IF (PRESENT(orthogonal_orbitals)) &
          p_env%orthogonal_orbitals = orthogonal_orbitals
@@ -597,13 +595,6 @@ CONTAINS
 
       ! tells kpp1_env about the change of psi0
       CALL kpp1_did_change(p_env%kpp1_env, psi0_changed=.TRUE.)
-
-! stda initialization
-      IF (ASSOCIATED(dft_control%tddfpt_control)) THEN
-         IF (dft_control%tddfpt_control%kernel .EQ. 0) THEN
-            CALL stda_init_matrices(qs_env, p_env)
-         ENDIF
-      ENDIF
 
       CALL timestop(handle)
 

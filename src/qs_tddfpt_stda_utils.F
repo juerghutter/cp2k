@@ -128,8 +128,7 @@ CONTAINS
 
       CHARACTER(len=20)                                  :: cstring
       INTEGER                                            :: handle, iatom, icol, ikind, irow, jatom, &
-                                                            jkind, natom, neighbor_list_id, nmat, &
-                                                            output_unit
+                                                            jkind, natom, neighbor_list_id, nmat
       INTEGER, DIMENSION(:), POINTER                     :: row_blk_sizes
       LOGICAL                                            :: do_ewald, do_mic, do_periodic, found
       REAL(KIND=dp)                                      :: dr, eta, fcut, r, ralpha, rbeta, rcut, &
@@ -137,7 +136,6 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(3)                        :: rij
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: gblock
       TYPE(cell_type), POINTER                           :: cell
-      TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_distribution_type), POINTER             :: dbcsr_dist
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(neighbor_list_iterator_p_type), &
@@ -147,10 +145,6 @@ CONTAINS
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
 
       CALL timeset(routineN, handle)
-
-      NULLIFY (logger) !get output_unit
-      logger => cp_get_default_logger()
-      output_unit = cp_logger_get_default_io_unit(logger)
 
       CALL get_qs_env(qs_env=qs_env, particle_set=particle_set, &
                       neighbor_list_id=neighbor_list_id, &
@@ -273,7 +267,6 @@ CONTAINS
             ENDIF
          END IF
 
-         WRITE (output_unit, *) 'gblock(:)', gblock(:, :), lexchange
       END DO
 
       CALL neighbor_list_iterator_release(nl_iterator)
@@ -297,8 +290,8 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'get_lowdin_transition_charges', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, ii, ispin, jj, n_occ, ndep, &
-                                                            nsgf, nspins, output_unit
+      INTEGER                                            :: handle, ii, iounit, ispin, jj, n_occ, &
+                                                            ndep, nsgf, nspins
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: values
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fmstruct
@@ -315,7 +308,7 @@ CONTAINS
 
       NULLIFY (logger) !get output_unit
       logger => cp_get_default_logger()
-      output_unit = cp_logger_get_default_io_unit(logger)
+      iounit = cp_logger_get_default_io_unit(logger)
 
       CPASSERT(ASSOCIATED(stda_env))
 
@@ -408,7 +401,7 @@ CONTAINS
                values(ii) = values(ii)+(ABS(fm_work2%local_data(jj, ii)))**2
             ENDDO
          ENDDO
-!         DO ii = 1, fmstruct%ncol_global
+!         DO ii = 1, fmstruct%ncol_global   !!!!!!!!!!!!KEEP THIS TEST AS DEBUG OPTION
 !            WRITE (UNIT=output_unit, FMT="(A,F10.8)") 'check sum lowdin coefficients only occ', values(ii)
 !         ENDDO
          DEALLOCATE (values)
@@ -707,21 +700,21 @@ CONTAINS
                                      para_env=para_env, &
                                      context=blacs_env, &
                                      nrow_global=basis_set%nsgf, &
-                                     ncol_global=nsgf) !p_env%n_ao(ispin))
+                                     ncol_global=nsgf)
             CALL cp_fm_create(matrix=fm_work2, &
                               matrix_struct=fmstruct, &
                               name="TMP MATRIX 2")
             CALL cp_fm_struct_release(fmstruct=fmstruct)
-!
+
             CALL cp_fm_to_fm_submat(ctransformed_occ(ispin)%matrix, fm_work1, basis_set%nsgf, n_occ, &
                                     first_sgf(iatom), 1, 1, 1)
-!
-            CALL cp_fm_to_fm_submat(stda_env%shalf, fm_work2, basis_set%nsgf, nsgf, & ! p_env%n_ao(ispin), &
+
+            CALL cp_fm_to_fm_submat(stda_env%shalf, fm_work2, basis_set%nsgf, nsgf, &
                                     first_sgf(iatom), 1, 1, 1)
 
             CALL cp_gemm(transa="T", &
                          transb="N", &
-                         m=nsgf, & !p_env%n_ao(ispin), &
+                         m=nsgf, &
                          n=n_occ, &
                          k=basis_set%nsgf, &
                          alpha=1.0_dp, &
@@ -850,7 +843,6 @@ CONTAINS
 
       CALL neighbor_list_iterator_create(nl_iterator, sab_orb)
       DO ispin = 1, nspins
-!      DO jspin=1,nspins
          DO WHILE (neighbor_list_iterate(nl_iterator) == 0)
             CALL get_iterator_info(nl_iterator, ikind=ikind, jkind=jkind, iatom=iatom, jatom=jatom)
             icol = MAX(iatom, jatom)
@@ -1128,7 +1120,6 @@ CONTAINS
                   ENDIF
 
 ! Coulomb-like
-                  !  IF (ispin.eq.jspin) THEN
                   tmp = 0.0_dp
                   DO jj = 1, n_occ(ispin)
                      CALL cp_fm_get_element(stda_env%atom_param_set(iatom)%atom_param%xtransformed_double(ispin)%matrix, &
@@ -1146,7 +1137,6 @@ CONTAINS
 
                   CALL cp_fm_get_element(res(ispin)%matrix, aa, ii, tmp)
                   CALL cp_fm_set_element(res(ispin)%matrix, aa, ii, tmp+tmp_coul)
-                  !  ENDIF
                ENDDO
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!IATOM.NE.JATOM
                IF (iatom .NE. jatom) THEN
@@ -1178,7 +1168,6 @@ CONTAINS
                      ENDIF
 
 ! Coulomb-like
-                     !  IF (ispin.eq.jspin) THEN
                      tmp = 0.0_dp
                      DO jj = 1, n_occ(ispin)
                         CALL cp_fm_get_element(stda_env%atom_param_set(jatom)%atom_param%xtransformed_double(ispin)%matrix, &
@@ -1196,7 +1185,6 @@ CONTAINS
 
                      CALL cp_fm_get_element(res(ispin)%matrix, aa, ii, tmp)
                      CALL cp_fm_set_element(res(ispin)%matrix, aa, ii, tmp+tmp_coul)
-                     !    ENDIF
                   ENDDO !!aa
 
                ENDIF !iatom.NE.jatom
@@ -1207,7 +1195,6 @@ CONTAINS
             !IF (iatom.NE.jatom) -----------------------------------------------------------------
          ENDDO !nl_iterator
       ENDDO !ispin
-!     ENDDO !jspin
 
 ! Ewald sum for Coulomb-like contribution
       IF (do_periodic) THEN

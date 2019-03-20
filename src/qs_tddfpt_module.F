@@ -11,6 +11,7 @@
 MODULE qs_tddfpt_module
    USE bibliography,                    ONLY: Iannuzzi2005,&
                                               cite_reference
+   USE cp_control_types,                ONLY: dft_control_type
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_io_unit,&
                                               cp_logger_type
@@ -42,6 +43,7 @@ MODULE qs_tddfpt_module
    USE qs_rho_types,                    ONLY: qs_rho_type
    USE qs_scf_types,                    ONLY: qs_scf_env_type
    USE qs_tddfpt_eigensolver,           ONLY: eigensolver
+   USE qs_tddfpt_stda_utils,            ONLY: stda_init_matrices
    USE qs_tddfpt_types,                 ONLY: tddfpt_env_type
    USE qs_tddfpt_utils,                 ONLY: find_contributions,&
                                               tddfpt_cleanup,&
@@ -71,6 +73,7 @@ CONTAINS
 
       INTEGER                                            :: handle, iw
       TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
       TYPE(qs_p_env_type), POINTER                       :: p_env
       TYPE(section_vals_type), POINTER                   :: dft_section, input
@@ -81,6 +84,8 @@ CONTAINS
       NULLIFY (input, ks_env)
       CALL get_qs_env(qs_env, ks_env=ks_env, input=input)
       dft_section => section_vals_get_subs_vals(input, "DFT")
+      NULLIFY (dft_control)
+      CALL get_qs_env(qs_env, dft_control=dft_control)
 
       IF (section_get_ival(dft_section, "EXCITATIONS") /= tddfpt_excitations) RETURN
       CALL cite_reference(Iannuzzi2005)
@@ -105,6 +110,13 @@ CONTAINS
       CALL set_ks_env(ks_env, rho_changed=.FALSE.)
 
       CALL tddfpt_init(p_env, t_env, qs_env)
+
+! stda initialization
+      IF (ASSOCIATED(dft_control%tddfpt_control)) THEN
+         IF (dft_control%tddfpt_control%kernel .EQ. 0) THEN
+            CALL stda_init_matrices(qs_env, p_env)
+         ENDIF
+      ENDIF
 
       CALL eigensolver(p_env, qs_env, t_env)
 
