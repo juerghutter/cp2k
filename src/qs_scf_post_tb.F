@@ -909,9 +909,9 @@ CONTAINS
          ! Always write eigenvalues
          IF (iounit > 0) WRITE (iounit, "(A)") " "
          IF (iounit > 0) WRITE (iounit, "(T3,A,I1)") &
-                            "Lowest Eigenvalues of the unoccupied subspace spin ", ispin
+            "Lowest Eigenvalues of the unoccupied subspace spin ", ispin
          IF (iounit > 0) WRITE (iounit, FMT='(T3,A)') &
-                            "-----------------------------------------------------"
+            "-----------------------------------------------------"
          CALL get_mo_set(mo_set=mos(ispin)%mo_set, mo_coeff=mo_coeff, homo=homo, nao=nao, nmo=nmo)
          CALL cp_fm_get_info(mo_coeff, nrow_global=n)
          nlumos = MAX(1, MIN(nlumo, nao-nmo))

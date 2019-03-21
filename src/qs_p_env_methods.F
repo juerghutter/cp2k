@@ -135,8 +135,8 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'p_env_create', routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, n_ao, n_mo, n_spins, natom, &
-                                                            output_unit, spin
+      INTEGER                                            :: handle, iounit, n_ao, n_mo, n_spins, &
+                                                            natom, spin
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_pool_p_type), DIMENSION(:), POINTER     :: ao_mo_fm_pools, mo_mo_fm_pools
       TYPE(cp_fm_type), POINTER                          :: qs_env_c
@@ -145,13 +145,12 @@ CONTAINS
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s
       TYPE(dft_control_type), POINTER                    :: dft_control
 
-      NULLIFY (logger) !get output_unit
-      logger => cp_get_default_logger()
-      output_unit = cp_logger_get_default_io_unit(logger)
-
-! code
-
       CALL timeset(routineN, handle)
+
+      NULLIFY (logger)
+      logger => cp_get_default_logger()
+      iounit = cp_logger_get_default_io_unit(logger)
+
       NULLIFY (ao_mo_fm_pools, mo_mo_fm_pools, matrix_s, dft_control, para_env, blacs_env)
       CALL get_qs_env(qs_env, &
                       matrix_s=matrix_s, &
@@ -405,8 +404,7 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'p_env_psi0_changed', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, lfomo, n_spins, nmo, &
-                                                            output_unit, spin
+      INTEGER                                            :: handle, iounit, lfomo, n_spins, nmo, spin
       LOGICAL                                            :: was_present
       REAL(KIND=dp)                                      :: maxocc
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: my_psi0
@@ -540,16 +538,16 @@ CONTAINS
 
       ! updates K (if necessary)
       CALL qs_ks_update_qs_env(qs_env)
-      output_unit = cp_print_key_unit_nr(logger, lr_section, "PRINT%PROGRAM_RUN_INFO", &
-                                         extension=".linresLog")
-      IF (output_unit > 0) THEN
+      iounit = cp_print_key_unit_nr(logger, lr_section, "PRINT%PROGRAM_RUN_INFO", &
+                                    extension=".linresLog")
+      IF (iounit > 0) THEN
          CALL section_vals_get(lr_section, explicit=was_present)
          IF (was_present) THEN
-            WRITE (UNIT=output_unit, FMT="(/,(T3,A,T55,F25.14))") &
+            WRITE (UNIT=iounit, FMT="(/,(T3,A,T55,F25.14))") &
                "Total energy ground state:                     ", energy%total
          END IF
       END IF
-      CALL cp_print_key_finished_output(output_unit, logger, lr_section, &
+      CALL cp_print_key_finished_output(iounit, logger, lr_section, &
                                         "PRINT%PROGRAM_RUN_INFO")
       !-----------------------------------------------------------------------|
       ! calculates                                                            |
@@ -662,7 +660,7 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'p_op_l1_spin', routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, ncol
+      INTEGER                                            :: handle, iounit, ncol
       TYPE(cp_fm_type), POINTER                          :: tmp
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(cp_para_env_type), POINTER                    :: para_env
@@ -670,12 +668,9 @@ CONTAINS
       TYPE(dbcsr_type), POINTER                          :: k_p
       TYPE(dft_control_type), POINTER                    :: dft_control
 
-      INTEGER:: output_unit
-
-! code
-      NULLIFY (logger) !get output_unit
+      NULLIFY (logger)
       logger => cp_get_default_logger()
-      output_unit = cp_logger_get_default_io_unit(logger)
+      iounit = cp_logger_get_default_io_unit(logger)
 
       CALL timeset(routineN, handle)
       NULLIFY (tmp, matrix_ks, matrix_s, dft_control)
@@ -709,9 +704,9 @@ CONTAINS
       CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, tmp, &
                                    res, p_env%n_mo(spin), alpha=1.0_dp, beta=1.0_dp)
 
-      !    CALL cp_fm_write_formatted(res,output_unit,"smatrix")
-      !    CALL cp_fm_write_formatted(p_env%m_epsilon(spin)%matrix,output_unit,"smatrix")
-      !     CALL dbcsr_print(res,UNIT=output_unit)
+      !    CALL cp_fm_write_formatted(res,iounit,"smatrix")
+      !    CALL cp_fm_write_formatted(p_env%m_epsilon(spin)%matrix,iounit,"smatrix")
+      !     CALL dbcsr_print(res,UNIT=iounit)
 
       CALL cp_fm_release(tmp)
       CALL timestop(handle)

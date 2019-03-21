@@ -77,8 +77,7 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'eigensolver', routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, n_ev, nspins, output_unit, &
-                                                            restarts
+      INTEGER                                            :: handle, iounit, n_ev, nspins, restarts
       LOGICAL                                            :: do_kernel_save
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: ievals
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -87,7 +86,7 @@ CONTAINS
 
       NULLIFY (dft_control)
 
-      output_unit = cp_logger_get_default_io_unit()
+      iounit = cp_logger_get_default_io_unit()
 
       CALL get_qs_env(qs_env, dft_control=dft_control)
       n_ev = dft_control%tddfpt_control%n_ev
@@ -100,21 +99,21 @@ CONTAINS
       !---------------!
       do_kernel_save = dft_control%tddfpt_control%do_kernel
       dft_control%tddfpt_control%do_kernel = .FALSE.
-      IF (output_unit > 0) THEN
-         WRITE (output_unit, *) " Generating initial guess"
-         WRITE (output_unit, *)
+      IF (iounit > 0) THEN
+         WRITE (iounit, "(T3,A)") "Generating initial guess"
+         WRITE (iounit, *)
       END IF
       IF (ASSOCIATED(dft_control%tddfpt_control%lumos)) THEN
          CALL co_initial_guess(t_env%evecs, ievals, n_ev, qs_env)
       ELSE
-         IF (output_unit > 0) WRITE (output_unit, *) "LUMOS are needed in TDDFPT!"
+         IF (iounit > 0) WRITE (iounit, *) "LUMOS are needed in TDDFPT!"
          CPABORT("")
       END IF
       DO restarts = 1, dft_control%tddfpt_control%n_restarts
          IF (iterative_solver(ievals, t_env, p_env, qs_env, ievals)) EXIT
-         IF (output_unit > 0) THEN
-            WRITE (output_unit, *) " Restarting"
-            WRITE (output_unit, *)
+         IF (iounit > 0) THEN
+            WRITE (iounit, *) " Restarting"
+            WRITE (iounit, *)
          END IF
       END DO
       dft_control%tddfpt_control%do_kernel = do_kernel_save
@@ -123,27 +122,27 @@ CONTAINS
       ! call the solver !
       !-----------------!
       IF (dft_control%tddfpt_control%kernel .EQ. 1) THEN
-         IF (output_unit > 0) THEN
-            WRITE (output_unit, *)
-            WRITE (output_unit, *) " Doing TDDFPT calculation"
-            WRITE (output_unit, *)
+         IF (iounit > 0) THEN
+            WRITE (iounit, *)
+            WRITE (iounit, *) " Doing TDDFPT calculation"
+            WRITE (iounit, *)
          ENDIF
       ELSEIF (dft_control%tddfpt_control%kernel .EQ. 0) THEN
-         IF (output_unit > 0) THEN
-            WRITE (output_unit, *)
-            WRITE (output_unit, *) " Doing sTDA calculation"
-            WRITE (output_unit, *)
+         IF (iounit > 0) THEN
+            WRITE (iounit, *)
+            WRITE (iounit, *) " Doing sTDA calculation"
+            WRITE (iounit, *)
          ENDIF
       ELSE
-         IF (output_unit > 0) WRITE (output_unit, *) "Chosen TDDFPT kernel not implemented!", &
+         IF (iounit > 0) WRITE (iounit, *) "Chosen TDDFPT kernel not implemented!", &
             "Choose either full kernel or sTDA kernel"
          CPABORT("")
       ENDIF
       DO restarts = 1, dft_control%tddfpt_control%n_restarts
          IF (iterative_solver(ievals, t_env, p_env, qs_env, t_env%evals)) EXIT
-         IF (output_unit > 0) THEN
-            WRITE (output_unit, *) " Restarting"
-            WRITE (output_unit, *)
+         IF (iounit > 0) THEN
+            WRITE (iounit, *) " Restarting"
+            WRITE (iounit, *)
          END IF
       END DO
 
@@ -189,10 +188,9 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       CHARACTER                                          :: mode
-      INTEGER                                            :: col, handle, i, iev, iter, j, k, &
+      INTEGER                                            :: col, handle, i, iev, iounit, iter, j, k, &
                                                             max_excitations, max_krylovspace_dim, &
-                                                            max_kv, n_ev, n_kv, nspins, &
-                                                            output_unit, row, spin
+                                                            max_kv, n_ev, n_kv, nspins, row, spin
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: must_improve
       REAL(dp)                                           :: Atilde_ij, convergence, tmp, tmp2
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals_difference, evals_tmp
@@ -224,7 +222,7 @@ CONTAINS
                       blacs_env=blacs_env)
 
       tddfpt_control => dft_control%tddfpt_control
-      output_unit = cp_logger_get_default_io_unit()
+      iounit = cp_logger_get_default_io_unit()
       n_ev = tddfpt_control%n_ev
       nspins = dft_control%nspins
 
@@ -242,15 +240,15 @@ CONTAINS
       max_kv = tddfpt_control%max_kv
       IF (max_krylovspace_dim <= max_kv) THEN
          max_kv = max_krylovspace_dim
-         IF (output_unit > 0) THEN
-            WRITE (output_unit, *) "  Setting the maximum number of krylov vectors to ", max_kv, "!!"
+         IF (iounit > 0) THEN
+            WRITE (iounit, *) "  Setting the maximum number of krylov vectors to ", max_kv, "!!"
          END IF
       END IF
       max_excitations = SUM((p_env%n_ao(1:nspins)-p_env%n_mo(1:nspins))*p_env%n_mo(1:nspins))
       IF (max_excitations <= n_ev) THEN
          tddfpt_control%n_ev = max_excitations
          n_ev = tddfpt_control%n_ev
-         WRITE (output_unit, *) "  The maximum number of excitations is limited to ", max_excitations, "!!"
+         WRITE (iounit, *) "  The maximum number of excitations is limited to ", max_excitations, "!!"
       END IF
       IF (max_kv <= n_ev) THEN
          CPABORT("Please increase # krylov vectors (to at least # requested excitations)")
@@ -288,10 +286,10 @@ CONTAINS
          END DO
       END DO
 
-      IF (output_unit > 0) THEN
-         WRITE (output_unit, '(2X,A,T69,A)') &
+      IF (iounit > 0) THEN
+         WRITE (iounit, '(2X,A,T69,A)') &
             "nvec", "Convergence"
-         WRITE (output_unit, '(2X,A)') &
+         WRITE (iounit, '(2X,A)') &
             "-----------------------------------------------------------------------------"
       END IF
 
@@ -377,7 +375,7 @@ CONTAINS
                   END DO
 
                ELSE
-                  IF (output_unit > 0) WRITE (output_unit, *) "unknown mode"
+                  IF (iounit > 0) WRITE (iounit, *) "unknown mode"
                   CPABORT("")
                END IF
 
@@ -451,16 +449,16 @@ CONTAINS
 
             evals_difference(:) = ABS((evals(1:n_ev, iter-1)-evals(1:n_ev, iter)))
             ! For debugging
-            IF (output_unit > 0) THEN
-               WRITE (output_unit, *)
+            IF (iounit > 0) THEN
+               WRITE (iounit, *)
                DO i = 1, n_ev
-                  WRITE (output_unit, '(2X,F10.7,T69,ES11.4)') evals(i, iter)*evolt, evals_difference(i)
+                  WRITE (iounit, '(2X,F10.7,T69,ES11.4)') evals(i, iter)*evolt, evals_difference(i)
                END DO
-               WRITE (output_unit, *)
+               WRITE (iounit, *)
             END IF
 
             convergence = MAXVAL(evals_difference)
-            IF (output_unit > 0) WRITE (output_unit, '(2X,I4,T69,ES11.4)') k, convergence
+            IF (iounit > 0) WRITE (iounit, '(2X,I4,T69,ES11.4)') k, convergence
             IF (convergence < tddfpt_control%tolerance) THEN
                res = .TRUE.
                EXIT iteration
@@ -573,13 +571,9 @@ CONTAINS
       INTEGER, SAVE                                      :: counter = 0
       TYPE(dft_control_type), POINTER                    :: dft_control
 
-      INTEGER:: output_unit
-
-      output_unit = cp_logger_get_default_io_unit()
+      CALL timeset(routineN, handle)
 
       NULLIFY (dft_control)
-
-      CALL timeset(routineN, handle)
 
       counter = counter+1
       CALL get_qs_env(qs_env, dft_control=dft_control)

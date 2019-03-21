@@ -204,6 +204,7 @@ MODULE qs_scf_post_gpw
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_scf_post_gpw'
    PUBLIC :: scf_post_calculation_gpw, &
              qs_scf_post_moments, &
+             make_lumo_gpw, &
              write_available_results, &
              write_mo_free_results
 
@@ -236,9 +237,9 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'scf_post_calculation_gpw', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, homo, ispin, min_lumos, n_rep, &
-                                                            nhomo, nlumo, nlumo_stm, nlumo_tddft, &
-                                                            nlumos, nmo, iounit, unit_nr
+      INTEGER                                            :: handle, homo, iounit, ispin, min_lumos, &
+                                                            n_rep, nhomo, nlumo, nlumo_stm, &
+                                                            nlumos, nmo, unit_nr
       INTEGER, DIMENSION(:, :, :), POINTER               :: marked_states
       LOGICAL :: check_write, compute_lumos, do_homo, do_kpoints, do_mo_cubes, do_stm, &
          do_wannier_cubes, has_homo, has_lumo, loc_explicit, loc_print_explicit, my_localized_wfn, &
@@ -413,10 +414,6 @@ CONTAINS
       END IF
       nlumo = section_get_ival(dft_section, "PRINT%MO_CUBES%NLUMO")
       nhomo = section_get_ival(dft_section, "PRINT%MO_CUBES%NHOMO")
-      nlumo_tddft = 0
-      IF (dft_control%do_tddfpt_calculation) THEN
-         nlumo_tddft = section_get_ival(dft_section, "TDDFPT%NLUMO")
-      END IF
 
       ! Setup the grids needed to compute a wavefunction given a vector..
       IF (((do_mo_cubes .OR. do_wannier_cubes) .AND. (nlumo /= 0 .OR. nhomo /= 0)) .OR. p_loc) THEN
@@ -439,7 +436,7 @@ CONTAINS
          CALL get_qs_env(qs_env, &
                          mos=mos, &
                          matrix_ks=ks_rmpv)
-         IF ((do_mo_cubes .AND. nhomo /= 0) .OR. do_stm .OR. dft_control%do_tddfpt_calculation) THEN
+         IF ((do_mo_cubes .AND. nhomo /= 0) .OR. do_stm) THEN
             IF (dft_control%restricted) THEN
                IF (iounit > 0) WRITE (iounit, *) &
                   " Unclear how we define MOs in the restricted case ... skipping"
@@ -528,10 +525,7 @@ CONTAINS
             CPWARN("Localization and MO related output not implemented for k-point calculations!")
          END IF
       ELSE
-         IF (nlumo .GT. -1) THEN
-            nlumo = MAX(nlumo, nlumo_tddft)
-         END IF
-         compute_lumos = (do_mo_cubes .OR. dft_control%do_tddfpt_calculation) .AND. nlumo .NE. 0
+         compute_lumos = do_mo_cubes .AND. nlumo .NE. 0
          compute_lumos = compute_lumos .OR. p_loc_lumo
 
          DO ispin = 1, dft_control%nspins
@@ -553,7 +547,7 @@ CONTAINS
                   END IF
                   IF (iounit > 0) WRITE (iounit, "(A)") " "
                   IF (iounit > 0) WRITE (iounit, "(T3,A,I1)") &
-                                     "Lowest eigenvalues of the unoccupied subspace spin ", ispin
+                     "Lowest eigenvalues of the unoccupied subspace spin ", ispin
                   IF (iounit > 0) WRITE (iounit, "(T3,A)") "---------------------------------------------"
                   IF (iounit > 0) WRITE (iounit, '(5F16.8)') mo_eigenvalues(homo+1:homo+nlumo)
 
@@ -580,7 +574,7 @@ CONTAINS
 
             ALLOCATE (unoccupied_orbs(dft_control%nspins))
             ALLOCATE (unoccupied_evals(dft_control%nspins))
-            CALL make_lumo(qs_env, scf_env, unoccupied_orbs, unoccupied_evals, min_lumos, nlumos)
+            CALL make_lumo_gpw(qs_env, scf_env, unoccupied_orbs, unoccupied_evals, min_lumos, nlumos)
             lumo_ptr => unoccupied_orbs
             DO ispin = 1, dft_control%nspins
                has_lumo = .TRUE.
@@ -594,16 +588,6 @@ CONTAINS
                                                particles, nlumos, homo, ispin)
                END IF
             END DO
-
-            ! Save the info for tddfpt calculation
-            IF (dft_control%do_tddfpt_calculation) THEN
-               ALLOCATE (dft_control%tddfpt_control%lumos_eigenvalues(nlumos, dft_control%nspins))
-               DO ispin = 1, dft_control%nspins
-                  dft_control%tddfpt_control%lumos_eigenvalues(1:nlumos, ispin) = &
-                     unoccupied_evals(ispin)%array(1:nlumos)
-               END DO
-               dft_control%tddfpt_control%lumos => unoccupied_orbs
-            END IF
 
             IF (p_loc_lumo) THEN
                ALLOCATE (lumo_localized(dft_control%nspins))
@@ -666,13 +650,10 @@ CONTAINS
          IF (compute_lumos) THEN
             DO ispin = 1, dft_control%nspins
                DEALLOCATE (unoccupied_evals(ispin)%array)
-               IF (.NOT. dft_control%do_tddfpt_calculation) &
-                  CALL cp_fm_release(unoccupied_orbs(ispin)%matrix)
+               CALL cp_fm_release(unoccupied_orbs(ispin)%matrix)
             ENDDO
             DEALLOCATE (unoccupied_evals)
-            IF (.NOT. dft_control%do_tddfpt_calculation) THEN
-               DEALLOCATE (unoccupied_orbs)
-            END IF
+            DEALLOCATE (unoccupied_orbs)
          ENDIF
       ENDIF
 
@@ -684,8 +665,8 @@ CONTAINS
             IF (nlumo_stm > 0) THEN
                ALLOCATE (unoccupied_orbs_stm(dft_control%nspins))
                ALLOCATE (unoccupied_evals_stm(dft_control%nspins))
-               CALL make_lumo(qs_env, scf_env, unoccupied_orbs_stm, unoccupied_evals_stm, &
-                              nlumo_stm, nlumos)
+               CALL make_lumo_gpw(qs_env, scf_env, unoccupied_orbs_stm, unoccupied_evals_stm, &
+                                  nlumo_stm, nlumos)
             END IF
 
             CALL th_stm_image(qs_env, stm_section, particles, unoccupied_orbs_stm, &
@@ -739,7 +720,7 @@ CONTAINS
 !> \param nlumo ...
 !> \param nlumos ...
 ! **************************************************************************************************
-   SUBROUTINE make_lumo(qs_env, scf_env, unoccupied_orbs, unoccupied_evals, nlumo, nlumos)
+   SUBROUTINE make_lumo_gpw(qs_env, scf_env, unoccupied_orbs, unoccupied_evals, nlumo, nlumos)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(qs_scf_env_type), POINTER                     :: scf_env
@@ -748,10 +729,9 @@ CONTAINS
       INTEGER                                            :: nlumo
       INTEGER, INTENT(OUT)                               :: nlumos
 
-      CHARACTER(len=*), PARAMETER :: routineN = 'make_lumo', routineP = moduleN//':'//routineN
+      CHARACTER(len=*), PARAMETER :: routineN = 'make_lumo_gpw', routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, homo, ispin, n, nao, nmo, &
-                                                            iounit
+      INTEGER                                            :: handle, homo, iounit, ispin, n, nao, nmo
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct_tmp
@@ -786,9 +766,9 @@ CONTAINS
          ! Always write eigenvalues
          IF (iounit > 0) WRITE (iounit, "(A)") " "
          IF (iounit > 0) WRITE (iounit, "(T3,A,I1)") &
-                            " Lowest Eigenvalues of the unoccupied subspace spin ", ispin
+            "Lowest Eigenvalues of the unoccupied subspace spin ", ispin
          IF (iounit > 0) WRITE (iounit, FMT='(T3,A)') &
-                            "-----------------------------------------------------"
+            "-----------------------------------------------------"
          CALL get_mo_set(mo_set=mos(ispin)%mo_set, mo_coeff=mo_coeff, homo=homo, nao=nao, nmo=nmo)
          CALL cp_fm_get_info(mo_coeff, nrow_global=n)
          nlumos = MAX(1, MIN(nlumo, nao-nmo))
@@ -836,7 +816,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE make_lumo
+   END SUBROUTINE make_lumo_gpw
 ! **************************************************************************************************
 !> \brief Computes and Prints Atomic Charges with several methods
 !> \param input ...
@@ -1311,7 +1291,7 @@ CONTAINS
 
       CHARACTER(LEN=default_path_length)                 :: filename, mpi_filename, my_pos_cube, &
                                                             title
-      INTEGER                                            :: handle, ispin, iounit, unit_nr
+      INTEGER                                            :: handle, iounit, ispin, unit_nr
       LOGICAL                                            :: append_cube, do_elf, gapw, mpi_io
       REAL(dp)                                           :: rho_cutoff
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -1549,7 +1529,7 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'write_mo_dependent_results', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, homo, ik, ispin, nmo, iounit
+      INTEGER                                            :: handle, homo, ik, iounit, ispin, nmo
       LOGICAL                                            :: all_equal, do_kpoints
       REAL(KIND=dp)                                      :: maxocc, s_square, s_square_ideal, &
                                                             total_abs_spin_dens
@@ -1769,8 +1749,8 @@ CONTAINS
       CHARACTER(LEN=default_path_length)                 :: filename, mpi_filename, my_pos_cube
       CHARACTER(LEN=default_string_length)               :: name
       INTEGER                                            :: after, handle, i, iat, id, ikind, img, &
-                                                            iso, ispin, iw, l, nd(3), ngto, niso, &
-                                                            nkind, np, nr, iounit, &
+                                                            iounit, iso, ispin, iw, l, nd(3), &
+                                                            ngto, niso, nkind, np, nr, &
                                                             print_level, unit_nr
       LOGICAL :: append_cube, do_kpoints, mpi_io, omit_headers, print_it, print_total_density, &
          rho_r_valid, write_ks, write_xc, xrd_interface
@@ -2874,7 +2854,7 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       CHARACTER(LEN=default_path_length)                 :: file_name, fileformat
-      INTEGER                                            :: handle, ispin, iounit, unit_nr
+      INTEGER                                            :: handle, iounit, ispin, unit_nr
       LOGICAL                                            :: bin, do_kpoints, do_ks_csr_write, uptr
       REAL(KIND=dp)                                      :: thld
       TYPE(cp_logger_type), POINTER                      :: logger
@@ -2951,7 +2931,7 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       CHARACTER(LEN=default_path_length)                 :: file_name, fileformat
-      INTEGER                                            :: handle, ispin, iounit, unit_nr
+      INTEGER                                            :: handle, iounit, ispin, unit_nr
       LOGICAL                                            :: bin, do_kpoints, do_s_csr_write, uptr
       REAL(KIND=dp)                                      :: thld
       TYPE(cp_logger_type), POINTER                      :: logger
@@ -3028,8 +3008,8 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       INTEGER                                            :: adjm_size, colind, handle, iatom, ikind, &
-                                                            ind, jatom, jkind, k, natom, nkind, &
-                                                            iounit, rowind, unit_nr
+                                                            ind, iounit, jatom, jkind, k, natom, &
+                                                            nkind, rowind, unit_nr
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: interact_adjm
       LOGICAL                                            :: do_adjm_write, do_symmetric
       TYPE(cp_logger_type), POINTER                      :: logger

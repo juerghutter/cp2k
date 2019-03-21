@@ -692,7 +692,7 @@ CONTAINS
             CALL ewald_pw_release(ewald_pw)
          END IF
       END IF
-! initialize Ewald for stda ; for now done here
+      ! initialize Ewald for stda ; for now done here
       IF (ASSOCIATED(dft_control%tddfpt_control)) THEN
          IF (dft_control%tddfpt_control%stda_control%do_ewald) THEN
             WRITE (output_unit, *) 'do_ewald in qs_env', dft_control%tddfpt_control%stda_control%do_ewald
@@ -706,8 +706,8 @@ CONTAINS
             CALL read_ewald_section(ewald_env, ewald_section)
             ! create Ewald grids
             CALL ewald_pw_create(ewald_pw, ewald_env, cell, cell_ref, print_section=print_section)
-!          ! initialize Ewald grids?
-!          ! setup the nonbond environment (real space part of Ewald)
+            ! initialize Ewald grids?
+            ! setup the nonbond environment (real space part of Ewald)
             CALL set_qs_env(qs_env, ewald_env=ewald_env, ewald_pw=ewald_pw)
             CALL ewald_env_release(ewald_env)
             CALL ewald_pw_release(ewald_pw)
@@ -728,15 +728,13 @@ CONTAINS
 
       !   *** Check that no all-electron potential is present if GPW or GAPW_XC
       CALL get_qs_kind_set(qs_kind_set, all_potential_present=all_potential_present)
-!!!!!! HAG FOR NO POTENTIAL
-!      IF ((dft_control%qs_control%method == "GPW") .OR. &
-!          (dft_control%qs_control%method == "GAPW_XC") .OR. &
-!          (dft_control%qs_control%method == "OFGPW")) THEN
-!         IF (all_potential_present) THEN
-!            CPABORT("All-el calculations with GPW, GAPW_XC, and OFGPW are not implemented ")
-!         END IF
-!      END IF
-!!!!!! HAG FOR NO POTENTIAL
+      IF ((dft_control%qs_control%method == "GPW") .OR. &
+          (dft_control%qs_control%method == "GAPW_XC") .OR. &
+          (dft_control%qs_control%method == "OFGPW")) THEN
+         IF (all_potential_present) THEN
+            CPWARN("All-El calculations with GPW, GAPW_XC, and OFGPW are not recommended")
+         END IF
+      END IF
 
       ! DFT+U
       CALL get_qs_kind_set(qs_kind_set, dft_plus_u_atom_present=dft_control%dft_plus_u)

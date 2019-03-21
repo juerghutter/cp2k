@@ -83,8 +83,9 @@ CONTAINS
       INTEGER, PARAMETER                                 :: max_iter_inner_loop = 40
       REAL(KIND=dp), PARAMETER                           :: rone = 1.0_dp, rzero = 0.0_dp
 
-      INTEGER                                            :: handle, ieigensolver, iter_total, k, n, &
-                                                            ortho_k, ortho_space_k, output_unit
+      INTEGER                                            :: handle, ieigensolver, iounit, &
+                                                            iter_total, k, n, ortho_k, &
+                                                            ortho_space_k
       LOGICAL                                            :: energy_only, my_silent, ortho
       REAL(KIND=dp)                                      :: delta, energy
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_hc
@@ -95,7 +96,7 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      output_unit = cp_logger_get_default_io_unit()
+      iounit = cp_logger_get_default_io_unit()
 
       IF (PRESENT(silent)) THEN
          my_silent = silent
@@ -246,7 +247,7 @@ CONTAINS
             ENDIF
          ENDIF
 
-!     *** Eigensolver loop ***
+         ! *** Eigensolver loop ***
          ieigensolver = 0
          eigensolver_loop: DO
 
@@ -286,19 +287,23 @@ CONTAINS
          CALL dbcsr_release_p(matrix_orthogonal_space)
 
          IF (delta < eps_gradient) THEN
-            IF ((output_unit > 0) .AND. .NOT. my_silent) THEN
-               WRITE (output_unit, *) " Reached convergence in ", iter_total, " iterations "
+            IF ((iounit > 0) .AND. .NOT. my_silent) THEN
+               WRITE (iounit, "(T2,A,T60,I10,T70,A)") &
+                  "Reached convergence in ", iter_total, " iterations"
             ENDIF
             EXIT outer_scf
          ENDIF
          IF (iter_total >= iter_max) THEN
-            IF (output_unit > 0) THEN
+            IF (iounit > 0) THEN
                IF (my_silent) THEN
-                  WRITE (output_unit, "(A,T60,E20.10)") "  WARNING OT eigensolver did not converge: current gradient", delta
+                  WRITE (iounit, "(T3,A,T61,E20.10)") &
+                     "WARNING OT eigensolver did not converge: current gradient", delta
                ELSE
-                  WRITE (output_unit, *) "WARNING : did not converge in ot_eigensolver"
-                  WRITE (output_unit, *) "number of iterations ", iter_total, " exceeded maximum"
-                  WRITE (output_unit, *) "current gradient / target gradient", delta, " / ", eps_gradient
+                  WRITE (iounit, "(T3,A)") "WARNING : did not converge in ot_eigensolver"
+                  WRITE (iounit, "(T3,A,T54,I10,T64,A)") &
+                     "Number of iterations ", iter_total, " exceeded maximum"
+                  WRITE (iounit, "(T3,A,T48,E15.8,A,E15.8)") &
+                     "Current gradient / Target gradient", delta, " / ", eps_gradient
                END IF
             ENDIF
             EXIT outer_scf

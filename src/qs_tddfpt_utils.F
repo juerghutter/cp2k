@@ -8,6 +8,8 @@
 !>      09-JUL-2002, TCH, development started
 ! **************************************************************************************************
 MODULE qs_tddfpt_utils
+   USE admm_types,                      ONLY: admm_type
+   USE cp_array_utils,                  ONLY: cp_1d_r_p_type
    USE cp_control_types,                ONLY: dft_control_type,&
                                               tddfpt_control_type
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
@@ -25,32 +27,42 @@ MODULE qs_tddfpt_utils
                                               cp_fm_set_all,&
                                               cp_fm_set_submatrix,&
                                               cp_fm_to_fm
-   USE cp_log_handling,                 ONLY: cp_logger_get_default_io_unit
+   USE cp_log_handling,                 ONLY: cp_get_default_logger,&
+                                              cp_logger_get_default_io_unit,&
+                                              cp_logger_type
    USE dbcsr_api,                       ONLY: dbcsr_p_type
+   USE input_section_types,             ONLY: section_get_ival,&
+                                              section_vals_get_subs_vals,&
+                                              section_vals_type
    USE kinds,                           ONLY: dp
    USE physcon,                         ONLY: evolt
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
-   USE qs_mo_types,                     ONLY: get_mo_set
+   USE qs_mo_methods,                   ONLY: make_mo_eig
+   USE qs_mo_types,                     ONLY: get_mo_set,&
+                                              mo_set_p_type
    USE qs_p_env_methods,                ONLY: p_env_create,&
                                               p_env_psi0_changed
    USE qs_p_env_types,                  ONLY: p_env_release,&
                                               qs_p_env_type
+   USE qs_scf_post_gpw,                 ONLY: make_lumo_gpw
+   USE qs_scf_types,                    ONLY: qs_scf_env_type
+   USE qs_tddfpt_stda_utils,            ONLY: stda_init_matrices
    USE qs_tddfpt_types,                 ONLY: tddfpt_env_allocate,&
                                               tddfpt_env_deallocate,&
                                               tddfpt_env_type
+   USE scf_control_types,               ONLY: scf_control_type
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_tddfpt_utils'
-   LOGICAL, PARAMETER          :: DEBUG_THIS_MODULE = .TRUE.
 
 ! **************************************************************************************************
    TYPE simple_solution_sorter
       INTEGER                               :: orbit
       INTEGER                               :: lumo
-      REAL(KIND=DP)                         :: value
+      REAL(KIND=dp)                         :: value
       TYPE(simple_solution_sorter), POINTER :: next
    END TYPE simple_solution_sorter
 
@@ -61,8 +73,11 @@ MODULE qs_tddfpt_utils
              tddfpt_init, &
              co_initial_guess, &
              find_contributions, &
+             make_orbital_sets, &
              normalize, &
              reorthogonalize
+
+! **************************************************************************************************
 
 CONTAINS
 
@@ -81,10 +96,11 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_init', routineP = moduleN//':'//routineN
 
-!------------------!
-! create the p_env !
-!------------------!
+      TYPE(dft_control_type), POINTER                    :: dft_control
 
+      !------------------!
+      ! create the p_env !
+      !------------------!
       CALL p_env_create(p_env, qs_env, orthogonal_orbitals=.TRUE.)
       CALL p_env_psi0_changed(p_env, qs_env) ! update the m_epsilon matrix
 
@@ -93,6 +109,14 @@ CONTAINS
       !------------------!
       CALL tddfpt_env_allocate(t_env, p_env, qs_env)
       CALL tddfpt_env_init(t_env, qs_env)
+
+      !---------------------!
+      ! sTDA initialization !
+      !---------------------!
+      CALL get_qs_env(qs_env, dft_control=dft_control)
+      IF (dft_control%tddfpt_control%kernel == 0) THEN
+         CALL stda_init_matrices(qs_env, p_env)
+      ENDIF
 
    END SUBROUTINE tddfpt_init
 
@@ -146,6 +170,121 @@ CONTAINS
 
 ! **************************************************************************************************
 !> \brief ...
+!> \param qs_env ...
+!> \par History
+!>      03.2019 created [jgh]
+!> \author jgh
+! **************************************************************************************************
+   SUBROUTINE make_orbital_sets(qs_env)
+
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'make_orbital_sets', &
+         routineP = moduleN//':'//routineN
+
+      CHARACTER(LEN=20)                                  :: subspace_selection
+      INTEGER                                            :: handle, homo, iounit, ispin, min_lumos, &
+                                                            nlumo, nlumos, nmo, nspins
+      LOGICAL                                            :: compute_lumos, has_homo, has_lumo
+      REAL(KIND=dp)                                      :: gap, homo_lumo(2, 2)
+      REAL(KIND=dp), DIMENSION(:), POINTER               :: mo_eigenvalues
+      TYPE(admm_type), POINTER                           :: admm_env
+      TYPE(cp_1d_r_p_type), DIMENSION(:), POINTER        :: unoccupied_evals
+      TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: unoccupied_orbs
+      TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: ks_rmpv, mo_derivs
+      TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(mo_set_p_type), DIMENSION(:), POINTER         :: mos
+      TYPE(qs_scf_env_type), POINTER                     :: scf_env
+      TYPE(scf_control_type), POINTER                    :: scf_control
+      TYPE(section_vals_type), POINTER                   :: dft_section, input
+
+      CALL timeset(routineN, handle)
+
+      CPASSERT(ASSOCIATED(qs_env))
+      logger => cp_get_default_logger()
+      iounit = cp_logger_get_default_io_unit(logger)
+
+      IF (iounit > 0) THEN
+         WRITE (UNIT=iounit, FMT='(T3,A)') "Generating Orbital Sets"
+      ENDIF
+
+      ! test input for requested options
+      CALL get_qs_env(qs_env, input=input)
+      dft_section => section_vals_get_subs_vals(input, "DFT")
+      nlumo = section_get_ival(dft_section, "TDDFPT%NLUMO")
+
+      has_homo = .FALSE.
+      has_lumo = .FALSE.
+
+      CALL get_qs_env(qs_env, dft_control=dft_control)
+      nspins = dft_control%nspins
+
+      ! Select active occupied subspace
+      subspace_selection = "ALL"
+!     subspace_selection = "ENERGY_WINDOW"
+!     subspace_selection = "LOCALIZATION"
+      IF (subspace_selection == "ALL" .OR. subspace_selection == "ENERGY_WINDOW") THEN
+         ! Makes the MOs eigenstates, computes eigenvalues
+         CALL get_qs_env(qs_env, mos=mos, mo_derivs=mo_derivs, matrix_ks=ks_rmpv)
+         CALL get_qs_env(qs_env, scf_control=scf_control)
+         IF (dft_control%do_admm) THEN
+            CALL get_qs_env(qs_env, admm_env=admm_env)
+            CALL make_mo_eig(mos, nspins, ks_rmpv, scf_control, mo_derivs, admm_env=admm_env)
+         ELSE
+            CALL make_mo_eig(mos, nspins, ks_rmpv, scf_control, mo_derivs)
+         END IF
+         DO ispin = 1, nspins
+            NULLIFY (mo_eigenvalues)
+            CALL get_mo_set(mo_set=mos(ispin)%mo_set, eigenvalues=mo_eigenvalues, homo=homo)
+            homo_lumo(ispin, 1) = mo_eigenvalues(homo)
+         END DO
+         has_homo = .TRUE.
+      END IF
+
+      ! Gets the lumos, and eigenvalues for the lumos
+      compute_lumos = nlumo .NE. 0
+      DO ispin = 1, nspins
+         CALL get_mo_set(mo_set=mos(ispin)%mo_set, homo=homo, nmo=nmo)
+         compute_lumos = compute_lumos .AND. homo == nmo
+      END DO
+      IF (compute_lumos) THEN
+         ALLOCATE (unoccupied_orbs(nspins))
+         ALLOCATE (unoccupied_evals(nspins))
+         CALL get_qs_env(qs_env, scf_env=scf_env)
+         CPASSERT(ASSOCIATED(scf_env))
+         CPASSERT(scf_env%ref_count > 0)
+
+         min_lumos = nlumo
+         CALL make_lumo_gpw(qs_env, scf_env, unoccupied_orbs, unoccupied_evals, min_lumos, nlumos)
+         ALLOCATE (dft_control%tddfpt_control%lumos_eigenvalues(nlumos, nspins))
+         DO ispin = 1, nspins
+            dft_control%tddfpt_control%lumos_eigenvalues(1:nlumos, ispin) = &
+               unoccupied_evals(ispin)%array(1:nlumos)
+         END DO
+         dft_control%tddfpt_control%lumos => unoccupied_orbs
+      ENDIF
+      IF (has_homo .AND. has_lumo) THEN
+         DO ispin = 1, nspins
+            gap = homo_lumo(ispin, 2)-homo_lumo(ispin, 1)
+            IF (iounit > 0) WRITE (iounit, '(T3,A,F12.6)') &
+               "HOMO - LUMO gap [eV] :", gap*evolt
+         ENDDO
+      ENDIF
+
+      IF (compute_lumos) THEN
+         DO ispin = 1, nspins
+            DEALLOCATE (unoccupied_evals(ispin)%array)
+         ENDDO
+         DEALLOCATE (unoccupied_evals)
+      ENDIF
+
+      CALL timestop(handle)
+
+   END SUBROUTINE make_orbital_sets
+
+! **************************************************************************************************
+!> \brief ...
 !> \param matrices ...
 !> \param energies ...
 !> \param n_v ...
@@ -170,8 +309,6 @@ CONTAINS
       TYPE(simple_solution_sorter), POINTER              :: sorter_iterator, sorter_pointer, &
                                                             sorter_start
       TYPE(tddfpt_control_type), POINTER                 :: tddfpt_control
-
-! number of vectors to initialize
 
       NULLIFY (dft_control)
 
@@ -288,8 +425,9 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER :: routineN = 'find_contributions', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: i, ii, j, jspin, n_ev, n_ev_from_lumos, &
-                                                            n_spins, occ, output_unit, spin, virt
+      INTEGER                                            :: i, ii, iounit, j, jspin, n_ev, &
+                                                            n_ev_from_lumos, n_spins, occ, spin, &
+                                                            virt
       INTEGER, DIMENSION(2)                              :: nhomos, nlumos, nrows
       REAL(KIND=dp)                                      :: contribution, summed_contributions
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: homo_coeff_col, lumo_coeff_col
@@ -299,11 +437,11 @@ CONTAINS
       TYPE(tddfpt_control_type)                          :: t_control
 
       NULLIFY (S_lumos, matrix_s, dft_control)
-      output_unit = cp_logger_get_default_io_unit()
+      iounit = cp_logger_get_default_io_unit()
       CALL get_qs_env(qs_env, matrix_s=matrix_s, dft_control=dft_control)
 
-      IF (output_unit > 0) WRITE (output_unit, *)
-      IF (output_unit > 0) WRITE (output_unit, *)
+      IF (iounit > 0) WRITE (iounit, *)
+      IF (iounit > 0) WRITE (iounit, *)
 
       t_control = dft_control%tddfpt_control
       n_ev = t_control%n_ev
@@ -315,7 +453,7 @@ CONTAINS
          nrows(spin) = t_control%lumos(spin)%matrix%matrix_struct%nrow_global
          nhomos(spin) = t_env%evecs(1, spin)%matrix%matrix_struct%ncol_global
          nlumos(spin) = t_control%lumos(spin)%matrix%matrix_struct%ncol_global
-!   nlumos(spin) = nrows(spin)-nhomos(spin)
+         !   nlumos(spin) = nrows(spin)-nhomos(spin)
          CALL cp_fm_create(S_lumos(spin)%matrix, t_control%lumos(spin)%matrix%matrix_struct, &
                            "S times lumos")
          CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, t_control%lumos(spin)%matrix, &
@@ -329,17 +467,17 @@ CONTAINS
          DO i = 1, nhomos(spin)*nlumos(spin) !n_ev
             ii = ii+1
             IF (ii .LE. n_ev) THEN
-            IF (output_unit > 0) THEN
-               WRITE (output_unit, '(A,I3,5X,F15.6)') "  excited state : ", ii, t_env%evals(ii)*evolt
-               WRITE (output_unit, *)
+            IF (iounit > 0) THEN
+               WRITE (iounit, '(A,I3,5X,F15.6)') "  excited state : ", ii, t_env%evals(ii)*evolt
+               WRITE (iounit, *)
             END IF
             DO jspin = 1, n_spins
                summed_contributions = 0.0_dp
                IF (n_spins == 2) THEN
                   IF (jspin == 1) THEN
-                     IF (output_unit > 0) WRITE (output_unit, *) 'alpha:'
+                     IF (iounit > 0) WRITE (iounit, *) 'alpha:'
                   ELSE
-                     IF (output_unit > 0) WRITE (output_unit, *) 'beta:'
+                     IF (iounit > 0) WRITE (iounit, *) 'beta:'
                   END IF
                END IF
                searchloop: DO occ = nhomos(jspin), 1, -1
@@ -354,38 +492,39 @@ CONTAINS
                      END DO
                      summed_contributions = summed_contributions+(contribution)**2
                      IF (ABS(contribution) > 5.0e-2_dp) THEN
-                        IF (output_unit > 0) WRITE (output_unit, '(14X,I5,A,I5,10X,F8.3,5X,F8.3)') &
+                        IF (iounit > 0) WRITE (iounit, '(14X,I5,A,I5,10X,F8.3,5X,F8.3)') &
                            occ, " ->", nhomos(spin)+virt, ABS(contribution), summed_contributions
                      END IF
                      IF (ABS(summed_contributions-1.0_dp) < 1.0e-3_dp) CYCLE searchloop
                   END DO
                END DO searchloop
             END DO
-            IF (output_unit > 0) WRITE (output_unit, *)
+            IF (iounit > 0) WRITE (iounit, *)
             ENDIF
          END DO
       END DO
 
       n_ev_from_lumos = SUM(nhomos(1:n_spins)*nlumos(1:n_spins))
       IF (n_ev .GT. n_ev_from_lumos) THEN
-         IF (output_unit > 0) THEN
-            WRITE (output_unit, '(A)') " No lumos available for the remaining excitation energies."
-            WRITE (output_unit, '(A)') " -> From now on printing only excitation energies without further assignment."
-            WRITE (output_unit, '(A)') " Increase # lumos with keyword NLUMO if desired otherwise."
-            WRITE (output_unit, *)
+         IF (iounit > 0) THEN
+            WRITE (iounit, '(A)') " No lumos available for the remaining excitation energies."
+            WRITE (iounit, '(A,A)') " -> From now on printing only excitation energies", &
+               " without further assignment."
+            WRITE (iounit, '(A)') " Increase # lumos with keyword NLUMO if desired otherwise."
+            WRITE (iounit, *)
          END IF
          DO ii = n_ev_from_lumos+1, n_ev
-            IF (output_unit > 0) THEN
-               WRITE (output_unit, '(A,I3,5X,F15.6)') "  excited state : ", ii, t_env%evals(ii)*evolt
-               WRITE (output_unit, *)
+            IF (iounit > 0) THEN
+               WRITE (iounit, '(A,I3,5X,F15.6)') "  excited state : ", ii, t_env%evals(ii)*evolt
+               WRITE (iounit, *)
             END IF
          ENDDO
       ENDIF
 
       !
       ! punch a checksum for the regs
-      IF (output_unit > 0) THEN
-         WRITE (output_unit, '(T2,A,E14.6)') ' TDDFPT : CheckSum  =', SQRT(SUM(t_env%evals**2))
+      IF (iounit > 0) THEN
+         WRITE (iounit, '(T2,A,E14.6)') ' TDDFPT : CheckSum  =', SQRT(SUM(t_env%evals**2))
       ENDIF
 
       DO spin = 1, n_spins
@@ -399,6 +538,10 @@ CONTAINS
 
 ! **************************************************************************************************
 !> \brief ...
+!> !---------------------------------------!
+!> ! x must not be changed in this routine !
+!> ! tmp_vec may be changed                !
+!> !---------------------------------------!
 !> \param X ...
 !> \param tmp_vec ...
 !> \param metric ...
@@ -431,10 +574,6 @@ CONTAINS
 
    END SUBROUTINE normalize
 
-   !---------------------------------------!
-   ! x must not be changed in this routine !
-   ! tmp_vec may be changed                !
-   !---------------------------------------!
 ! **************************************************************************************************
 !> \brief ...
 !> \param X ...
@@ -454,7 +593,7 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       INTEGER                                            :: handle, i, n_spins, spin
-      REAL(DP)                                           :: dot_product, tmp
+      REAL(KIND=dp)                                      :: dotp, tmp
 
       CALL timeset(routineN, handle)
 
@@ -466,14 +605,14 @@ CONTAINS
          END DO
 
          DO i = 1, n
-            dot_product = 0.0_dp
+            dotp = 0.0_dp
             DO spin = 1, n_spins
                CALL cp_fm_trace(SV_set(i, spin)%matrix, work(spin)%matrix, tmp)
-               dot_product = dot_product+tmp
+               dotp = dotp+tmp
             END DO
             DO spin = 1, n_spins
                CALL cp_fm_scale_and_add(1.0_dp, X(spin)%matrix, &
-                                        -1.0_dp*dot_product, V_set(i, spin)%matrix)
+                                        -1.0_dp*dotp, V_set(i, spin)%matrix)
             END DO
          END DO
 
@@ -482,4 +621,5 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE reorthogonalize
+
 END MODULE qs_tddfpt_utils

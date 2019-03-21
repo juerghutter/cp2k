@@ -505,7 +505,7 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'subspace_eigenvalues_ks_fm', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, i, j, ncol_global, nrow_global
+      INTEGER                                            :: handle, ncol_global, nrow_global
       LOGICAL                                            :: compute_evecs, do_rotation_local
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: evals
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct_tmp
@@ -525,7 +525,8 @@ CONTAINS
       IF (do_rotation_local) THEN
          compute_evecs = .TRUE.
       ELSE
-         ! this would be the logical choice if syevx computing only evals were faster than syevd computing evecs and evals.
+         ! this would be the logical choice if syevx computing only evals were faster
+         ! than syevd computing evecs and evals.
          compute_evecs = .FALSE.
          ! this is not the case, so lets compute evecs always
          compute_evecs = .TRUE.
@@ -591,19 +592,7 @@ CONTAINS
             IF (.NOT. PRESENT(ionode)) CPABORT("IONODE?")
             IF (.NOT. PRESENT(scr)) CPABORT("SCR?")
             IF (ionode) THEN
-               DO i = 1, ncol_global, 4
-                  j = MIN(3, ncol_global-i)
-                  SELECT CASE (j)
-                  CASE (3)
-                     WRITE (scr, '(1X,4F16.8)') evals(i:i+j)
-                  CASE (2)
-                     WRITE (scr, '(1X,3F16.8)') evals(i:i+j)
-                  CASE (1)
-                     WRITE (scr, '(1X,2F16.8)') evals(i:i+j)
-                  CASE (0)
-                     WRITE (scr, '(1X,1F16.8)') evals(i:i+j)
-                  END SELECT
-               ENDDO
+               WRITE (scr, '(5F16.8)') evals(1:ncol_global)
             ENDIF
          ENDIF
 
@@ -648,7 +637,7 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'subspace_eigenvalues_ks_dbcsr', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, i, j, ncol_global, nrow_global
+      INTEGER                                            :: handle, ncol_global, nrow_global
       LOGICAL                                            :: compute_evecs, do_rotation_local
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: evals
       TYPE(dbcsr_type), POINTER                          :: e_vectors, h_block, weighted_vectors
@@ -667,7 +656,8 @@ CONTAINS
       IF (do_rotation_local) THEN
          compute_evecs = .TRUE.
       ELSE
-         ! this would be the logical choice if syevx computing only evals were faster than syevd computing evecs and evals.
+         ! this would be the logical choice if syevx computing only evals were faster
+         ! than syevd computing evecs and evals.
          compute_evecs = .FALSE.
          ! this is not the case, so lets compute evecs always
          compute_evecs = .TRUE.
@@ -741,19 +731,7 @@ CONTAINS
             IF (.NOT. PRESENT(ionode)) CPABORT("IONODE?")
             IF (.NOT. PRESENT(scr)) CPABORT("SCR?")
             IF (ionode) THEN
-               DO i = 1, ncol_global, 4
-                  j = MIN(3, ncol_global-i)
-                  SELECT CASE (j)
-                  CASE (3)
-                     WRITE (scr, '(1X,4F16.8)') evals(i:i+j)
-                  CASE (2)
-                     WRITE (scr, '(1X,3F16.8)') evals(i:i+j)
-                  CASE (1)
-                     WRITE (scr, '(1X,2F16.8)') evals(i:i+j)
-                  CASE (0)
-                     WRITE (scr, '(1X,1F16.8)') evals(i:i+j)
-                  END SELECT
-               ENDDO
+               WRITE (scr, '(5F16.8)') evals(1:ncol_global)
             ENDIF
          ENDIF
 
@@ -927,7 +905,7 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'make_mo_eig', routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, homo, ispin, nmo, iounut
+      INTEGER                                            :: handle, homo, iounut, ispin, nmo
       REAL(KIND=dp), DIMENSION(:), POINTER               :: mo_eigenvalues
       TYPE(cp_fm_type), POINTER                          :: mo_coeff
       TYPE(dbcsr_type), POINTER                          :: mo_coeff_deriv

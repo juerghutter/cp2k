@@ -11,7 +11,6 @@
 MODULE qs_tddfpt_module
    USE bibliography,                    ONLY: Iannuzzi2005,&
                                               cite_reference
-   USE cp_control_types,                ONLY: dft_control_type
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_io_unit,&
                                               cp_logger_type
@@ -43,9 +42,9 @@ MODULE qs_tddfpt_module
    USE qs_rho_types,                    ONLY: qs_rho_type
    USE qs_scf_types,                    ONLY: qs_scf_env_type
    USE qs_tddfpt_eigensolver,           ONLY: eigensolver
-   USE qs_tddfpt_stda_utils,            ONLY: stda_init_matrices
    USE qs_tddfpt_types,                 ONLY: tddfpt_env_type
    USE qs_tddfpt_utils,                 ONLY: find_contributions,&
+                                              make_orbital_sets,&
                                               tddfpt_cleanup,&
                                               tddfpt_init
    USE xc_pot_saop,                     ONLY: add_saop_pot
@@ -73,50 +72,41 @@ CONTAINS
 
       INTEGER                                            :: handle, iw
       TYPE(cp_logger_type), POINTER                      :: logger
-      TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
       TYPE(qs_p_env_type), POINTER                       :: p_env
       TYPE(section_vals_type), POINTER                   :: dft_section, input
       TYPE(tddfpt_env_type)                              :: t_env
 
-      NULLIFY (logger)
-      logger => cp_get_default_logger()
-      NULLIFY (input, ks_env)
-      CALL get_qs_env(qs_env, ks_env=ks_env, input=input)
+      CALL get_qs_env(qs_env, input=input)
       dft_section => section_vals_get_subs_vals(input, "DFT")
-      NULLIFY (dft_control)
-      CALL get_qs_env(qs_env, dft_control=dft_control)
-
       IF (section_get_ival(dft_section, "EXCITATIONS") /= tddfpt_excitations) RETURN
-      CALL cite_reference(Iannuzzi2005)
 
       CALL timeset(routineN, handle)
 
-      IF (section_get_ival(dft_section, "TDDFPT%OE_CORR") /= oe_none) THEN
-         CALL orbital_eigenvalue_correction(qs_env)
-      END IF
+      CALL cite_reference(Iannuzzi2005)
 
-      NULLIFY (p_env)
-
+      NULLIFY (logger)
+      logger => cp_get_default_logger()
       iw = cp_print_key_unit_nr(logger, dft_section, "PRINT%PROGRAM_BANNER", &
                                 extension=".Log")
       CALL tddfpt_header(iw)
       CALL cp_print_key_finished_output(iw, logger, dft_section, &
                                         "PRINT%PROGRAM_BANNER")
 
+      CALL make_orbital_sets(qs_env)
+
+      IF (section_get_ival(dft_section, "TDDFPT%OE_CORR") /= oe_none) THEN
+         CALL orbital_eigenvalue_correction(qs_env)
+      END IF
+
       !---------------------------------------!
       ! we don't want to update the KS matrix !
       !---------------------------------------!
+      CALL get_qs_env(qs_env, ks_env=ks_env)
       CALL set_ks_env(ks_env, rho_changed=.FALSE.)
 
+      NULLIFY (p_env)
       CALL tddfpt_init(p_env, t_env, qs_env)
-
-! stda initialization
-      IF (ASSOCIATED(dft_control%tddfpt_control)) THEN
-         IF (dft_control%tddfpt_control%kernel .EQ. 0) THEN
-            CALL stda_init_matrices(qs_env, p_env)
-         ENDIF
-      ENDIF
 
       CALL eigensolver(p_env, qs_env, t_env)
 
@@ -140,7 +130,7 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER :: routineN = 'orbital_eigenvalue_correction', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: oe_corr, output_unit
+      INTEGER                                            :: iounit, oe_corr
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks
       TYPE(qs_energy_type), POINTER                      :: energy
@@ -152,10 +142,10 @@ CONTAINS
 
       NULLIFY (logger, scf_env, input, energy, matrix_ks, rho)
       logger => cp_get_default_logger()
-      output_unit = cp_logger_get_default_io_unit(logger)
+      iounit = cp_logger_get_default_io_unit(logger)
 
-      IF (output_unit > 0) THEN
-         WRITE (output_unit, "(2X,A)") "", &
+      IF (iounit > 0) THEN
+         WRITE (iounit, "(2X,A)") "", &
             "-----------------------------------------------------------------------------", &
             "-                    orbital eigenvalue correction started                  -", &
             "-----------------------------------------------------------------------------", &

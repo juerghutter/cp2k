@@ -38,7 +38,6 @@ MODULE qs_tddfpt_stda_types
                                               section_vals_type,&
                                               section_vals_val_get
    USE kinds,                           ONLY: dp
-   USE particle_types,                  ONLY: particle_type
    USE physcon,                         ONLY: evolt
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
@@ -205,12 +204,12 @@ CONTAINS
       DO ikind = 1, nkind
          atomic_kind => atomic_kind_set(ikind)
          kind_param => stda_env%kind_param_set(ikind)%kind_param
+         ! element symbol, kind_number, atomic number
          CALL get_atomic_kind(atomic_kind, &
-                              element_symbol=stda_env%kind_param_set(ikind)%kind_param%symbol, & !element symbol
-                              kind_number=stda_env%kind_param_set(ikind)%kind_param%kind_number, & !kind_number
-                              z=stda_env%kind_param_set(ikind)%kind_param%z) !atomic number
-         NULLIFY (kind_param)
-      ENDDO !ikind
+                              element_symbol=stda_env%kind_param_set(ikind)%kind_param%symbol, &
+                              kind_number=stda_env%kind_param_set(ikind)%kind_param%kind_number, &
+                              z=stda_env%kind_param_set(ikind)%kind_param%z)
+      ENDDO
 
 ! HFx_fraction
       NULLIFY (input)
@@ -329,25 +328,32 @@ CONTAINS
       TYPE(cp_fm_type), POINTER                          :: qs_env_c
       TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(dft_control_type), POINTER                    :: dft_control
-      TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(stda_atom_type), POINTER                      :: atom_param
       TYPE(stda_kind_type), POINTER                      :: kind_param
 
       CALL timeset(routineN, handle)
 
+      CPASSERT(.NOT. ASSOCIATED(stda_env))
       ALLOCATE (stda_env)
-
-      NULLIFY (dft_control)
-      CALL get_qs_env(qs_env, dft_control=dft_control)
-      nspins = dft_control%nspins
 
       stda_env%hfx_fraction = 0.0d0
       stda_env%alpha_param = 0.0d0
       stda_env%beta_param = 0.0d0
       stda_env%n_occ = 0
+      stda_env%n_ao = 0
+      NULLIFY (stda_env%atom_param_set)
+      NULLIFY (stda_env%kind_param_set)
+      NULLIFY (stda_env%gamma_coulomb)
+      NULLIFY (stda_env%gamma_exchange)
+      NULLIFY (stda_env%ctransformed)
+      NULLIFY (stda_env%xtransformed)
+      NULLIFY (stda_env%shalf)
 
-! get number of occ orbitals / atomic orbitals
+      CALL get_qs_env(qs_env, dft_control=dft_control)
+      nspins = dft_control%nspins
+
+      ! get number of occ orbitals / atomic orbitals
       DO ispin = 1, nspins
          CALL get_mo_set(qs_env%mos(ispin)%mo_set, mo_coeff=qs_env_c)
          CALL cp_fm_get_info(qs_env_c, ncol_global=n_occ, nrow_global=n_ao)
@@ -355,51 +361,35 @@ CONTAINS
          stda_env%n_ao(ispin) = n_ao
       ENDDO
 
-! initialize stda_kind_parameters
-      NULLIFY (qs_kind_set) !get different kinds
+      ! initialize stda_kind_parameters
       CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set)
       nkind = SIZE(qs_kind_set)
 
       ALLOCATE (stda_env%kind_param_set(nkind))
-      NULLIFY (kind_param)
-
       DO ii = 1, nkind
-         ALLOCATE (stda_env%kind_param_set(ii)%kind_param)
-         kind_param => stda_env%kind_param_set(ii)%kind_param
+         NULLIFY (kind_param)
          CALL allocate_stda_kind_param(kind_param)
+         stda_env%kind_param_set(ii)%kind_param => kind_param
       ENDDO
 
-! initialize stda_atom_parameters
-      NULLIFY (particle_set) ! get total number of atoms
-      CALL get_qs_env(qs_env, particle_set=particle_set)
-      natoms = SIZE(particle_set)
-
+      ! initialize stda_atom_parameters
+      CALL get_qs_env(qs_env=qs_env, natom=natoms)
       ALLOCATE (stda_env%atom_param_set(natoms))
-      NULLIFY (atom_param)
-
       DO ii = 1, natoms
-         ALLOCATE (stda_env%atom_param_set(ii)%atom_param)
-         atom_param => stda_env%atom_param_set(ii)%atom_param
+         NULLIFY (atom_param)
          CALL allocate_stda_atom_param(qs_env, stda_env, atom_param)
+         stda_env%atom_param_set(ii)%atom_param => atom_param
       ENDDO
 
-      NULLIFY (stda_env%gamma_coulomb, stda_env%gamma_exchange)
-      NULLIFY (stda_env%ctransformed)
-      NULLIFY (stda_env%xtransformed)
       NULLIFY (ao_mo_fm_pools)
       CALL mpools_get(qs_env%mpools, ao_mo_fm_pools=ao_mo_fm_pools)
       CALL fm_pools_create_fm_vect(ao_mo_fm_pools, stda_env%ctransformed, name=routineP//"ctransformed")
       CALL fm_pools_create_fm_vect(ao_mo_fm_pools, stda_env%xtransformed, name=routineP//"xtransformed")
 
       NULLIFY (para_env, blacs_env)
-      CALL get_qs_env(qs_env, &
-                      para_env=para_env, &
-                      blacs_env=blacs_env)
-
-      NULLIFY (stda_env%shalf)
-      CALL get_qs_kind_set(qs_kind_set, nsgf=nsgf)
-
+      CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
       NULLIFY (fm_struct)
+      CALL get_qs_kind_set(qs_kind_set, nsgf=nsgf)
       CALL cp_fm_struct_create(fm_struct, para_env, blacs_env, nsgf, nsgf)
       CALL cp_fm_create(stda_env%shalf, fm_struct, routineP//"shalf")
       CALL cp_fm_struct_release(fm_struct)
@@ -427,9 +417,11 @@ CONTAINS
       IF (ASSOCIATED(stda_env)) THEN
          IF (ASSOCIATED(stda_env%gamma_coulomb)) THEN
             CALL dbcsr_deallocate_matrix_set(stda_env%gamma_coulomb)
+            NULLIFY (stda_env%gamma_coulomb)
          ENDIF
          IF (ASSOCIATED(stda_env%gamma_exchange)) THEN
             CALL dbcsr_deallocate_matrix_set(stda_env%gamma_exchange)
+            NULLIFY (stda_env%gamma_exchange)
          ENDIF
          IF (ASSOCIATED(stda_env%ctransformed)) THEN
             CALL cp_fm_vect_dealloc(stda_env%ctransformed)
@@ -443,20 +435,18 @@ CONTAINS
             CALL cp_fm_release(stda_env%shalf)
             NULLIFY (stda_env%shalf)
          ENDIF
-! deallocate stda_kind_parameters
+         ! deallocate stda_kind_parameters
          IF (ASSOCIATED(stda_env%kind_param_set)) THEN
             DO ii = 1, SIZE(stda_env%kind_param_set)
-               NULLIFY (kind_param)
                kind_param => stda_env%kind_param_set(ii)%kind_param
                CALL deallocate_stda_kind_param(kind_param)
             ENDDO
             DEALLOCATE (stda_env%kind_param_set)
             NULLIFY (stda_env%kind_param_set)
          ENDIF
-! deallocate stda_atom_parameters
+         ! deallocate stda_atom_parameters
          IF (ASSOCIATED(stda_env%atom_param_set)) THEN
             DO ii = 1, SIZE(stda_env%atom_param_set)
-               NULLIFY (atom_param)
                atom_param => stda_env%atom_param_set(ii)%atom_param
                CALL deallocate_stda_atom_param(atom_param)
             ENDDO
@@ -532,8 +522,6 @@ CONTAINS
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(tddfpt_control_type), POINTER                 :: tddfpt_control
 
-! n_unocc
-
       NULLIFY (logger)
       logger => cp_get_default_logger()
       iounit = cp_logger_get_default_io_unit(logger)
@@ -541,13 +529,10 @@ CONTAINS
       IF (ASSOCIATED(atom_param)) &
          CALL deallocate_stda_atom_param(atom_param)
 
-      NULLIFY (dft_control, para_env, blacs_env)
       CALL get_qs_env(qs_env, &
                       dft_control=dft_control, &
                       para_env=para_env, &
                       blacs_env=blacs_env)
-
-      NULLIFY (tddfpt_control)
       tddfpt_control => dft_control%tddfpt_control
 
       nspins = dft_control%nspins
@@ -560,22 +545,24 @@ CONTAINS
       DO ispin = 1, nspins
          n_occ = stda_env%n_occ(ispin)
          n_ao = stda_env%n_ao(ispin)
-!charges
+         !charges
          NULLIFY (fm_struct)
          CALL cp_fm_struct_create(fm_struct, para_env, blacs_env, n_occ, n_occ)
          CALL cp_fm_create(atom_param%charges(ispin)%matrix, fm_struct, routineP//"charges")
          CALL cp_fm_struct_release(fm_struct)
-!xtransformed_double
+         !xtransformed_double
          NULLIFY (fm_struct)
          CALL cp_fm_struct_create(fm_struct, para_env, blacs_env, n_ao, n_occ)
-         CALL cp_fm_create(atom_param%xtransformed_double(ispin)%matrix, fm_struct, routineP//"xtransformed_double")
+         CALL cp_fm_create(atom_param%xtransformed_double(ispin)%matrix, fm_struct, &
+                           routineP//"xtransformed_double")
          CALL cp_fm_struct_release(fm_struct)
-!ctransformed_double
+         !ctransformed_double
          NULLIFY (fm_struct)
          CALL cp_fm_struct_create(fm_struct, para_env, blacs_env, n_ao, n_occ)
-         CALL cp_fm_create(atom_param%ctransformed_double(ispin)%matrix, fm_struct, routineP//"ctransformed_double")
+         CALL cp_fm_create(atom_param%ctransformed_double(ispin)%matrix, fm_struct, &
+                           routineP//"ctransformed_double")
          CALL cp_fm_struct_release(fm_struct)
-!gmcharge
+         !gmcharge
          NULLIFY (fm_struct)
          CALL cp_fm_struct_create(fm_struct, para_env, blacs_env, n_occ, n_occ)
          CALL cp_fm_create(atom_param%gmcharge(ispin)%matrix, fm_struct, routineP//"gmcharge")
@@ -598,7 +585,7 @@ CONTAINS
 
       CPASSERT(ASSOCIATED(atom_param))
       IF (ASSOCIATED(atom_param)) THEN
-!charges
+         !charges
          IF (ASSOCIATED(atom_param%charges)) THEN
             DO ispin = 1, SIZE(atom_param%charges)
                IF (ASSOCIATED(atom_param%charges(ispin)%matrix)) &
@@ -607,7 +594,7 @@ CONTAINS
             DEALLOCATE (atom_param%charges)
             NULLIFY (atom_param%charges)
          ENDIF
-!ctransformed_double
+         !ctransformed_double
          IF (ASSOCIATED(atom_param%ctransformed_double)) THEN
             DO ispin = 1, SIZE(atom_param%ctransformed_double)
                IF (ASSOCIATED(atom_param%ctransformed_double(ispin)%matrix)) &
@@ -616,7 +603,7 @@ CONTAINS
             DEALLOCATE (atom_param%ctransformed_double)
             NULLIFY (atom_param%ctransformed_double)
          ENDIF
-!gmcharge
+         !gmcharge
          IF (ASSOCIATED(atom_param%gmcharge)) THEN
             DO ispin = 1, SIZE(atom_param%gmcharge)
                IF (ASSOCIATED(atom_param%gmcharge(ispin)%matrix)) &
@@ -625,7 +612,7 @@ CONTAINS
             DEALLOCATE (atom_param%gmcharge)
             NULLIFY (atom_param%gmcharge)
          ENDIF
-!xtransformed_double
+         !xtransformed_double
          IF (ASSOCIATED(atom_param%xtransformed_double)) THEN
             DO ispin = 1, SIZE(atom_param%xtransformed_double)
                IF (ASSOCIATED(atom_param%xtransformed_double(ispin)%matrix)) &
@@ -637,5 +624,7 @@ CONTAINS
       ENDIF
       DEALLOCATE (atom_param)
       NULLIFY (atom_param)
+
    END SUBROUTINE deallocate_stda_atom_param
+
 END MODULE qs_tddfpt_stda_types
