@@ -288,7 +288,7 @@ CONTAINS
 
          IF (delta < eps_gradient) THEN
             IF ((iounit > 0) .AND. .NOT. my_silent) THEN
-               WRITE (iounit, "(T2,A,T60,I10,T70,A)") &
+               WRITE (iounit, "(T3,A,T60,I10,T70,A)") &
                   "Reached convergence in ", iter_total, " iterations"
             ENDIF
             EXIT outer_scf
