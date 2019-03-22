@@ -827,7 +827,6 @@ CONTAINS
       TYPE(cp_fm_type), POINTER                          :: tmp_matrix
       TYPE(dft_control_type), POINTER                    :: dft_control
 
-! code
       CALL timeset(routineN, handle)
 
       NULLIFY (tmp_matrix, maxmo_maxmo_fm_pool, maxmo_maxmo_fmstruct, tmp_fmstruct, &
@@ -923,7 +922,6 @@ CONTAINS
       TYPE(cp_fm_type), POINTER                          :: tmp_matrix
       TYPE(dft_control_type), POINTER                    :: dft_control
 
-! code
       CALL timeset(routineN, handle)
 
       NULLIFY (tmp_matrix, maxmo_maxmo_fm_pool, maxmo_maxmo_fmstruct, tmp_fmstruct, &

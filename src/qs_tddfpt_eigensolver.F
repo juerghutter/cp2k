@@ -438,8 +438,8 @@ CONTAINS
          evals_tmp(:) = evals(:, iter)
          CALL cp_fm_syevd(Atilde%matrix, Us%matrix, evals_tmp(:))
          evals(:, iter) = evals_tmp(:)
-         DO i = 1, k
-         ENDDO
+!        DO i = 1, k
+!        ENDDO
 
          !-------------------!
          ! check convergence !

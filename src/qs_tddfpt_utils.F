@@ -263,6 +263,7 @@ CONTAINS
                unoccupied_evals(ispin)%array(1:nlumos)
          END DO
          dft_control%tddfpt_control%lumos => unoccupied_orbs
+         has_lumo = .TRUE.
       ENDIF
       IF (has_homo .AND. has_lumo) THEN
          DO ispin = 1, nspins

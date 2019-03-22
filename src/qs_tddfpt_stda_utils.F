@@ -10,7 +10,9 @@ MODULE qs_tddfpt_stda_utils
    USE atomic_kind_types,               ONLY: atomic_kind_type,&
                                               get_atomic_kind_set
    USE basis_set_container_types,       ONLY: get_basis_from_container
-   USE basis_set_types,                 ONLY: gto_basis_set_type
+   USE basis_set_types,                 ONLY: gto_basis_set_type, gto_basis_set_p_type
+   USE qs_integral_utils,               ONLY: basis_set_list_setup,&
+                                              get_memory_usage
    USE cell_types,                      ONLY: cell_type
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
    USE cp_control_types,                ONLY: dft_control_type
@@ -737,8 +739,8 @@ CONTAINS
 
    END SUBROUTINE lowdin_charges_fm
 ! **************************************************************************************************
-!> \brief ...Calculate the sTDA kernel contribution by contracting the Lowdin MO coefficients / transition
-!>            charges with the Coulomb-type or exchange-type integrals
+!> \brief ...Calculate the sTDA kernel contribution by contracting the Lowdin MO coefficients --
+!>           transition charges with the Coulomb-type or exchange-type integrals
 !> \param p_env ...
 !> \param qs_env ...
 !> \param X ...
@@ -757,8 +759,8 @@ CONTAINS
 
       INTEGER                                            :: aa, bb, handle, iatom, icol, ii, ikind, &
                                                             irow, ispin, jatom, jj, jkind, jspin, &
-                                                            natom, nsgf, nspins, output_unit, &
-                                                            res_etype
+                                                            natom, nsgf, nspins, iounit, &
+                                                            res_etype, nkind
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: first_sgf
       INTEGER, DIMENSION(2)                              :: n_occ
       INTEGER, DIMENSION(:), POINTER                     :: kind_of
@@ -772,6 +774,7 @@ CONTAINS
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(gto_basis_set_p_type), DIMENSION(:), POINTER  :: basis_set_list
       TYPE(gto_basis_set_type), POINTER                  :: basis_set_iatom, basis_set_jatom
       TYPE(neighbor_list_iterator_p_type), &
          DIMENSION(:), POINTER                           :: nl_iterator
@@ -779,7 +782,6 @@ CONTAINS
          POINTER                                         :: sab_orb
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
-      TYPE(qs_kind_type), POINTER                        :: qs_kind
       TYPE(section_vals_type), POINTER                   :: input
       TYPE(stda_env_type), POINTER                       :: stda_env
 
@@ -790,7 +792,7 @@ CONTAINS
 
       NULLIFY (logger) ! Get output_unit
       logger => cp_get_default_logger()
-      output_unit = cp_logger_get_default_io_unit(logger)
+      iounit = cp_logger_get_default_io_unit(logger)
 
       NULLIFY (stda_env)
       stda_env => p_env%stda_env
@@ -823,6 +825,7 @@ CONTAINS
 
       NULLIFY (qs_kind_set)
       CALL get_qs_env(qs_env=qs_env, qs_kind_set=qs_kind_set)
+      nkind = SIZE(qs_kind_set)
       CALL get_qs_kind_set(qs_kind_set, nsgf=nsgf)
       ALLOCATE (first_sgf(natom))
       CALL get_particle_set(particle_set, qs_kind_set, first_sgf=first_sgf)
@@ -840,6 +843,9 @@ CONTAINS
 ! calculate Loewdin transformed Davidson trial vector tilde(X)=S^1/2*X and tilde(tilde(X))=S^1/2_A*tilde(X)_A
 
       CALL get_lowdin_x(qs_env, p_env, X)
+      ! set up basis set lists
+      ALLOCATE (basis_set_list(nkind))
+      CALL basis_set_list_setup(basis_set_list, "ORB", qs_kind_set)
 
       CALL neighbor_list_iterator_create(nl_iterator, sab_orb)
       DO ispin = 1, nspins
@@ -859,18 +865,8 @@ CONTAINS
                                    BLOCK=coulombblock, found=found)
             CPASSERT(found)
 
-! Get number of basis functions per atom
-            NULLIFY (basis_set_iatom)
-            NULLIFY (qs_kind)
-            ikind = kind_of(iatom) !iatom
-            qs_kind => qs_kind_set(ikind)
-            CALL get_basis_from_container(qs_kind%basis_sets, basis_set=basis_set_iatom, basis_type="ORB")
-
-            NULLIFY (basis_set_jatom)
-            NULLIFY (qs_kind)
-            jkind = kind_of(jatom) !jatom
-            qs_kind => qs_kind_set(jkind)
-            CALL get_basis_from_container(qs_kind%basis_sets, basis_set=basis_set_jatom, basis_type="ORB")
+            basis_set_iatom => basis_set_list(ikind)%gto_basis_set
+            basis_set_jatom => basis_set_list(jkind)%gto_basis_set
 
 !1. Contract exchange-type contributions to the kernel with coefficients
 !   2* gamma_K(A,B) * Cdoubletilde_B *Ctilde_A *Xtilde_A
@@ -1131,9 +1127,9 @@ CONTAINS
 
                   tmp_coul = -coulombblock(1, 1)*tmp
 
-!         WRITE(output_unit,*) '-------------------------------------------------'
-!         WRITE(UNIT=output_unit,FMT="(A,F18.6,F18.6,F18.6)") "tmp_coulomb, tmp", tmp_coul ,tmp,coulombblock(1,1)
-!         WRITE(output_unit,*) '-------------------------------------------------'
+!         WRITE(iounit,*) '-------------------------------------------------'
+!         WRITE(UNIT=iounit,FMT="(A,F18.6,F18.6,F18.6)") "tmp_coulomb, tmp", tmp_coul ,tmp,coulombblock(1,1)
+!         WRITE(iounit,*) '-------------------------------------------------'
 
                   CALL cp_fm_get_element(res(ispin)%matrix, aa, ii, tmp)
                   CALL cp_fm_set_element(res(ispin)%matrix, aa, ii, tmp+tmp_coul)
@@ -1179,9 +1175,9 @@ CONTAINS
 
                      tmp_coul = -coulombblock(1, 1)*tmp
 
-!         WRITE(output_unit,*) '-------------------------------------------------'
-!         WRITE(UNIT=output_unit,FMT="(A,F18.6,F18.6,F18.6)") "tmp_coulomb, tmp", tmp_coul ,tmp,coulombblock(1,1)
-!         WRITE(output_unit,*) '-------------------------------------------------'
+!         WRITE(iounit,*) '-------------------------------------------------'
+!         WRITE(UNIT=iounit,FMT="(A,F18.6,F18.6,F18.6)") "tmp_coulomb, tmp", tmp_coul ,tmp,coulombblock(1,1)
+!         WRITE(iounit,*) '-------------------------------------------------'
 
                      CALL cp_fm_get_element(res(ispin)%matrix, aa, ii, tmp)
                      CALL cp_fm_set_element(res(ispin)%matrix, aa, ii, tmp+tmp_coul)
@@ -1195,6 +1191,7 @@ CONTAINS
             !IF (iatom.NE.jatom) -----------------------------------------------------------------
          ENDDO !nl_iterator
       ENDDO !ispin
+      DEALLOCATE (basis_set_list)
 
 ! Ewald sum for Coulomb-like contribution
       IF (do_periodic) THEN
