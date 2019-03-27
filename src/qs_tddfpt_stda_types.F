@@ -33,7 +33,10 @@ MODULE qs_tddfpt_stda_types
                                               cp_logger_get_default_io_unit,&
                                               cp_logger_type
    USE cp_para_types,                   ONLY: cp_para_env_type
-   USE dbcsr_api,                       ONLY: dbcsr_p_type
+   USE dbcsr_api,                       ONLY: dbcsr_create,&
+                                              dbcsr_p_type,&
+                                              dbcsr_release,&
+                                              dbcsr_type
    USE input_section_types,             ONLY: section_vals_get_subs_vals,&
                                               section_vals_type,&
                                               section_vals_val_get
@@ -42,7 +45,6 @@ MODULE qs_tddfpt_stda_types
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
    USE qs_kind_types,                   ONLY: get_qs_kind,&
-                                              get_qs_kind_set,&
                                               qs_kind_type
    USE qs_matrix_pools,                 ONLY: mpools_get
    USE qs_mo_types,                     ONLY: get_mo_set
@@ -76,23 +78,29 @@ MODULE qs_tddfpt_stda_types
    END TYPE
 
    TYPE stda_env_type
-      REAL(KIND=dp)                                :: hfx_fraction !fraction of non-local HF exchange !! REDUNDANT also in stda_control
-      REAL(KIND=dp)                                :: alpha_param ! empirical parameters
-      REAL(KIND=dp)                                :: beta_param ! empirical parameters
-      TYPE(stda_atom_p_type), DIMENSION(:), POINTER:: atom_param_set ! for each atom
-      TYPE(stda_kind_p_type), DIMENSION(:), POINTER:: kind_param_set ! for each kind of atoms
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER    :: gamma_coulomb, & !approximated Coulomb-type integrals (Mataga-Nishimoto-Ohno-Klopman)
-                                                      gamma_exchange !approximated exchange-type integrals (Mataga-Nishimoto-Ohno-Klopman)
-      ! BOTH NATOM*NATOM
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER    :: ctransformed => Null() !Lowdin MO coefficients !NAO*NOCC
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER    :: xtransformed => Null() !Lowdin transformed Davidson trial vector X  !NAO*NOCC
-      TYPE(cp_fm_type), POINTER                    :: shalf => Null() !Lowdin MO coefficients !for debugging !NAO*NAO
-      INTEGER, DIMENSION(2)                         :: n_ao !number of atomic orbitals
-      INTEGER, DIMENSION(2)                         :: n_occ !number of occupied orbitals
-      !  INTEGER,DIMENSION(2)                         :: n_unocc !number of unoccupied orbitals
+      !fraction of non-local HF exchange !! REDUNDANT also in stda_control
+      REAL(KIND=dp)                                :: hfx_fraction
+      ! empirical parameters
+      REAL(KIND=dp)                                :: alpha_param
+      REAL(KIND=dp)                                :: beta_param
+      TYPE(stda_atom_p_type), DIMENSION(:), POINTER:: atom_param_set
+      TYPE(stda_kind_p_type), DIMENSION(:), POINTER:: kind_param_set
+      !approximated Coulomb/Exchange-type integrals (Mataga-Nishimoto-Ohno-Klopman)
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER    :: gamma_coulomb, &
+                                                      gamma_exchange
+      !Lowdin MO coefficients !NAO*NOCC
+      TYPE(cp_fm_p_type), DIMENSION(:), POINTER    :: ctransformed => Null()
+      !Lowdin transformed Davidson trial vector X  !NAO*NOCC
+      TYPE(cp_fm_p_type), DIMENSION(:), POINTER    :: xtransformed => Null()
+      !S^1/2
+      TYPE(dbcsr_type)                             :: shalf
+      !number of atomic orbitals, number of occupied orbitals
+      INTEGER, DIMENSION(2)                        :: n_ao
+      INTEGER, DIMENSION(2)                        :: n_occ
    END TYPE
 
-!PARAMETERS
+   !PARAMETERS
+!&<
    INTEGER, PARAMETER, PRIVATE :: nelem = 103
    !   H                                                                      He
    !   Li Be                                                 B  C  N  O  F    Ne
@@ -103,53 +111,57 @@ MODULE qs_tddfpt_stda_types
    !   Fr Ra Ac Th Pa U        Np Pu Am Cm Bk Cf Es Fm Md    No Lr  103
 
    REAL(KIND=dp), DIMENSION(1:nelem), PARAMETER, PRIVATE:: hardness = &
-                                                           (/6.4299544220_dp, 12.544911890_dp, & ! 2 H-He
-                                                             2.3745866560_dp, 3.4967633530_dp, 4.6190089720_dp, 5.7409789220_dp, &
-                                                             6.8624665290_dp, 7.9854357010_dp, 9.1064753720_dp, 10.23034050_dp, & ! 8 Li-Ne
-                                                             2.444141360_dp, 3.0146513830_dp, 3.5849070740_dp, 4.15513090_dp, &
-                                                             4.7258039740_dp, 5.2959792410_dp, 5.8661864840_dp, 6.4366187140_dp, & ! 8 Na-Ar
-                                                             2.3273178360_dp, 2.7587238140_dp, 2.8581921140_dp, 2.9578300430_dp, &
-                                                             3.0573410060_dp, 3.1567254290_dp, 3.2563827230_dp, 3.3559314050_dp, &
-                                                             3.4556091170_dp, 3.5550133130_dp, 3.6544183480_dp, 3.7541601450_dp, &
-                                                             4.1855197930_dp, 4.6166272460_dp, 5.0662145070_dp, 5.4794960970_dp, &
-                                                             5.9110996450_dp, 6.3418467680_dp, & ! 18 K-Kr
-                                                             2.1204582570_dp, 2.5373700480_dp, 2.6335468980_dp, 2.7297528930_dp, &
-                                                             2.8259738860_dp, 2.9221296040_dp, 3.0183708780_dp, 3.1145981770_dp, &
-                                                             3.210756280_dp, 3.3069474480_dp, 3.4031948570_dp, 3.4993761390_dp, &
-                                                             3.9163692460_dp, 4.3332332190_dp, 4.7500787860_dp, 5.1669793270_dp, &
-                                                             5.5838871020_dp, 6.000897330_dp, & ! 18 Rb-Xe
-                                                             0.6829150240_dp, 0.9200946840_dp, 1.1570887860_dp, 1.39427570_dp, &
-                                                             1.6314731730_dp, 1.8684389980_dp, 2.1056577930_dp, 2.3426646420_dp, &
-                                                             2.5798149820_dp, 2.8170264230_dp, 3.0540365330_dp, 3.2911692310_dp, &
-                                                             3.5282971610_dp, 3.7655249290_dp, 4.0025547030_dp, 4.2394783410_dp, &
-                                                             4.4765830210_dp, 4.7065224490_dp, 4.9508466940_dp, 5.1879311720_dp, &
-                                                             5.4256076210_dp, 5.6619144310_dp, 5.900042920_dp, 6.1367145320_dp, &
-                                                             6.3741299770_dp, 6.6102656130_dp, 1.7043485810_dp, 1.9413526120_dp, &
-                                                             2.178491510_dp, 2.4158121060_dp, 2.6527780840_dp, 2.8899554570_dp, & ! 32 Cs-Rn
-                                                             0.9882529880_dp, 1.2819499970_dp, 1.3497250380_dp, 1.4175257380_dp, &
-                                                             1.9368567520_dp, 2.2305576050_dp, 2.5241204960_dp, 3.0436128480_dp, &
-                                                             3.4168675260_dp, 3.4049844440_dp, 3.9244199680_dp, 4.2180813280_dp, &
-                                                             4.5115926320_dp, 4.8050928950_dp, 5.0989816210_dp, 5.3926054620_dp, &
-                                                             5.4606987930_dp/) ! 17 Fr-Lr
+         (/6.4299544220_dp, 12.544911890_dp, & ! 2 H-He
+           2.3745866560_dp, 3.4967633530_dp, 4.6190089720_dp, 5.7409789220_dp, &
+           6.8624665290_dp, 7.9854357010_dp, 9.1064753720_dp, 10.23034050_dp, & ! 8 Li-Ne
+           2.444141360_dp, 3.0146513830_dp, 3.5849070740_dp, 4.15513090_dp, &
+           4.7258039740_dp, 5.2959792410_dp, 5.8661864840_dp, 6.4366187140_dp, & ! 8 Na-Ar
+           2.3273178360_dp, 2.7587238140_dp, 2.8581921140_dp, 2.9578300430_dp, &
+           3.0573410060_dp, 3.1567254290_dp, 3.2563827230_dp, 3.3559314050_dp, &
+           3.4556091170_dp, 3.5550133130_dp, 3.6544183480_dp, 3.7541601450_dp, &
+           4.1855197930_dp, 4.6166272460_dp, 5.0662145070_dp, 5.4794960970_dp, &
+           5.9110996450_dp, 6.3418467680_dp, & ! 18 K-Kr
+           2.1204582570_dp, 2.5373700480_dp, 2.6335468980_dp, 2.7297528930_dp, &
+           2.8259738860_dp, 2.9221296040_dp, 3.0183708780_dp, 3.1145981770_dp, &
+           3.210756280_dp, 3.3069474480_dp, 3.4031948570_dp, 3.4993761390_dp, &
+           3.9163692460_dp, 4.3332332190_dp, 4.7500787860_dp, 5.1669793270_dp, &
+           5.5838871020_dp, 6.000897330_dp, & ! 18 Rb-Xe
+           0.6829150240_dp, 0.9200946840_dp, 1.1570887860_dp, 1.39427570_dp, &
+           1.6314731730_dp, 1.8684389980_dp, 2.1056577930_dp, 2.3426646420_dp, &
+           2.5798149820_dp, 2.8170264230_dp, 3.0540365330_dp, 3.2911692310_dp, &
+           3.5282971610_dp, 3.7655249290_dp, 4.0025547030_dp, 4.2394783410_dp, &
+           4.4765830210_dp, 4.7065224490_dp, 4.9508466940_dp, 5.1879311720_dp, &
+           5.4256076210_dp, 5.6619144310_dp, 5.900042920_dp, 6.1367145320_dp, &
+           6.3741299770_dp, 6.6102656130_dp, 1.7043485810_dp, 1.9413526120_dp, &
+           2.178491510_dp, 2.4158121060_dp, 2.6527780840_dp, 2.8899554570_dp, & ! 32 Cs-Rn
+           0.9882529880_dp, 1.2819499970_dp, 1.3497250380_dp, 1.4175257380_dp, &
+           1.9368567520_dp, 2.2305576050_dp, 2.5241204960_dp, 3.0436128480_dp, &
+           3.4168675260_dp, 3.4049844440_dp, 3.9244199680_dp, 4.2180813280_dp, &
+           4.5115926320_dp, 4.8050928950_dp, 5.0989816210_dp, 5.3926054620_dp, &
+           5.4606987930_dp/) ! 17 Fr-Lr
+!&>
 
    ! Shell occupation
-   INTEGER, DIMENSION(1:5, 0:nelem), PARAMETER, PRIVATE :: occupation = RESHAPE((/0, 0, 0, 0, 0, & ! 0
-                                                                                  1, 0, 0, 0, 0, 2, 0, 0, 0, 0, & ! 2
-      1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 1, 0, 0, 0, 2, 2, 0, 0, 0, 2, 3, 0, 0, 0, 2, 4, 0, 0, 0, 2, 5, 0, 0, 0, 2, 6, 0, 0, 0, & ! 10
-      1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 1, 0, 0, 0, 2, 2, 0, 0, 0, 2, 3, 0, 0, 0, 2, 4, 0, 0, 0, 2, 5, 0, 0, 0, 2, 6, 0, 0, 0, & ! 18
-           1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 1, 0, 0, 2, 0, 2, 0, 0, 2, 0, 3, 0, 0, 2, 0, 4, 0, 0, 2, 0, 5, 0, 0, 2, 0, 6, 0, 0, &
-      2,0,7,0,0,  2,0,8,0,0,  2,0,9,0,0,  2,0,10,0,0, 2,1,0,0,0,  2,2,0,0,0,  2,3,0,0,0,  2,4,0,0,0,  2,5,0,0,0, 2,6,0,0,0, & ! 36
-         1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 1, 0, 0, 2, 0, 2, 0, 0, 2, 0, 3, 0, 0, 2, 0, 4, 0, 0, 2, 0, 5, 0, 0, 2, 0, 6, 0, 0, & !
-      2,0,7,0,0,  2,0,8,0,0,  2,0,9,0,0,  2,0,10,0,0, 2,1,0,0,0,  2,2,0,0,0,  2,3,0,0,0,  2,4,0,0,0,  2,5,0,0,0, 2,6,0,0,0, & ! 54
-                                                                                  1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 1, 0, 0, &
-           2, 0, 1, 0, 0, 2, 0, 1, 0, 0, 2, 0, 1, 0, 0, 2, 0, 1, 0, 0, 2, 0, 1, 0, 0, 2, 0, 1, 0, 0, 2, 0, 1, 0, 0, 2, 0, 1, 0, 0, &
-                           2, 0, 1, 0, 0, 2, 0, 1, 0, 0, 2, 0, 1, 0, 0, 2, 0, 1, 0, 0, 2, 0, 1, 0, 0, 2, 0, 1, 0, 0, & ! Lanthanides
-           2, 0, 2, 0, 0, 2, 0, 3, 0, 0, 2, 0, 4, 0, 0, 2, 0, 5, 0, 0, 2, 0, 6, 0, 0, 2, 0, 7, 0, 0, 2, 0, 8, 0, 0, 2, 0, 9, 0, 0, &
-2, 0, 10, 0, 0, 2, 1, 0, 0, 0, 2, 2, 0, 0, 0, 2, 3, 0, 0, 0, 2, 4, 0, 0, 0, 2, 5, 0, 0, 0, 2, 6, 0, 0, 0, & ! 86 (last element defined)
-                                                                                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, & !
-           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &
-                             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, & ! Actinides
-                                                                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0/), (/5, nelem+1/))
+!&<
+   INTEGER, DIMENSION(1:5, 0:nelem), PARAMETER, PRIVATE :: occupation = &
+     RESHAPE((/0, 0, 0, 0, 0, & ! 0
+      1,0,0,0,0, 2,0,0,0,0, & ! 2
+      1,0,0,0,0, 2,0,0,0,0, 2,1,0,0,0, 2,2,0,0,0, 2,3,0,0,0, 2,4,0,0,0, 2,5,0,0,0, 2,6,0,0,0, & ! 10
+      1,0,0,0,0, 2,0,0,0,0, 2,1,0,0,0, 2,2,0,0,0, 2,3,0,0,0, 2,4,0,0,0, 2,5,0,0,0, 2,6,0,0,0, & ! 18
+      1,0,0,0,0, 2,0,0,0,0, 2,0,1,0,0, 2,0,2,0,0, 2,0,3,0,0, 2,0,4,0,0, 2,0,5,0,0, 2,0,6,0,0, &
+      2,0,7,0,0, 2,0,8,0,0, 2,0,9,0,0, 2,0,10,0,0, 2,1,0,0,0, 2,2,0,0,0, 2,3,0,0,0, 2,4,0,0,0, 2,5,0,0,0, 2,6,0,0,0, & ! 36
+      1,0,0,0,0, 2,0,0,0,0, 2,0,1,0,0, 2,0,2,0,0, 2,0,3,0,0, 2,0,4,0,0, 2,0,5,0,0, 2,0,6,0,0, & !
+      2,0,7,0,0, 2,0,8,0,0, 2,0,9,0,0, 2,0,10,0,0, 2,1,0,0,0, 2,2,0,0,0, 2,3,0,0,0, 2,4,0,0,0, 2,5,0,0,0, 2,6,0,0,0, & ! 54
+      1,0,0,0,0, 2,0,0,0,0, 2,0,1,0,0, &
+      2,0,1,0,0, 2,0,1,0,0, 2,0,1,0,0, 2,0,1,0,0, 2,0,1,0,0, 2,0,1,0,0, 2,0,1,0,0, 2,0,1,0,0, &
+      2,0,1,0,0, 2,0,1,0,0, 2,0,1,0,0, 2,0,1,0,0, 2,0,1,0,0, 2,0,1,0,0, & ! Lanthanides
+      2,0,2,0,0, 2,0,3,0,0, 2,0,4,0,0, 2,0,5,0,0, 2,0,6,0,0, 2,0,7,0,0, 2,0,8,0,0, 2,0,9,0,0, &
+      2,0,10,0,0, 2,1,0,0,0, 2,2,0,0,0, 2,3,0,0,0, 2,4,0,0,0, 2,5,0,0,0, 2,6,0,0,0, & ! 86 (last element defined)
+      0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, & !
+      0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, &
+      0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, & ! Actinides
+      0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0/), (/5, nelem+1/))
+!&>
 
    REAL(KIND=dp), DIMENSION(2), PARAMETER, PRIVATE:: alpha = (/1.420_dp, 0.480_dp/)
    REAL(KIND=dp), DIMENSION(2), PARAMETER, PRIVATE:: beta = (/0.200_dp, 1.830_dp/)
@@ -321,12 +333,10 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       INTEGER                                            :: handle, ii, ispin, n_ao, n_occ, natoms, &
-                                                            nkind, nsgf, nspins
-      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+                                                            nkind, nspins
       TYPE(cp_fm_pool_p_type), DIMENSION(:), POINTER     :: ao_mo_fm_pools
-      TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
       TYPE(cp_fm_type), POINTER                          :: qs_env_c
-      TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_s
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(stda_atom_type), POINTER                      :: atom_param
@@ -348,7 +358,6 @@ CONTAINS
       NULLIFY (stda_env%gamma_exchange)
       NULLIFY (stda_env%ctransformed)
       NULLIFY (stda_env%xtransformed)
-      NULLIFY (stda_env%shalf)
 
       CALL get_qs_env(qs_env, dft_control=dft_control)
       nspins = dft_control%nspins
@@ -386,13 +395,8 @@ CONTAINS
       CALL fm_pools_create_fm_vect(ao_mo_fm_pools, stda_env%ctransformed, name=routineP//"ctransformed")
       CALL fm_pools_create_fm_vect(ao_mo_fm_pools, stda_env%xtransformed, name=routineP//"xtransformed")
 
-      NULLIFY (para_env, blacs_env)
-      CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
-      NULLIFY (fm_struct)
-      CALL get_qs_kind_set(qs_kind_set, nsgf=nsgf)
-      CALL cp_fm_struct_create(fm_struct, para_env, blacs_env, nsgf, nsgf)
-      CALL cp_fm_create(stda_env%shalf, fm_struct, routineP//"shalf")
-      CALL cp_fm_struct_release(fm_struct)
+      CALL get_qs_env(qs_env=qs_env, matrix_s_kp=matrix_s)
+      CALL dbcsr_create(stda_env%shalf, template=matrix_s(1, 1)%matrix)
 
       CALL timestop(handle)
 
@@ -431,10 +435,7 @@ CONTAINS
             CALL cp_fm_vect_dealloc(stda_env%xtransformed)
             NULLIFY (stda_env%xtransformed)
          ENDIF
-         IF (ASSOCIATED(stda_env%shalf)) THEN
-            CALL cp_fm_release(stda_env%shalf)
-            NULLIFY (stda_env%shalf)
-         ENDIF
+         CALL dbcsr_release(stda_env%shalf)
          ! deallocate stda_kind_parameters
          IF (ASSOCIATED(stda_env%kind_param_set)) THEN
             DO ii = 1, SIZE(stda_env%kind_param_set)

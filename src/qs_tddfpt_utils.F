@@ -216,6 +216,7 @@ CONTAINS
 
       has_homo = .FALSE.
       has_lumo = .FALSE.
+      homo_lumo = 0.0_dp
 
       CALL get_qs_env(qs_env, dft_control=dft_control)
       nspins = dft_control%nspins
@@ -261,6 +262,7 @@ CONTAINS
          DO ispin = 1, nspins
             dft_control%tddfpt_control%lumos_eigenvalues(1:nlumos, ispin) = &
                unoccupied_evals(ispin)%array(1:nlumos)
+            homo_lumo(ispin, 2) = unoccupied_evals(ispin)%array(1)
          END DO
          dft_control%tddfpt_control%lumos => unoccupied_orbs
          has_lumo = .TRUE.
