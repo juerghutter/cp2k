@@ -7,7 +7,10 @@
 ! **************************************************************************************************
 MODULE qs_tddfpt_stda_utils
 
-   USE cell_types,                      ONLY: cell_type
+   USE atomic_kind_types,               ONLY: atomic_kind_type,&
+                                              get_atomic_kind_set
+   USE cell_types,                      ONLY: cell_type,&
+                                              pbc
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_cp2k_link,              ONLY: cp_dbcsr_alloc_block_from_nbl
@@ -38,6 +41,7 @@ MODULE qs_tddfpt_stda_utils
         dbcsr_get_block_p, dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, &
         dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_p_type, &
         dbcsr_release, dbcsr_set, dbcsr_type, dbcsr_type_no_symmetry, dbcsr_type_symmetric
+   USE distribution_1d_types,           ONLY: distribution_1d_type
    USE input_constants,                 ONLY: tddfpt_singlet
    USE input_section_types,             ONLY: section_vals_type,&
                                               section_vals_val_get
@@ -92,9 +96,8 @@ CONTAINS
       NULLIFY (stda_env)
       stda_env => p_env%stda_env
 
-      ! calculate Coulomb and exchange gamma matrices
-      CALL setup_gamma(qs_env, stda_env, stda_env%gamma_exchange, .TRUE.)
-      CALL setup_gamma(qs_env, stda_env, stda_env%gamma_coulomb, .FALSE.)
+      ! calculate exchange gamma matrix
+      CALL setup_gamma(qs_env, stda_env, stda_env%gamma_exchange)
 
       ! calculate S_half and Lowdin MO coefficients
       CALL get_lowdin_mo_coefficients(qs_env, p_env, stda_env)
@@ -103,36 +106,32 @@ CONTAINS
 
    END SUBROUTINE stda_init_matrices
 ! **************************************************************************************************
-!> \brief Calculate sTDA Coulomb- and exchange-type contributions
+!> \brief Calculate sTDA exchange-type contributions
 !> \param qs_env ...
 !> \param stda_env ...
-!> \param gamma_matrix sTDA Coulomb- or exchange-type contributions
-!> \param lexchange logical to choose between Coulomb or exchange
+!> \param gamma_matrix sTDA exchange-type contributions
 !> \note  Note the specific sTDA notation exchange-type integrals (ia|jb) refer to Coulomb interaction
-!>                                        Coulomb-type integrals (ij|ab) refer to exchange interaction
 ! **************************************************************************************************
-   SUBROUTINE setup_gamma(qs_env, stda_env, gamma_matrix, lexchange)
+   SUBROUTINE setup_gamma(qs_env, stda_env, gamma_matrix)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(stda_env_type), POINTER                       :: stda_env
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: gamma_matrix
-      LOGICAL, INTENT(IN)                                :: lexchange
 
       CHARACTER(len=*), PARAMETER :: routineN = 'setup_gamma', routineP = moduleN//':'//routineN
       REAL(KIND=dp), PARAMETER                           :: rsmooth = 1.0_dp
 
       CHARACTER(len=20)                                  :: cstring
       INTEGER                                            :: handle, iatom, icol, ikind, irow, jatom, &
-                                                            jkind, natom, neighbor_list_id, nmat
+                                                            jkind, natom, nmat
       INTEGER, DIMENSION(:), POINTER                     :: row_blk_sizes
-      LOGICAL                                            :: do_ewald, found
-      REAL(KIND=dp)                                      :: dr, eta, fcut, r, ralpha, rbeta, rcut, &
-                                                            rcuta, rcutb, x
+      LOGICAL                                            :: found
+      REAL(KIND=dp)                                      :: dr, eta, fcut, r, ralpha, rcut, rcuta, &
+                                                            rcutb, x
       REAL(KIND=dp), DIMENSION(3)                        :: rij
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: gblock
       TYPE(cell_type), POINTER                           :: cell
       TYPE(dbcsr_distribution_type), POINTER             :: dbcsr_dist
-      TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(neighbor_list_iterator_p_type), &
          DIMENSION(:), POINTER                           :: nl_iterator
       TYPE(neighbor_list_set_p_type), DIMENSION(:), &
@@ -141,23 +140,10 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      CALL get_qs_env(qs_env=qs_env, particle_set=particle_set, &
-                      neighbor_list_id=neighbor_list_id, &
-                      dbcsr_dist=dbcsr_dist, &
-                      dft_control=dft_control, &
-                      cell=cell)
+      cstring = "GAMMA EXCHANGE MATRIX"
+      CALL get_qs_env(qs_env=qs_env, particle_set=particle_set, dbcsr_dist=dbcsr_dist, &
+                      sab_orb=sab_orb, cell=cell)
       natom = SIZE(particle_set)
-
-      do_ewald = dft_control%tddfpt_control%stda_control%do_ewald
-      IF (lexchange) THEN
-         IF (do_ewald) THEN
-            CALL get_qs_env(qs_env=qs_env, sab_orb=sab_orb)
-         ELSE
-            CALL get_qs_env(qs_env=qs_env, sab_orb_mic=sab_orb)
-         ENDIF
-      ELSE
-         CALL get_qs_env(qs_env=qs_env, sab_orb_mic=sab_orb)
-      ENDIF
 
       nmat = 1
       NULLIFY (gamma_matrix)
@@ -167,21 +153,15 @@ CONTAINS
       row_blk_sizes(1:natom) = 1
       ALLOCATE (gamma_matrix(1)%matrix)
 
-      IF (lexchange) THEN
-         cstring = "GAMMA EXCHANGE MATRIX"
-      ELSE
-         cstring = "GAMMA COULOMB MATRIX"
-      ENDIF
-
       CALL dbcsr_create(gamma_matrix(1)%matrix, name=TRIM(ADJUSTL(cstring)), dist=dbcsr_dist, &
                         matrix_type=dbcsr_type_symmetric, row_blk_size=row_blk_sizes, &
                         col_blk_size=row_blk_sizes, nze=0, mutable_work=.TRUE.)
-      CALL dbcsr_set(gamma_matrix(1)%matrix, 0.0_dp)
 
       DEALLOCATE (row_blk_sizes)
 
       ! setup the matrices using the neighbor list
       CALL cp_dbcsr_alloc_block_from_nbl(gamma_matrix(1)%matrix, sab_orb)
+      CALL dbcsr_set(gamma_matrix(1)%matrix, 0.0_dp)
 
       NULLIFY (nl_iterator)
       CALL neighbor_list_iterator_create(nl_iterator, sab_orb)
@@ -211,11 +191,7 @@ CONTAINS
          !>   Nataga-Mishimoto-Ohno-Klopman formula equivalently as it is done for xTB
          IF (dr < 1.e-6) THEN
             ! on site terms
-            IF (lexchange) THEN
-               gblock(:, :) = gblock(:, :)+eta
-            ELSE
-               gblock(:, :) = gblock(:, :)+stda_env%hfx_fraction*eta
-            ENDIF
+            gblock(:, :) = gblock(:, :)+eta
          ELSEIF (dr > rcut) THEN
             ! do nothing
          ELSE
@@ -226,28 +202,10 @@ CONTAINS
                x = r/rsmooth
                fcut = -10._dp*x**5+15._dp*x**4-10._dp*x**3+1._dp
             END IF
-            IF (lexchange) THEN
-               ralpha = dr**stda_env%alpha_param
-               IF (do_ewald) THEN
-                  gblock(:, :) = gblock(:, :)+ &
-                                 fcut*(1._dp/(dr**(stda_env%alpha_param)+eta**(-stda_env%alpha_param))) &
-                                 **(1._dp/stda_env%alpha_param)-fcut/dr
-               ELSE
-                  gblock(:, :) = gblock(:, :)+ &
-                                 (1._dp/(dr**(stda_env%alpha_param)+eta**(-stda_env%alpha_param))) &
-                                 **(1._dp/stda_env%alpha_param)
-               ENDIF
-            ELSE
-               rbeta = dr**stda_env%beta_param
-               IF (stda_env%hfx_fraction > 0._dp) THEN
-                  gblock(:, :) = gblock(:, :)+ &
-                                 (1._dp/(rbeta+(stda_env%hfx_fraction*eta)**(-stda_env%beta_param))) &
-                                 **(1._dp/stda_env%beta_param)
-               ELSE
-                  ! to be consistent with sTDA program of Grimme gblock is set to 0.
-                  gblock(:, :) = 0._dp
-               ENDIF
-            ENDIF
+            ralpha = dr**stda_env%alpha_param
+            gblock(:, :) = gblock(:, :)+ &
+                           fcut*(1._dp/(dr**(stda_env%alpha_param)+eta**(-stda_env%alpha_param))) &
+                           **(1._dp/stda_env%alpha_param)-fcut/dr
          END IF
 
       END DO
@@ -477,15 +435,18 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'stda_calculate_kernel', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: blk, handle, ia, iatom, icol, iounit, &
-                                                            irow, is, ispin, jatom, natom, nsgf, &
+      INTEGER                                            :: blk, handle, ia, iatom, ikind, iounit, &
+                                                            is, ispin, jatom, jkind, natom, nsgf, &
                                                             nspins, res_etype
-      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: first_sgf, last_sgf
+      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: first_sgf, kind_of, last_sgf
       INTEGER, DIMENSION(2)                              :: n_occ
-      LOGICAL                                            :: do_coulomb, do_ewald, found
-      REAL(KIND=dp)                                      :: spinfac
+      LOGICAL                                            :: do_coulomb, do_ewald
+      REAL(KIND=dp)                                      :: bp, dr, eta, gabr, hfx, rbeta, spinfac
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: gtcharge, tcharge, tv
+      REAL(KIND=dp), DIMENSION(3)                        :: rij
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: gab, pblock
+      TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
+      TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_fm_struct_type), POINTER                   :: fmstruct
       TYPE(cp_fm_type), POINTER                          :: ct, cvec, xt
       TYPE(cp_logger_type), POINTER                      :: logger
@@ -495,6 +456,7 @@ CONTAINS
       TYPE(dbcsr_type)                                   :: pdens
       TYPE(dbcsr_type), POINTER                          :: tempmat
       TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(distribution_1d_type), POINTER                :: local_particles
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(section_vals_type), POINTER                   :: input
@@ -527,7 +489,8 @@ CONTAINS
       CALL get_qs_env(qs_env, dft_control=dft_control)
       do_ewald = dft_control%tddfpt_control%stda_control%do_ewald
 
-      CALL get_qs_env(qs_env, natom=natom, particle_set=particle_set, qs_kind_set=qs_kind_set)
+      CALL get_qs_env(qs_env, natom=natom, cell=cell, &
+                      particle_set=particle_set, qs_kind_set=qs_kind_set)
       ALLOCATE (first_sgf(natom))
       ALLOCATE (last_sgf(natom))
       CALL get_particle_set(particle_set, qs_kind_set, first_sgf=first_sgf, last_sgf=last_sgf)
@@ -578,6 +541,22 @@ CONTAINS
             ! Ewald long range contribution
             IF (do_ewald) THEN
                CPABORT("EWALD")
+            ELSE
+               CALL get_qs_env(qs_env=qs_env, local_particles=local_particles)
+               DO ikind = 1, SIZE(local_particles%n_el)
+                  DO ia = 1, local_particles%n_el(ikind)
+                     iatom = local_particles%list(ikind)%array(ia)
+                     DO jatom = 1, iatom-1
+                        rij = particle_set(iatom)%r-particle_set(jatom)%r
+                        rij = pbc(rij, cell)
+                        dr = SQRT(SUM(rij(:)**2))
+                        IF (dr > 1.e-6_dp) THEN
+                           gtcharge(iatom) = gtcharge(iatom)+tcharge(jatom)/dr
+                           gtcharge(jatom) = gtcharge(jatom)+tcharge(iatom)/dr
+                        END IF
+                     END DO
+                  END DO
+               END DO
             END IF
             CALL mp_sum(gtcharge, para_env%group)
             ! expand charges
@@ -598,33 +577,34 @@ CONTAINS
          !
          ! *** Exchange contribution
          !
-         IF (stda_env%hfx_fraction /= 0.0_dp) THEN
+         IF (stda_env%hfx_fraction > 0.0_dp) THEN
+            ALLOCATE (kind_of(natom))
+            CALL get_qs_env(qs_env=qs_env, atomic_kind_set=atomic_kind_set)
+            CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set, kind_of=kind_of)
+            !
             CALL get_qs_env(qs_env=qs_env, matrix_s=matrix_s)
             tempmat => matrix_s(1)%matrix
             CALL dbcsr_create(pdens, template=tempmat, matrix_type=dbcsr_type_no_symmetry)
             ! P(nu,mu) = SUM_j XT(nu,j)*CT(mu,j)
             CALL cp_dbcsr_plus_fm_fm_t(pdens, xt, ct, n_occ(ispin), &
                                        1.0_dp, keep_sparsity=.FALSE.)
-            ! Apply PP*gab -> PP
-            ! gab = stda_env%gamma_coulomb(1)%matrix
+            ! Apply PP*gab -> PP; gab = gamma_coulomb
             ! P(nu,mu) = P(nu,mu)*g(a of nu,b of mu)
-            tempmat => stda_env%gamma_coulomb(1)%matrix
+            bp = stda_env%beta_param
+            hfx = stda_env%hfx_fraction
             CALL dbcsr_iterator_start(iter, pdens)
             DO WHILE (dbcsr_iterator_blocks_left(iter))
                CALL dbcsr_iterator_next_block(iter, iatom, jatom, pblock, blk)
-               IF (iatom <= jatom) THEN
-                  irow = iatom
-                  icol = jatom
-               ELSE
-                  irow = jatom
-                  icol = iatom
-               END IF
-               CALL dbcsr_get_block_p(matrix=tempmat, row=irow, col=icol, BLOCK=gab, found=found)
-               IF (found) THEN
-                  pblock = gab(1, 1)*pblock
-               ELSE
-                  pblock = 0.0_dp
-               END IF
+               rij = particle_set(iatom)%r-particle_set(jatom)%r
+               rij = pbc(rij, cell)
+               dr = SQRT(SUM(rij(:)**2))
+               ikind = kind_of(iatom)
+               jkind = kind_of(jatom)
+               eta = (stda_env%kind_param_set(ikind)%kind_param%hardness_param+ &
+                      stda_env%kind_param_set(jkind)%kind_param%hardness_param)/2.0_dp
+               rbeta = dr**bp
+               gabr = (1._dp/(rbeta+(hfx*eta)**(-bp)))**(1._dp/bp)
+               pblock = gabr*pblock
             END DO
             CALL dbcsr_iterator_stop(iter)
             ! CV(mu,i) = P(nu,mu)*CT(mu,i)
@@ -635,6 +615,7 @@ CONTAINS
                                          n_occ(ispin), -1.0_dp, 1.0_dp)
             !
             CALL dbcsr_release(pdens)
+            DEALLOCATE (kind_of)
          END IF
          !
          CALL cp_fm_release(cvec)

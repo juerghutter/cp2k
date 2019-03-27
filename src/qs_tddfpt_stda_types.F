@@ -85,9 +85,8 @@ MODULE qs_tddfpt_stda_types
       REAL(KIND=dp)                                :: beta_param
       TYPE(stda_atom_p_type), DIMENSION(:), POINTER:: atom_param_set
       TYPE(stda_kind_p_type), DIMENSION(:), POINTER:: kind_param_set
-      !approximated Coulomb/Exchange-type integrals (Mataga-Nishimoto-Ohno-Klopman)
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER    :: gamma_coulomb, &
-                                                      gamma_exchange
+      !approximated Exchange-type integrals (Mataga-Nishimoto-Ohno-Klopman)
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER    :: gamma_exchange
       !Lowdin MO coefficients !NAO*NOCC
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER    :: ctransformed => Null()
       !Lowdin transformed Davidson trial vector X  !NAO*NOCC
@@ -354,7 +353,6 @@ CONTAINS
       stda_env%n_ao = 0
       NULLIFY (stda_env%atom_param_set)
       NULLIFY (stda_env%kind_param_set)
-      NULLIFY (stda_env%gamma_coulomb)
       NULLIFY (stda_env%gamma_exchange)
       NULLIFY (stda_env%ctransformed)
       NULLIFY (stda_env%xtransformed)
@@ -419,10 +417,6 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       IF (ASSOCIATED(stda_env)) THEN
-         IF (ASSOCIATED(stda_env%gamma_coulomb)) THEN
-            CALL dbcsr_deallocate_matrix_set(stda_env%gamma_coulomb)
-            NULLIFY (stda_env%gamma_coulomb)
-         ENDIF
          IF (ASSOCIATED(stda_env%gamma_exchange)) THEN
             CALL dbcsr_deallocate_matrix_set(stda_env%gamma_exchange)
             NULLIFY (stda_env%gamma_exchange)
