@@ -9,7 +9,9 @@ MODULE qs_tddfpt_stda_utils
 
    USE atomic_kind_types,               ONLY: atomic_kind_type,&
                                               get_atomic_kind_set
+   USE atprop_types,                    ONLY: atprop_type
    USE cell_types,                      ONLY: cell_type,&
+                                              get_cell,&
                                               pbc
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
    USE cp_control_types,                ONLY: dft_control_type
@@ -42,11 +44,17 @@ MODULE qs_tddfpt_stda_utils
         dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_p_type, &
         dbcsr_release, dbcsr_set, dbcsr_type, dbcsr_type_no_symmetry, dbcsr_type_symmetric
    USE distribution_1d_types,           ONLY: distribution_1d_type
+   USE ewald_environment_types,         ONLY: ewald_env_get,&
+                                              ewald_environment_type
+   USE ewald_methods_tb,                ONLY: tb_ewald_overlap,&
+                                              tb_spme_evaluate
+   USE ewald_pw_types,                  ONLY: ewald_pw_type
    USE input_constants,                 ONLY: tddfpt_singlet
    USE input_section_types,             ONLY: section_vals_type,&
                                               section_vals_val_get
    USE iterate_matrix,                  ONLY: matrix_sqrt_Newton_Schulz
    USE kinds,                           ONLY: dp
+   USE mathconstants,                   ONLY: oorootpi
    USE message_passing,                 ONLY: mp_sum
    USE particle_methods,                ONLY: get_particle_set
    USE particle_types,                  ONLY: particle_type
@@ -63,6 +71,7 @@ MODULE qs_tddfpt_stda_utils
    USE qs_p_env_types,                  ONLY: qs_p_env_type
    USE qs_tddfpt_stda_types,            ONLY: stda_env_type
    USE scf_control_types,               ONLY: scf_control_type
+   USE virial_types,                    ONLY: virial_type
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -435,17 +444,22 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'stda_calculate_kernel', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: blk, handle, ia, iatom, ikind, iounit, &
-                                                            is, ispin, jatom, jkind, natom, nsgf, &
-                                                            nspins, res_etype
+      INTEGER                                            :: blk, ewald_type, handle, ia, iatom, &
+                                                            ikind, iounit, is, ispin, jatom, &
+                                                            jkind, natom, nsgf, nspins, res_etype
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: first_sgf, kind_of, last_sgf
       INTEGER, DIMENSION(2)                              :: n_occ
-      LOGICAL                                            :: do_coulomb, do_ewald
-      REAL(KIND=dp)                                      :: bp, dr, eta, gabr, hfx, rbeta, spinfac
-      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: gtcharge, tcharge, tv
+      INTEGER, DIMENSION(3)                              :: periodic
+      LOGICAL                                            :: calculate_forces, do_coulomb, do_ewald, &
+                                                            use_virial
+      REAL(KIND=dp)                                      :: alpha, bp, deth, dr, eta, gabr, hfx, &
+                                                            rbeta, spinfac
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: tcharge, tv
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: gtcharge
       REAL(KIND=dp), DIMENSION(3)                        :: rij
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: gab, pblock
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
+      TYPE(atprop_type), POINTER                         :: atprop
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_fm_struct_type), POINTER                   :: fmstruct
       TYPE(cp_fm_type), POINTER                          :: ct, cvec, xt
@@ -457,10 +471,15 @@ CONTAINS
       TYPE(dbcsr_type), POINTER                          :: tempmat
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(distribution_1d_type), POINTER                :: local_particles
+      TYPE(ewald_environment_type), POINTER              :: ewald_env
+      TYPE(ewald_pw_type), POINTER                       :: ewald_pw
+      TYPE(neighbor_list_set_p_type), DIMENSION(:), &
+         POINTER                                         :: n_list
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(section_vals_type), POINTER                   :: input
       TYPE(stda_env_type), POINTER                       :: stda_env
+      TYPE(virial_type), POINTER                         :: virial
 
       CALL timeset(routineN, handle)
 
@@ -499,7 +518,7 @@ CONTAINS
       ! and tilde(tilde(X))=S^1/2_A*tilde(X)_A
       CALL get_lowdin_x(qs_env, p_env, X)
 
-      ALLOCATE (tcharge(natom), gtcharge(natom))
+      ALLOCATE (tcharge(natom), gtcharge(natom, 1))
 
       DO ispin = 1, nspins
          ct => stda_env%ctransformed(ispin)%matrix
@@ -532,15 +551,29 @@ CONTAINS
             CALL dbcsr_iterator_start(iter, tempmat)
             DO WHILE (dbcsr_iterator_blocks_left(iter))
                CALL dbcsr_iterator_next_block(iter, iatom, jatom, gab, blk)
-               gtcharge(iatom) = gtcharge(iatom)+gab(1, 1)*tcharge(jatom)
+               gtcharge(iatom, 1) = gtcharge(iatom, 1)+gab(1, 1)*tcharge(jatom)
                IF (iatom /= jatom) THEN
-                  gtcharge(jatom) = gtcharge(jatom)+gab(1, 1)*tcharge(iatom)
+                  gtcharge(jatom, 1) = gtcharge(jatom, 1)+gab(1, 1)*tcharge(iatom)
                END IF
             END DO
             CALL dbcsr_iterator_stop(iter)
             ! Ewald long range contribution
             IF (do_ewald) THEN
-               CPABORT("EWALD")
+               NULLIFY (ewald_env, ewald_pw)
+               CALL get_qs_env(qs_env=qs_env, ewald_env=ewald_env, ewald_pw=ewald_pw)
+               CALL get_cell(cell=cell, periodic=periodic, deth=deth)
+               CALL ewald_env_get(ewald_env, alpha=alpha, ewald_type=ewald_type)
+               CALL get_qs_env(qs_env=qs_env, sab_tbe=n_list, &
+                               virial=virial, atprop=atprop)
+               use_virial = .FALSE.
+               calculate_forces = .FALSE.
+               CALL tb_ewald_overlap(gtcharge, tcharge, alpha, n_list, virial, use_virial, atprop)
+               CALL tb_spme_evaluate(ewald_env, ewald_pw, particle_set, cell, &
+                                     gtcharge, tcharge, calculate_forces, virial, use_virial, atprop)
+               ! add self charge interaction contribution
+               IF (para_env%ionode) THEN
+                  gtcharge(:, 1) = gtcharge(:, 1)-2._dp*alpha*oorootpi*tcharge(:)
+               END IF
             ELSE
                CALL get_qs_env(qs_env=qs_env, local_particles=local_particles)
                DO ikind = 1, SIZE(local_particles%n_el)
@@ -551,8 +584,8 @@ CONTAINS
                         rij = pbc(rij, cell)
                         dr = SQRT(SUM(rij(:)**2))
                         IF (dr > 1.e-6_dp) THEN
-                           gtcharge(iatom) = gtcharge(iatom)+tcharge(jatom)/dr
-                           gtcharge(jatom) = gtcharge(jatom)+tcharge(iatom)/dr
+                           gtcharge(iatom, 1) = gtcharge(iatom, 1)+tcharge(jatom)/dr
+                           gtcharge(jatom, 1) = gtcharge(jatom, 1)+tcharge(iatom)/dr
                         END IF
                      END DO
                   END DO
@@ -564,7 +597,7 @@ CONTAINS
             tv(1:nsgf) = 0.0_dp
             DO ia = 1, natom
                DO is = first_sgf(ia), last_sgf(ia)
-                  tv(is) = gtcharge(ia)
+                  tv(is) = gtcharge(ia, 1)
                END DO
             END DO
             ! CV(mu,i) = TV(mu)*CV(mu,i)

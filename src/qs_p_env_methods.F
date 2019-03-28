@@ -314,10 +314,10 @@ CONTAINS
       ! stda initialization
       IF (ASSOCIATED(dft_control%tddfpt_control)) THEN
          IF (dft_control%tddfpt_control%kernel == 0) THEN
-            ! initialize Ewald for stda ! do this in qs_environment
-            IF (dft_control%tddfpt_control%stda_control%do_ewald) THEN
-               CPABORT("ewald not working yet")
-            END IF
+!           ! initialize Ewald for stda ! do this in qs_environment
+!           IF (dft_control%tddfpt_control%stda_control%do_ewald) THEN
+!              CPABORT("ewald not working yet")
+!           END IF
             CALL stda_init_param(qs_env, p_env%stda_env)
          ENDIF
       ENDIF
