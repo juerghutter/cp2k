@@ -11,14 +11,16 @@
 ! **************************************************************************************************
 MODULE input_cp2k_xc
    USE bibliography,                    ONLY: &
-        Becke1988, Becke1997, BeckeRoussel1989, Goedecker1996, Grimme2006, Grimme2010, Grimme2011, &
-        Heyd2004, Lee1988, Lehtola2018, Marques2012, Ortiz1994, Perdew1981, Perdew1996, &
-        Perdew2008, Proynov2007, Tao2003, Tran2013, Vosko1980, Wellendorff2012, Zhang1998
+        Avezac2005, Becke1988, Becke1997, BeckeRoussel1989, Goedecker1996, Grimme2006, Grimme2010, &
+        Grimme2011, Heyd2004, Lee1988, Lehtola2018, Marques2012, Ortiz1994, Perdew1981, &
+        Perdew1996, Perdew2008, Proynov2007, Tao2003, Tran2013, VandeVondele2005b, Vosko1980, &
+        Wellendorff2012, Zhang1998
    USE cp_output_handling,              ONLY: add_last_numeric,&
                                               cp_print_key_section_create,&
                                               high_print_level
    USE input_constants,                 ONLY: &
-        do_adiabatic_hybrid_mcy3, do_adiabatic_model_pade, gaussian, slater, vdw_nl_drsll, &
+        do_adiabatic_hybrid_mcy3, do_adiabatic_model_pade, gaussian, sic_ad, sic_eo, sic_list_all, &
+        sic_list_unpaired, sic_mauri_spz, sic_mauri_us, sic_none, slater, vdw_nl_drsll, &
         vdw_nl_lmkll, vdw_nl_rvv10, vdw_pairpot_dftd2, vdw_pairpot_dftd3, vdw_pairpot_dftd3bj, &
         xc_funct_b3lyp, xc_funct_beefvdw, xc_funct_blyp, xc_funct_bp, xc_funct_hcth120, &
         xc_funct_no_shortcut, xc_funct_olyp, xc_funct_pade, xc_funct_pbe, xc_funct_pbe0, &
@@ -56,7 +58,7 @@ MODULE input_cp2k_xc
    LOGICAL, PRIVATE, PARAMETER :: debug_this_module = .TRUE.
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'input_cp2k_xc'
 
-   PUBLIC :: create_xc_section
+   PUBLIC :: create_xc_section, create_sic_section
 
 CONTAINS
 
@@ -1262,5 +1264,72 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
    END SUBROUTINE create_adiabatic_section
+
+! **************************************************************************************************
+!> \brief creates the sic (self interaction correction) section
+!> \param section ...
+!> \author fawzi
+! **************************************************************************************************
+   SUBROUTINE create_sic_section(section)
+      TYPE(section_type), POINTER                        :: section
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'create_sic_section', &
+         routineP = moduleN//':'//routineN
+
+      TYPE(keyword_type), POINTER                        :: keyword
+
+      CPASSERT(.NOT. ASSOCIATED(section))
+      CALL section_create(section, "sic", &
+                          description="parameters for the self interaction correction", &
+                          n_keywords=6, n_subsections=0, repeats=.FALSE., &
+                          citations=(/VandeVondele2005b, Perdew1981, Avezac2005/))
+
+      NULLIFY (keyword)
+
+      CALL keyword_create(keyword, name="SIC_SCALING_A", &
+                          description="Scaling of the coulomb term in sic [experimental]", &
+                          usage="SIC_SCALING_A 0.5", &
+                          citations=(/VandeVondele2005b/), &
+                          default_r_val=1.0_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="SIC_SCALING_B", &
+                          description="Scaling of the xc term in sic [experimental]", &
+                          usage="SIC_SCALING_B 0.5", &
+                          citations=(/VandeVondele2005b/), &
+                          default_r_val=1.0_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="SIC_METHOD", &
+                          description="Method used to remove the self interaction", &
+                          usage="SIC_METHOD MAURI_US", &
+                          default_i_val=sic_none, &
+                          enum_c_vals=s2a("NONE", "MAURI_US", "MAURI_SPZ", "AD", "EXPLICIT_ORBITALS"), &
+                          enum_i_vals=(/sic_none, sic_mauri_us, sic_mauri_spz, sic_ad, sic_eo/), &
+                          enum_desc=s2a("Do not apply a sic correction", &
+                                        "Employ a (scaled) correction proposed by Mauri and co-workers"// &
+                                        " on the spin density / doublet unpaired orbital", &
+                                        "Employ a (scaled) Perdew-Zunger expression"// &
+                                        " on the spin density / doublet unpaired orbital", &
+                                        "The average density correction", &
+                                        "(scaled) Perdew-Zunger correction explicitly on a set of orbitals."), &
+                          citations=(/VandeVondele2005b, Perdew1981, Avezac2005/))
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="ORBITAL_SET", &
+                          description="Type of orbitals treated with the SIC", &
+                          usage="ORBITAL_SET ALL", &
+                          default_i_val=sic_list_unpaired, &
+                          enum_c_vals=s2a("UNPAIRED", "ALL"), &
+                          enum_desc=s2a("correction for the unpaired orbitals only, requires a restricted open shell calculation", &
+                                        "correction for all orbitals, requires a LSD or ROKS calculation"), &
+                          enum_i_vals=(/sic_list_unpaired, sic_list_all/))
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+   END SUBROUTINE create_sic_section
 
 END MODULE input_cp2k_xc

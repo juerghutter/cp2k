@@ -11,28 +11,17 @@ MODULE qs_tddfpt_stda_types
                                               get_atomic_kind
    USE basis_set_types,                 ONLY: get_gto_basis_set,&
                                               gto_basis_set_type
-   USE cell_types,                      ONLY: cell_type,&
-                                              plane_distance
-   USE cp_blacs_env,                    ONLY: cp_blacs_env_type
-   USE cp_control_types,                ONLY: dft_control_type,&
-                                              stda_control_type,&
-                                              tddfpt_control_type
+   USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_operations,             ONLY: dbcsr_deallocate_matrix_set
    USE cp_fm_pool_types,                ONLY: cp_fm_pool_p_type,&
                                               fm_pools_create_fm_vect
-   USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
-                                              cp_fm_struct_release,&
-                                              cp_fm_struct_type
-   USE cp_fm_types,                     ONLY: cp_fm_create,&
-                                              cp_fm_get_info,&
+   USE cp_fm_types,                     ONLY: cp_fm_get_info,&
                                               cp_fm_p_type,&
-                                              cp_fm_release,&
                                               cp_fm_type
    USE cp_fm_vect,                      ONLY: cp_fm_vect_dealloc
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_io_unit,&
                                               cp_logger_type
-   USE cp_para_types,                   ONLY: cp_para_env_type
    USE dbcsr_api,                       ONLY: dbcsr_create,&
                                               dbcsr_p_type,&
                                               dbcsr_release,&
@@ -62,17 +51,6 @@ MODULE qs_tddfpt_stda_types
       REAL(KIND=dp)                               :: rcut !cutoff radius for short-range Coulomb
    END TYPE
 
-   TYPE stda_atom_type
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER    :: charges => Null() ! Lowdin transition density charges   !NOCC*NOCC
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER    :: xtransformed_double => Null() !NAO*NOCC
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER    :: ctransformed_double => Null() !NAO*NOCC
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER    :: gmcharge => Null()
-   END TYPE
-
-   TYPE stda_atom_p_type
-      TYPE(stda_atom_type), POINTER               :: atom_param
-   END TYPE
-
    TYPE stda_kind_p_type
       TYPE(stda_kind_type), POINTER               :: kind_param
    END TYPE
@@ -83,7 +61,6 @@ MODULE qs_tddfpt_stda_types
       ! empirical parameters
       REAL(KIND=dp)                                :: alpha_param
       REAL(KIND=dp)                                :: beta_param
-      TYPE(stda_atom_p_type), DIMENSION(:), POINTER:: atom_param_set
       TYPE(stda_kind_p_type), DIMENSION(:), POINTER:: kind_param_set
       !approximated Exchange-type integrals (Mataga-Nishimoto-Ohno-Klopman)
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER    :: gamma_exchange
@@ -167,7 +144,7 @@ MODULE qs_tddfpt_stda_types
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_tddfpt_stda_types'
 
-   PUBLIC:: stda_env_type, allocate_stda_atom_param, deallocate_stda_atom_param, &
+   PUBLIC:: stda_env_type, &
             allocate_stda_env, deallocate_stda_env, stda_init_param
 
 CONTAINS
@@ -185,18 +162,13 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       INTEGER                                            :: handle, ikind, iounit, nkind
-      LOGICAL                                            :: explicit
-      REAL(KIND=dp)                                      :: rc
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(atomic_kind_type), POINTER                    :: atomic_kind
-      TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_logger_type), POINTER                      :: logger
-      TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(gto_basis_set_type), POINTER                  :: tmp_basis_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(qs_kind_type), POINTER                        :: qs_kind
       TYPE(section_vals_type), POINTER                   :: input, stda_section
-      TYPE(stda_control_type), POINTER                   :: stda_control
       TYPE(stda_kind_type), POINTER                      :: kind_param
 
       CALL timeset(routineN, handle)
@@ -222,32 +194,18 @@ CONTAINS
                               z=stda_env%kind_param_set(ikind)%kind_param%z)
       ENDDO
 
-! HFx_fraction
+      ! HFx_fraction
       NULLIFY (input)
       CALL get_qs_env(qs_env, input=input)
       stda_section => section_vals_get_subs_vals(input, "DFT%TDDFPT%sTDA")
-      CALL section_vals_val_get(stda_section, "FRACTION", r_val=stda_env%hfx_fraction, explicit=explicit)
-!      IF (explicit) THEN
-!         xc_section => section_vals_get_subs_vals(input, "DFT%XC")
-!         CALL section_vals_val_get(input, "DFT%EXCITATIONS", &
-!                                   i_val=excitations)
-!         IF (excitations == tddfpt_excitations) THEN
-!            xc_section => section_vals_get_subs_vals(input, "DFT%TDDFPT%XC")
-!            CALL section_vals_get(xc_section, explicit=explicit)
-!            IF (.NOT. explicit) THEN
-!               xc_section => section_vals_get_subs_vals(input, "DFT%XC")
-!            END IF
-!         END IF
-!         hfx_section => section_vals_get_subs_vals(xc_section, "HF")
-!         CALL section_vals_val_get(hfx_section, "FRACTION", r_val=stda_env%hfx_fraction)
+      CALL section_vals_val_get(stda_section, "FRACTION", r_val=stda_env%hfx_fraction)
       IF (iounit > 0) THEN
          WRITE (iounit, *)
-         WRITE (iounit, '(A,T71,F10.3)') " STDA | Fraction a_x [a.u.]", &
+         WRITE (iounit, '(A,T71,F10.3)') " STDA | HFx Fraction a_x [a.u.]", &
             stda_env%hfx_fraction
       END IF
-!      ENDIF
 
-! alpha and beta parameter
+      ! alpha and beta parameter
       stda_env%alpha_param = alpha(1)+stda_env%hfx_fraction*alpha(2)
       stda_env%beta_param = beta(1)+stda_env%hfx_fraction*beta(2)
 
@@ -259,61 +217,14 @@ CONTAINS
       END IF
 
       DO ikind = 1, nkind
-! hardness parameter
+         ! hardness parameter
          stda_env%kind_param_set(ikind)%kind_param%hardness_param = &
             hardness(stda_env%kind_param_set(ikind)%kind_param%z)*2.0_dp/evolt
-! rcut parameter
+         ! rcut parameter
          qs_kind => qs_kind_set(ikind)
          CALL get_qs_kind(qs_kind, basis_set=tmp_basis_set)
          CALL get_gto_basis_set(tmp_basis_set, kind_radius=stda_env%kind_param_set(ikind)%kind_param%rcut)
       ENDDO ! nkind
-
-! set coulomb cutoff
-      CALL section_vals_val_get(stda_section, "COULOMB_CUTOFF", explicit=explicit)
-      CALL get_qs_env(qs_env, cell=cell, dft_control=dft_control)
-      stda_control => dft_control%tddfpt_control%stda_control
-      IF ((.NOT. explicit) .AND. stda_control%do_mic) THEN
-         rc = MAX(0.5*plane_distance(1, 0, 0, cell), &
-                  0.5*plane_distance(0, 1, 0, cell), &
-                  0.5*plane_distance(0, 0, 1, cell))
-         IF (rc /= stda_control%cutoff_cou) THEN
-            IF (iounit > 0) THEN
-               WRITE (iounit, *)
-               WRITE (iounit, '(A,T43,A)') " STDA |", &
-                  " Coulomb Integral cutoff was redefined"
-               WRITE (iounit, '(A,T71,F10.3)') " STDA | Old value [a.u.]", &
-                  stda_control%cutoff_cou
-               WRITE (iounit, '(A,T71,F10.3)') " STDA | New value [a.u.]", rc
-               WRITE (iounit, *)
-            END IF
-         END IF
-         stda_control%cutoff_cou = rc
-      ELSE IF ((.NOT. explicit) .AND. (ALL(cell%perd == 0))) THEN
-         rc = MAX(plane_distance(1, 0, 0, cell), &
-                  plane_distance(0, 1, 0, cell), &
-                  plane_distance(0, 0, 1, cell))
-         IF (rc /= stda_control%cutoff_cou) THEN
-            IF (iounit > 0) THEN
-               WRITE (iounit, *)
-               WRITE (iounit, '(A,T37,A)') " STDA |", &
-                  " Coulomb Integral cutoff was redefined"
-               WRITE (iounit, '(A,T71,F10.3)') " STDA | Old value [a.u.]", &
-                  stda_control%cutoff_cou
-               WRITE (iounit, '(A,T71,F10.3)') " STDA | New value [a.u.]", rc
-               WRITE (iounit, *)
-            END IF
-         END IF
-         stda_control%cutoff_cou = rc
-      ELSE
-         IF (iounit > 0) THEN
-            WRITE (iounit, *)
-            WRITE (iounit, '(A,T50,A)') " STDA |", &
-               " Coulomb Integral cutoff values"
-            WRITE (iounit, '(A,T71,F10.3)') " STDA | Cutoff [a.u.]", &
-               stda_control%cutoff_cou
-            WRITE (iounit, *)
-         END IF
-      ENDIF
 
       CALL timestop(handle)
 
@@ -331,14 +242,13 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'allocate_stda_env', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: handle, ii, ispin, n_ao, n_occ, natoms, &
-                                                            nkind, nspins
+      INTEGER                                            :: handle, ii, ispin, n_ao, n_occ, nkind, &
+                                                            nspins
       TYPE(cp_fm_pool_p_type), DIMENSION(:), POINTER     :: ao_mo_fm_pools
       TYPE(cp_fm_type), POINTER                          :: qs_env_c
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_s
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
-      TYPE(stda_atom_type), POINTER                      :: atom_param
       TYPE(stda_kind_type), POINTER                      :: kind_param
 
       CALL timeset(routineN, handle)
@@ -351,7 +261,6 @@ CONTAINS
       stda_env%beta_param = 0.0d0
       stda_env%n_occ = 0
       stda_env%n_ao = 0
-      NULLIFY (stda_env%atom_param_set)
       NULLIFY (stda_env%kind_param_set)
       NULLIFY (stda_env%gamma_exchange)
       NULLIFY (stda_env%ctransformed)
@@ -379,15 +288,6 @@ CONTAINS
          stda_env%kind_param_set(ii)%kind_param => kind_param
       ENDDO
 
-      ! initialize stda_atom_parameters
-      CALL get_qs_env(qs_env=qs_env, natom=natoms)
-      ALLOCATE (stda_env%atom_param_set(natoms))
-      DO ii = 1, natoms
-         NULLIFY (atom_param)
-         CALL allocate_stda_atom_param(qs_env, stda_env, atom_param)
-         stda_env%atom_param_set(ii)%atom_param => atom_param
-      ENDDO
-
       NULLIFY (ao_mo_fm_pools)
       CALL mpools_get(qs_env%mpools, ao_mo_fm_pools=ao_mo_fm_pools)
       CALL fm_pools_create_fm_vect(ao_mo_fm_pools, stda_env%ctransformed, name=routineP//"ctransformed")
@@ -411,7 +311,6 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       INTEGER                                            :: handle, ii
-      TYPE(stda_atom_type), POINTER                      :: atom_param
       TYPE(stda_kind_type), POINTER                      :: kind_param
 
       CALL timeset(routineN, handle)
@@ -438,15 +337,6 @@ CONTAINS
             ENDDO
             DEALLOCATE (stda_env%kind_param_set)
             NULLIFY (stda_env%kind_param_set)
-         ENDIF
-         ! deallocate stda_atom_parameters
-         IF (ASSOCIATED(stda_env%atom_param_set)) THEN
-            DO ii = 1, SIZE(stda_env%atom_param_set)
-               atom_param => stda_env%atom_param_set(ii)%atom_param
-               CALL deallocate_stda_atom_param(atom_param)
-            ENDDO
-            DEALLOCATE (stda_env%atom_param_set)
-            NULLIFY (stda_env%atom_param_set)
          ENDIF
          DEALLOCATE (stda_env)
       ENDIF
@@ -494,132 +384,5 @@ CONTAINS
       NULLIFY (kind_param)
 
    END SUBROUTINE deallocate_stda_kind_param
-! **************************************************************************************************
-!> \brief Allocate sTDA atom parameter
-!> \param qs_env ...
-!> \param stda_env ...
-!> \param atom_param ...
-! **************************************************************************************************
-   SUBROUTINE allocate_stda_atom_param(qs_env, stda_env, atom_param)
-
-      TYPE(qs_environment_type), POINTER                 :: qs_env
-      TYPE(stda_env_type), POINTER                       :: stda_env
-      TYPE(stda_atom_type), POINTER                      :: atom_param
-
-      CHARACTER(LEN=*), PARAMETER :: routineN = 'allocate_stda_atom_param', &
-         routineP = moduleN//':'//routineN
-
-      INTEGER                                            :: iounit, ispin, n_ao, n_occ, nspins
-      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
-      TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
-      TYPE(cp_logger_type), POINTER                      :: logger
-      TYPE(cp_para_env_type), POINTER                    :: para_env
-      TYPE(dft_control_type), POINTER                    :: dft_control
-      TYPE(tddfpt_control_type), POINTER                 :: tddfpt_control
-
-      NULLIFY (logger)
-      logger => cp_get_default_logger()
-      iounit = cp_logger_get_default_io_unit(logger)
-
-      IF (ASSOCIATED(atom_param)) &
-         CALL deallocate_stda_atom_param(atom_param)
-
-      CALL get_qs_env(qs_env, &
-                      dft_control=dft_control, &
-                      para_env=para_env, &
-                      blacs_env=blacs_env)
-      tddfpt_control => dft_control%tddfpt_control
-
-      nspins = dft_control%nspins
-      ALLOCATE (atom_param)
-      ALLOCATE (atom_param%charges(nspins))
-      ALLOCATE (atom_param%xtransformed_double(nspins))
-      ALLOCATE (atom_param%ctransformed_double(nspins))
-      ALLOCATE (atom_param%gmcharge(nspins))
-
-      DO ispin = 1, nspins
-         n_occ = stda_env%n_occ(ispin)
-         n_ao = stda_env%n_ao(ispin)
-         !charges
-         NULLIFY (fm_struct)
-         CALL cp_fm_struct_create(fm_struct, para_env, blacs_env, n_occ, n_occ)
-         CALL cp_fm_create(atom_param%charges(ispin)%matrix, fm_struct, routineP//"charges")
-         CALL cp_fm_struct_release(fm_struct)
-         !xtransformed_double
-         NULLIFY (fm_struct)
-         CALL cp_fm_struct_create(fm_struct, para_env, blacs_env, n_ao, n_occ)
-         CALL cp_fm_create(atom_param%xtransformed_double(ispin)%matrix, fm_struct, &
-                           routineP//"xtransformed_double")
-         CALL cp_fm_struct_release(fm_struct)
-         !ctransformed_double
-         NULLIFY (fm_struct)
-         CALL cp_fm_struct_create(fm_struct, para_env, blacs_env, n_ao, n_occ)
-         CALL cp_fm_create(atom_param%ctransformed_double(ispin)%matrix, fm_struct, &
-                           routineP//"ctransformed_double")
-         CALL cp_fm_struct_release(fm_struct)
-         !gmcharge
-         NULLIFY (fm_struct)
-         CALL cp_fm_struct_create(fm_struct, para_env, blacs_env, n_occ, n_occ)
-         CALL cp_fm_create(atom_param%gmcharge(ispin)%matrix, fm_struct, routineP//"gmcharge")
-         CALL cp_fm_struct_release(fm_struct)
-      ENDDO
-
-   END SUBROUTINE allocate_stda_atom_param
-! **************************************************************************************************
-!> \brief Deallocate sTDA atom parameter
-!> \param atom_param ...
-! **************************************************************************************************
-   SUBROUTINE deallocate_stda_atom_param(atom_param)
-
-      TYPE(stda_atom_type), POINTER                      :: atom_param
-
-      CHARACTER(LEN=*), PARAMETER :: routineN = 'deallocate_stda_atom_param', &
-         routineP = moduleN//':'//routineN
-
-      INTEGER                                            :: ispin
-
-      CPASSERT(ASSOCIATED(atom_param))
-      IF (ASSOCIATED(atom_param)) THEN
-         !charges
-         IF (ASSOCIATED(atom_param%charges)) THEN
-            DO ispin = 1, SIZE(atom_param%charges)
-               IF (ASSOCIATED(atom_param%charges(ispin)%matrix)) &
-                  CALL cp_fm_release(atom_param%charges(ispin)%matrix)
-            ENDDO
-            DEALLOCATE (atom_param%charges)
-            NULLIFY (atom_param%charges)
-         ENDIF
-         !ctransformed_double
-         IF (ASSOCIATED(atom_param%ctransformed_double)) THEN
-            DO ispin = 1, SIZE(atom_param%ctransformed_double)
-               IF (ASSOCIATED(atom_param%ctransformed_double(ispin)%matrix)) &
-                  CALL cp_fm_release(atom_param%ctransformed_double(ispin)%matrix)
-            ENDDO
-            DEALLOCATE (atom_param%ctransformed_double)
-            NULLIFY (atom_param%ctransformed_double)
-         ENDIF
-         !gmcharge
-         IF (ASSOCIATED(atom_param%gmcharge)) THEN
-            DO ispin = 1, SIZE(atom_param%gmcharge)
-               IF (ASSOCIATED(atom_param%gmcharge(ispin)%matrix)) &
-                  CALL cp_fm_release(atom_param%gmcharge(ispin)%matrix)
-            ENDDO
-            DEALLOCATE (atom_param%gmcharge)
-            NULLIFY (atom_param%gmcharge)
-         ENDIF
-         !xtransformed_double
-         IF (ASSOCIATED(atom_param%xtransformed_double)) THEN
-            DO ispin = 1, SIZE(atom_param%xtransformed_double)
-               IF (ASSOCIATED(atom_param%xtransformed_double(ispin)%matrix)) &
-                  CALL cp_fm_release(atom_param%xtransformed_double(ispin)%matrix)
-            ENDDO
-            DEALLOCATE (atom_param%xtransformed_double)
-            NULLIFY (atom_param%xtransformed_double)
-         ENDIF
-      ENDIF
-      DEALLOCATE (atom_param)
-      NULLIFY (atom_param)
-
-   END SUBROUTINE deallocate_stda_atom_param
 
 END MODULE qs_tddfpt_stda_types

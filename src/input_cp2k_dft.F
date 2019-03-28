@@ -11,14 +11,13 @@
 ! **************************************************************************************************
 MODULE input_cp2k_dft
    USE bibliography,                    ONLY: &
-        Andermatt2016, Andreussi2012, Avezac2005, BaniHashemian2016, Becke1988b, Bengtsson1999, &
-        Blochl1995, Brelaz1979, Dewar1977, Dewar1985, Dudarev1997, Dudarev1998, Ehrhardt1985, &
-        Fattebert2002, Golze2017a, Golze2017b, Guidon2010, Heinzmann1976, Holmberg2017, &
-        Holmberg2018, Hunt2003, Iannuzzi2005, Iannuzzi2006, Iannuzzi2007, Kolafa2004, Krack2000, &
-        Krack2002, Kunert2003, Lippert1997, Lippert1999, Lu2004, Perdew1981, Repasky2002, &
-        Rocha2006, Schenter2008, Schiffmann2015, Stewart1982, Stewart1989, Stewart2007, Thiel1992, &
-        Tozer1996, VanVoorhis2015, VandeVondele2003, VandeVondele2005a, VandeVondele2005b, &
-        VandeVondele2006, Weber2008, Zhao1994
+        Andermatt2016, Andreussi2012, BaniHashemian2016, Becke1988b, Bengtsson1999, Blochl1995, &
+        Brelaz1979, Dewar1977, Dewar1985, Dudarev1997, Dudarev1998, Ehrhardt1985, Fattebert2002, &
+        Golze2017a, Golze2017b, Guidon2010, Heinzmann1976, Holmberg2017, Holmberg2018, Hunt2003, &
+        Iannuzzi2006, Iannuzzi2007, Kolafa2004, Krack2000, Krack2002, Kunert2003, Lippert1997, &
+        Lippert1999, Lu2004, Repasky2002, Rocha2006, Schenter2008, Schiffmann2015, Stewart1982, &
+        Stewart1989, Stewart2007, Thiel1992, Tozer1996, VanVoorhis2015, VandeVondele2003, &
+        VandeVondele2005a, VandeVondele2006, Weber2008, Zhao1994
    USE cp_output_handling,              ONLY: add_last_numeric,&
                                               cp_print_key_section_create,&
                                               debug_print_level,&
@@ -61,37 +60,35 @@ MODULE input_cp2k_dft
         kg_cholesky, kg_color_dsatur, kg_color_greedy, kg_ec_diagonalization, &
         kg_ec_functional_harris, kg_tnadd_atomic, kg_tnadd_embed, kg_tnadd_embed_ri, &
         kg_tnadd_none, ls_2pnt, ls_3pnt, ls_gold, ls_none, mao_basis_ext, mao_basis_orb, &
-        mao_basis_prim, mao_projection, mopac_guess, no_excitations, no_guess, numerical, oe_gllb, &
-        oe_lb, oe_none, oe_saop, oe_sic, op_loc_berry, op_loc_boys, op_loc_pipek, orb_dx2, &
-        orb_dxy, orb_dy2, orb_dyz, orb_dz2, orb_dzx, orb_px, orb_py, orb_pz, orb_s, ot_algo_irac, &
-        ot_algo_taylor_or_diag, ot_chol_irac, ot_lwdn_irac, ot_mini_broyden, ot_mini_cg, &
-        ot_mini_diis, ot_mini_sd, ot_poly_irac, ot_precond_full_all, ot_precond_full_kinetic, &
-        ot_precond_full_single, ot_precond_full_single_inverse, ot_precond_none, &
-        ot_precond_s_inverse, ot_precond_solver_default, ot_precond_solver_direct, &
-        ot_precond_solver_inv_chol, ot_precond_solver_update, outer_scf_basis_center_opt, &
-        outer_scf_becke_constraint, outer_scf_cdft_constraint, outer_scf_ddapc_constraint, &
-        outer_scf_hirshfeld_constraint, outer_scf_none, outer_scf_optimizer_bisect, &
-        outer_scf_optimizer_broyden, outer_scf_optimizer_diis, outer_scf_optimizer_newton, &
-        outer_scf_optimizer_newton_ls, outer_scf_optimizer_none, outer_scf_optimizer_sd, &
-        outer_scf_optimizer_secant, outer_scf_s2_constraint, plus_u_lowdin, plus_u_mulliken, &
-        plus_u_mulliken_charges, pw_interp, radius_covalent, radius_default, radius_single, &
-        radius_user, radius_vdw, random_guess, real_time_propagation, ref_charge_atomic, &
-        ref_charge_mulliken, rel_dkh, rel_none, rel_pot_erfc, rel_pot_full, rel_sczora_mp, &
-        rel_trans_atom, rel_trans_full, rel_trans_molecule, rel_zora, rel_zora_full, rel_zora_mp, &
-        restart_guess, rsdft_model, sccs_andreussi, sccs_derivative_cd3, sccs_derivative_cd5, &
-        sccs_derivative_cd7, sccs_derivative_fft, sccs_fattebert_gygi, shape_function_density, &
-        shape_function_gaussian, sic_ad, sic_eo, sic_list_all, sic_list_unpaired, sic_mauri_spz, &
-        sic_mauri_us, sic_none, slater, smear_energy_window, smear_fermi_dirac, smear_list, &
-        sparse_guess, spline3_nopbc_interp, spline3_pbc_interp, tddfpt_davidson, &
-        tddfpt_excitations, tddfpt_kernel_full, tddfpt_kernel_stda, tddfpt_lanczos, &
-        tddfpt_singlet, tddfpt_triplet, use_coulomb, use_diff, use_no, use_restart_wfn, &
-        use_rt_restart, use_scf_wfn, wannier_projection, weight_type_mass, weight_type_unit, &
-        wfi_aspc_nr, wfi_frozen_method_nr, wfi_linear_p_method_nr, wfi_linear_ps_method_nr, &
-        wfi_linear_wf_method_nr, wfi_ps_method_nr, wfi_use_guess_method_nr, &
-        wfi_use_prev_p_method_nr, wfi_use_prev_rho_r_method_nr, wfi_use_prev_wf_method_nr, &
-        xas_1s_type, xas_2p_type, xas_2s_type, xas_3d_type, xas_3p_type, xas_3s_type, xas_4d_type, &
-        xas_4f_type, xas_4p_type, xas_4s_type, xas_dip_len, xas_dip_vel, xas_dscf, xas_none, &
-        xas_tp_fh, xas_tp_flex, xas_tp_hh, xas_tp_xfh, xas_tp_xhh, xes_tp_val
+        mao_basis_prim, mao_projection, mopac_guess, no_excitations, no_guess, numerical, &
+        op_loc_berry, op_loc_boys, op_loc_pipek, orb_dx2, orb_dxy, orb_dy2, orb_dyz, orb_dz2, &
+        orb_dzx, orb_px, orb_py, orb_pz, orb_s, ot_algo_irac, ot_algo_taylor_or_diag, &
+        ot_chol_irac, ot_lwdn_irac, ot_mini_broyden, ot_mini_cg, ot_mini_diis, ot_mini_sd, &
+        ot_poly_irac, ot_precond_full_all, ot_precond_full_kinetic, ot_precond_full_single, &
+        ot_precond_full_single_inverse, ot_precond_none, ot_precond_s_inverse, &
+        ot_precond_solver_default, ot_precond_solver_direct, ot_precond_solver_inv_chol, &
+        ot_precond_solver_update, outer_scf_basis_center_opt, outer_scf_becke_constraint, &
+        outer_scf_cdft_constraint, outer_scf_ddapc_constraint, outer_scf_hirshfeld_constraint, &
+        outer_scf_none, outer_scf_optimizer_bisect, outer_scf_optimizer_broyden, &
+        outer_scf_optimizer_diis, outer_scf_optimizer_newton, outer_scf_optimizer_newton_ls, &
+        outer_scf_optimizer_none, outer_scf_optimizer_sd, outer_scf_optimizer_secant, &
+        outer_scf_s2_constraint, plus_u_lowdin, plus_u_mulliken, plus_u_mulliken_charges, &
+        pw_interp, radius_covalent, radius_default, radius_single, radius_user, radius_vdw, &
+        random_guess, real_time_propagation, ref_charge_atomic, ref_charge_mulliken, rel_dkh, &
+        rel_none, rel_pot_erfc, rel_pot_full, rel_sczora_mp, rel_trans_atom, rel_trans_full, &
+        rel_trans_molecule, rel_zora, rel_zora_full, rel_zora_mp, restart_guess, rsdft_model, &
+        sccs_andreussi, sccs_derivative_cd3, sccs_derivative_cd5, sccs_derivative_cd7, &
+        sccs_derivative_fft, sccs_fattebert_gygi, shape_function_density, shape_function_gaussian, &
+        slater, smear_energy_window, smear_fermi_dirac, smear_list, sparse_guess, &
+        spline3_nopbc_interp, spline3_pbc_interp, tddfpt_excitations, use_coulomb, use_diff, &
+        use_no, use_restart_wfn, use_rt_restart, use_scf_wfn, wannier_projection, &
+        weight_type_mass, weight_type_unit, wfi_aspc_nr, wfi_frozen_method_nr, &
+        wfi_linear_p_method_nr, wfi_linear_ps_method_nr, wfi_linear_wf_method_nr, &
+        wfi_ps_method_nr, wfi_use_guess_method_nr, wfi_use_prev_p_method_nr, &
+        wfi_use_prev_rho_r_method_nr, wfi_use_prev_wf_method_nr, xas_1s_type, xas_2p_type, &
+        xas_2s_type, xas_3d_type, xas_3p_type, xas_3s_type, xas_4d_type, xas_4f_type, xas_4p_type, &
+        xas_4s_type, xas_dip_len, xas_dip_vel, xas_dscf, xas_none, xas_tp_fh, xas_tp_flex, &
+        xas_tp_hh, xas_tp_xfh, xas_tp_xhh, xes_tp_val
    USE input_cp2k_almo,                 ONLY: create_almo_scf_section
    USE input_cp2k_distribution,         ONLY: create_distribution_section
    USE input_cp2k_field,                ONLY: create_efield_section,&
@@ -105,8 +102,10 @@ MODULE input_cp2k_dft
    USE input_cp2k_rsgrid,               ONLY: create_rsgrid_section
    USE input_cp2k_tb,                   ONLY: create_dftb_control_section,&
                                               create_xtb_control_section
+   USE input_cp2k_tddfpt,               ONLY: create_tddfpt_section
    USE input_cp2k_transport,            ONLY: create_transport_section
-   USE input_cp2k_xc,                   ONLY: create_xc_section
+   USE input_cp2k_xc,                   ONLY: create_sic_section,&
+                                              create_xc_section
    USE input_keyword_types,             ONLY: keyword_create,&
                                               keyword_release,&
                                               keyword_type
@@ -4512,219 +4511,7 @@ CONTAINS
 
    END SUBROUTINE create_s2_restraint_section
 
-! **************************************************************************************************
-!> \brief creates the input section for the tddfpt part
-!> \param section the section to create
-!> \author teo
-! **************************************************************************************************
-   SUBROUTINE create_tddfpt_section(section)
-      TYPE(section_type), POINTER                        :: section
-
-      CHARACTER(len=*), PARAMETER :: routineN = 'create_tddfpt_section', &
-         routineP = moduleN//':'//routineN
-
-      TYPE(keyword_type), POINTER                        :: keyword
-      TYPE(section_type), POINTER                        :: subsection
-
-      CPASSERT(.NOT. ASSOCIATED(section))
-      CALL section_create(section, "tddfpt", &
-                          description="parameters needed to set up the Time Dependent Density Functional PT", &
-                          n_keywords=14, n_subsections=1, repeats=.FALSE., &
-                          citations=(/Iannuzzi2005/))
-
-      NULLIFY (subsection, keyword)
-
-      ! Integer
-      CALL keyword_create(keyword, name="MAX_KV", &
-                          variants=s2a("MAX_VECTORS"), &
-                          description=" maximal number of Krylov space vectors", &
-                          usage="MAX_KV someInteger>0", &
-                          n_var=1, type_of_var=integer_t, &
-                          default_i_val=60)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="RESTARTS", &
-                          variants=s2a("N_RESTARTS"), &
-                          description=" maximal number subspace search restarts", &
-                          usage="RESTARTS someInteger>0", &
-                          n_var=1, type_of_var=integer_t, &
-                          default_i_val=5)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="NEV", &
-                          variants=s2a("N_EV", "EV"), &
-                          description=" number of excitations to calculate", &
-                          usage="NEV someInteger>0", &
-                          n_var=1, type_of_var=integer_t, &
-                          default_i_val=1)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="NLUMO", &
-                          description=" number of additional unoccupied orbitals ", &
-                          usage="NLUMO 10", &
-                          n_var=1, type_of_var=integer_t, &
-                          default_i_val=5)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="NREORTHO", &
-                          variants=s2a("N_REORTHO", "REORTHO", "REORTHOGONALITAZIONS"), &
-                          description=" number of reorthogonalization steps", &
-                          usage="NREORTHO someInteger>0", &
-                          n_var=1, type_of_var=integer_t, &
-                          default_i_val=2)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      ! Logical
-      CALL keyword_create(keyword, name="CALCULATE_KERNEL", &
-                          variants=s2a("DO_KERNEL"), &
-                          description="compute the kernel (debug purpose only)", &
-                          usage="CALCULATE_KERNEL logical_value", &
-                          default_l_val=.TRUE., lone_keyword_l_val=.TRUE.)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="LSD_SINGLETS", &
-                          description="compute singlets using lsd vxc kernel", &
-                          usage="LSD_SINGLETS logical_value", &
-                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="INVERT_S", &
-                          variants=s2a("INVERT_OVERLAP"), &
-                          description="use the inverse of the overlap matrix", &
-                          usage="INVERT_S logical_value", &
-                          default_l_val=.TRUE., lone_keyword_l_val=.TRUE.)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="PRECONDITIONER", &
-                          variants=s2a("PRECOND"), &
-                          description="use the preconditioner (only for Davidson)", &
-                          usage="PRECONDITIONER logical_value", &
-                          default_l_val=.TRUE., lone_keyword_l_val=.TRUE.)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      ! Character
-      CALL keyword_create(keyword, name="KERNEL", &
-                          description="options to compute the kernel", &
-                          usage="KERNEL FULL", &
-                          enum_c_vals=s2a("FULL", "sTDA"), &
-                          enum_i_vals=(/tddfpt_kernel_full, tddfpt_kernel_stda/), &
-                          default_i_val=tddfpt_kernel_full)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="RES_ETYPE", &
-                          variants=s2a("RESTRICTED_EXCITATIONS_TYPE", "RES_E_TYPE"), &
-                          description="(singlets/triplets) for restricted calculation", &
-                          usage="RES_ETYPE T", &
-                          enum_c_vals=s2a("S", "SINGLET", "SINGLETS", "T", "TRIPLET", "TRIPLETS"), &
-                          enum_i_vals=(/tddfpt_singlet, tddfpt_singlet, tddfpt_singlet, &
-                                        tddfpt_triplet, tddfpt_triplet, tddfpt_triplet/), &
-                          default_i_val=tddfpt_singlet)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="DIAG_METHOD", &
-                          variants=s2a("DIAGONALIZATION_METHOD", "METHOD"), &
-                          description="Diagonalization method used in tddfpt", &
-                          usage="DIAG_METHOD DAVIDSON", &
-                          enum_c_vals=s2a("DAVIDSON", "LANCZOS"), &
-                          enum_i_vals=(/tddfpt_davidson, tddfpt_lanczos/), &
-                          default_i_val=tddfpt_davidson)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="OE_CORR", &
-                          variants=s2a("ORBITAL_EIGENVALUES_CORRECTION"), &
-                          description="Which type of orbital eigenvalue correction to use\n"// &
-                          "(to yield better HOMO-LUMO energies)", &
-                          usage="OE_CORR SAOP", &
-                          enum_c_vals=s2a("NONE", "LB", "LB_ALPHA", "LB94", "GLLB", "GLB", "SAOP", "SIC"), &
-                          enum_i_vals=(/oe_none, oe_lb, oe_lb, oe_lb, oe_gllb, oe_gllb, oe_saop, oe_sic/), &
-                          default_i_val=oe_none)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      ! Real
-      CALL keyword_create(keyword, name="CONVERGENCE", &
-                          variants=s2a("CONV"), &
-                          description="The convergence of the eigenvalues", &
-                          usage="CONVERGENCE 1.0E-6 ", &
-                          n_var=1, type_of_var=real_t, &
-                          default_r_val=1.0e-5_dp)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL create_xc_section(subsection)
-      CALL section_add_subsection(section, subsection)
-      CALL section_release(subsection)
-
-      CALL create_sic_section(subsection)
-      CALL section_add_subsection(section, subsection)
-      CALL section_release(subsection)
-
-      CALL create_stda_section(subsection)
-      CALL section_add_subsection(section, subsection)
-      CALL section_release(subsection)
-
-   END SUBROUTINE create_tddfpt_section
-! **************************************************************************************************
-!> \brief creates the stda input section (simplified Tamm Dancoff Approximation)
-!> \param section the section to create
-! **************************************************************************************************
-   SUBROUTINE create_stda_section(section)
-      TYPE(section_type), POINTER                        :: section
-
-      CHARACTER(len=*), PARAMETER :: routineN = 'create_stda_section', &
-         routineP = moduleN//':'//routineN
-
-      TYPE(keyword_type), POINTER                        :: keyword
-
-      CPASSERT(.NOT. ASSOCIATED(section))
-      CALL section_create(section, "sTDA", &
-                          description="parameters needed and setup for sTDA calculations", &
-                          n_keywords=4, n_subsections=0, repeats=.FALSE.)
-      NULLIFY (keyword)
-
-      CALL keyword_create(keyword, name="FRACTION", &
-                          description="The fraction of Hartree-Fock to add to the total energy. "// &
-                          "1.0 implies standard Hartree-Fock if used with XC_FUNCTIONAL NONE. "// &
-                          "NOTE: In a mixed potential calculation this should be set to 1.0, otherwise "// &
-                          "all parts are multiplied with this factor. ", &
-                          usage="FRACTION 0.0", default_r_val=0.0_dp)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="DO_EWALD", &
-                          description="Use Ewald type method instead of direct sum for Coulomb interaction", &
-                          usage="DO_EWALD", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="DO_MIC", &
-                          description="Use minimum image convention for Coulomb interaction", &
-                          usage="DO_MIC", default_l_val=.TRUE., lone_keyword_l_val=.TRUE.)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="COULOMB_CUTOFF", &
-                          description="Atomic Cutoff Radius Cutoff for the evaluation of the  Coulomb integrals. "// &
-                          "For non-periodic calculation the default value is exactly the full cell dimension, in order "// &
-                     "to evaluate all pair interactions. Instead, for periodic calculations the default numerical value is used.", &
-                          usage="COULOMB_CUTOFF {real} ", unit_str="angstrom", &
-                          default_r_val=cp_unit_to_cp2k(value=12.0_dp, unit_str="angstrom"))
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-   END SUBROUTINE create_stda_section
+!deb
 ! **************************************************************************************************
 !> \brief creates the input section for the relativistic part
 !> \param section the section to create
@@ -6534,73 +6321,7 @@ CONTAINS
 
    END SUBROUTINE create_interp_section
 
-! **************************************************************************************************
-!> \brief creates the sic (self interaction correction) section
-!> \param section ...
-!> \author fawzi
-! **************************************************************************************************
-   SUBROUTINE create_sic_section(section)
-      TYPE(section_type), POINTER                        :: section
-
-      CHARACTER(len=*), PARAMETER :: routineN = 'create_sic_section', &
-         routineP = moduleN//':'//routineN
-
-      TYPE(keyword_type), POINTER                        :: keyword
-
-      CPASSERT(.NOT. ASSOCIATED(section))
-      CALL section_create(section, "sic", &
-                          description="parameters for the self interaction correction", &
-                          n_keywords=6, n_subsections=0, repeats=.FALSE., &
-                          citations=(/VandeVondele2005b, Perdew1981, Avezac2005/))
-
-      NULLIFY (keyword)
-
-      CALL keyword_create(keyword, name="SIC_SCALING_A", &
-                          description="Scaling of the coulomb term in sic [experimental]", &
-                          usage="SIC_SCALING_A 0.5", &
-                          citations=(/VandeVondele2005b/), &
-                          default_r_val=1.0_dp)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="SIC_SCALING_B", &
-                          description="Scaling of the xc term in sic [experimental]", &
-                          usage="SIC_SCALING_B 0.5", &
-                          citations=(/VandeVondele2005b/), &
-                          default_r_val=1.0_dp)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="SIC_METHOD", &
-                          description="Method used to remove the self interaction", &
-                          usage="SIC_METHOD MAURI_US", &
-                          default_i_val=sic_none, &
-                          enum_c_vals=s2a("NONE", "MAURI_US", "MAURI_SPZ", "AD", "EXPLICIT_ORBITALS"), &
-                          enum_i_vals=(/sic_none, sic_mauri_us, sic_mauri_spz, sic_ad, sic_eo/), &
-                          enum_desc=s2a("Do not apply a sic correction", &
-                                        "Employ a (scaled) correction proposed by Mauri and co-workers"// &
-                                        " on the spin density / doublet unpaired orbital", &
-                                        "Employ a (scaled) Perdew-Zunger expression"// &
-                                        " on the spin density / doublet unpaired orbital", &
-                                        "The average density correction", &
-                                        "(scaled) Perdew-Zunger correction explicitly on a set of orbitals."), &
-                          citations=(/VandeVondele2005b, Perdew1981, Avezac2005/))
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, name="ORBITAL_SET", &
-                          description="Type of orbitals treated with the SIC", &
-                          usage="ORBITAL_SET ALL", &
-                          default_i_val=sic_list_unpaired, &
-                          enum_c_vals=s2a("UNPAIRED", "ALL"), &
-                          enum_desc=s2a("correction for the unpaired orbitals only, requires a restricted open shell calculation", &
-                                        "correction for all orbitals, requires a LSD or ROKS calculation"), &
-                          enum_i_vals=(/sic_list_unpaired, sic_list_all/))
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-   END SUBROUTINE create_sic_section
-
+!deb
 ! **************************************************************************************************
 !> \brief creates the low spin roks section
 !> \param section ...

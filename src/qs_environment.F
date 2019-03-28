@@ -483,9 +483,8 @@ CONTAINS
          maxlppnl, method_id, multiplicity, my_ival, n_ao, n_ao_aux_fit, n_mo_add, natom, &
          nelectron, ngauss, nkind, output_unit, tnadd_method
       INTEGER, DIMENSION(2)                              :: n_mo, nelectron_spin
-      LOGICAL                                            :: all_potential_present, be_silent, &
-                                                            do_kpoints, e1terms, has_unit_metric, &
-                                                            lribas, orb_gradient, was_present
+      LOGICAL :: all_potential_present, be_silent, do_kpoints, e1terms, ewald_done, &
+         has_unit_metric, lribas, orb_gradient, was_present
       REAL(dp)                                           :: alpha, ccore, ewald_rcut, maxocc, &
                                                             verlet_skin, zeff_correction
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
@@ -618,6 +617,7 @@ CONTAINS
       CALL rel_c_release(rel_control)
 
       !   *** Read DFTB parameter files ***
+      ewald_done = .FALSE.
       IF (dft_control%qs_control%method_id == do_method_dftb) THEN
          NULLIFY (ewald_env, ewald_pw, dftb_potential)
          dftb_control => dft_control%qs_control%dftb_control
@@ -637,6 +637,7 @@ CONTAINS
             CALL set_qs_env(qs_env, ewald_env=ewald_env, ewald_pw=ewald_pw)
             CALL ewald_env_release(ewald_env)
             CALL ewald_pw_release(ewald_pw)
+            ewald_done = .TRUE.
          END IF
       ELSEIF (dft_control%qs_control%method_id == do_method_xtb) THEN
          !   *** Read xTB parameter file ***
@@ -690,27 +691,25 @@ CONTAINS
             CALL set_qs_env(qs_env, ewald_env=ewald_env, ewald_pw=ewald_pw)
             CALL ewald_env_release(ewald_env)
             CALL ewald_pw_release(ewald_pw)
+            ewald_done = .TRUE.
          END IF
       END IF
       ! initialize Ewald for stda ; for now done here
-      IF (ASSOCIATED(dft_control%tddfpt_control)) THEN
-         IF (dft_control%tddfpt_control%stda_control%do_ewald) THEN
-            WRITE (output_unit, *) 'do_ewald in qs_env', dft_control%tddfpt_control%stda_control%do_ewald
-            NULLIFY (ewald_env, ewald_pw)
-            CALL ewald_env_create(ewald_env, para_env)
-            poisson_section => section_vals_get_subs_vals(dft_section, "POISSON")
-            CALL ewald_env_set(ewald_env, poisson_section=poisson_section)
-            ewald_section => section_vals_get_subs_vals(poisson_section, "EWALD")
-            print_section => section_vals_get_subs_vals(qs_env%input, "PRINT%GRID_INFORMATION")
-            !  CALL get_qs_kind_set(qs_kind_set, basis_rcut=ewald_rcut)
-            CALL read_ewald_section(ewald_env, ewald_section)
-            ! create Ewald grids
-            CALL ewald_pw_create(ewald_pw, ewald_env, cell, cell_ref, print_section=print_section)
-            ! initialize Ewald grids?
-            ! setup the nonbond environment (real space part of Ewald)
-            CALL set_qs_env(qs_env, ewald_env=ewald_env, ewald_pw=ewald_pw)
-            CALL ewald_env_release(ewald_env)
-            CALL ewald_pw_release(ewald_pw)
+      IF (.NOT. ewald_done) THEN
+         IF (ASSOCIATED(dft_control%tddfpt_control)) THEN
+            IF (dft_control%tddfpt_control%stda_control%do_ewald) THEN
+               NULLIFY (ewald_env, ewald_pw)
+               CALL ewald_env_create(ewald_env, para_env)
+               poisson_section => section_vals_get_subs_vals(dft_section, "POISSON")
+               CALL ewald_env_set(ewald_env, poisson_section=poisson_section)
+               ewald_section => section_vals_get_subs_vals(poisson_section, "EWALD")
+               print_section => section_vals_get_subs_vals(qs_env%input, "PRINT%GRID_INFORMATION")
+               CALL read_ewald_section_tb(ewald_env, ewald_section, cell_ref%hmat)
+               CALL ewald_pw_create(ewald_pw, ewald_env, cell, cell_ref, print_section=print_section)
+               CALL set_qs_env(qs_env, ewald_env=ewald_env, ewald_pw=ewald_pw)
+               CALL ewald_env_release(ewald_env)
+               CALL ewald_pw_release(ewald_pw)
+            ENDIF
          ENDIF
       ENDIF
 

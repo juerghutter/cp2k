@@ -135,14 +135,14 @@ CONTAINS
       TYPE(neighbor_list_iterator_p_type), &
          DIMENSION(:), POINTER                           :: nl_iterator
       TYPE(neighbor_list_set_p_type), DIMENSION(:), &
-         POINTER                                         :: sab_orb
+         POINTER                                         :: n_list
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
 
       CALL timeset(routineN, handle)
 
       cstring = "GAMMA EXCHANGE MATRIX"
       CALL get_qs_env(qs_env=qs_env, particle_set=particle_set, dbcsr_dist=dbcsr_dist, &
-                      sab_orb=sab_orb, cell=cell)
+                      sab_orb=n_list, cell=cell)
       natom = SIZE(particle_set)
 
       nmat = 1
@@ -160,11 +160,11 @@ CONTAINS
       DEALLOCATE (row_blk_sizes)
 
       ! setup the matrices using the neighbor list
-      CALL cp_dbcsr_alloc_block_from_nbl(gamma_matrix(1)%matrix, sab_orb)
+      CALL cp_dbcsr_alloc_block_from_nbl(gamma_matrix(1)%matrix, n_list)
       CALL dbcsr_set(gamma_matrix(1)%matrix, 0.0_dp)
 
       NULLIFY (nl_iterator)
-      CALL neighbor_list_iterator_create(nl_iterator, sab_orb)
+      CALL neighbor_list_iterator_create(nl_iterator, n_list)
       DO WHILE (neighbor_list_iterate(nl_iterator) == 0)
          CALL get_iterator_info(nl_iterator, ikind=ikind, jkind=jkind, &
                                 iatom=iatom, jatom=jatom, r=rij)

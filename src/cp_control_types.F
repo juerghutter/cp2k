@@ -392,8 +392,6 @@ MODULE cp_control_types
 ! **************************************************************************************************
    TYPE stda_control_type
       LOGICAL                                :: do_ewald
-      LOGICAL                                :: do_mic
-      REAL(KIND=dp)                          :: cutoff_cou
    END TYPE stda_control_type
 ! **************************************************************************************************
 ! \brief Control parameters for a Time-Dependent DFT calculation.
@@ -985,7 +983,6 @@ CONTAINS
       ALLOCATE (stda_control)
 
       stda_control%do_ewald = .FALSE.
-      stda_control%do_mic = .FALSE.
 
    END SUBROUTINE stda_control_create
 ! **************************************************************************************************

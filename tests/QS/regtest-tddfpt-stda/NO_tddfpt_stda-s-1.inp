@@ -25,7 +25,6 @@
       KERNEL sTDA
       &sTDA
        FRACTION 0.0
-       DO_MIC
       &END sTDA
       MAX_KV 10
       METHOD DAVIDSON

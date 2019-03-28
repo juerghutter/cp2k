@@ -590,7 +590,8 @@ CONTAINS
       ! might not be optimal. It should be verified for each operator.
       IF (.NOT. (nddo .OR. dftb .OR. xtb)) THEN
          CALL build_neighbor_lists(sab_all, particle_set, atom2d, cell, pair_radius, &
-                                   mic=mic, symmetric=.FALSE., subcells=subcells, molecular=molecule_only, nlname="sab_all")
+                                   mic=mic, symmetric=.FALSE., subcells=subcells, &
+                                   molecular=molecule_only, nlname="sab_all")
          CALL set_ks_env(ks_env=ks_env, sab_all=sab_all)
       ENDIF
 
@@ -744,31 +745,6 @@ CONTAINS
          END IF
       END IF
 
-      IF (ASSOCIATED(dft_control%tddfpt_control)) THEN
-         IF ((dft_control%tddfpt_control%do_kernel) .AND. &
-             (dft_control%tddfpt_control%kernel .EQ. 0)) THEN
-            IF (dft_control%tddfpt_control%stda_control%do_mic) THEN
-               default_present = .TRUE.
-               c_radius = dft_control%tddfpt_control%stda_control%cutoff_cou
-               ! Build the minimum image neighbor lists
-               CALL pair_radius_setup(default_present, default_present, c_radius, c_radius, pair_radius)
-               CALL build_neighbor_lists(sab_se, particle_set, atom2d, cell, pair_radius, mic=mic, &
-                                         subcells=subcells, nlname="sab_se")
-               CALL set_ks_env(ks_env=ks_env, sab_se=sab_se)
-               CALL write_neighbor_lists(sab_se, particle_set, cell, para_env, neighbor_list_section, &
-                                         "/SAB_SE", "sab_se", "HARTREE INTERACTIONS")
-
-               CALL pair_radius_setup(orb_present, orb_present, orb_radius, orb_radius, pair_radius)
-               CALL build_neighbor_lists(sab_orb_mic, particle_set, atom2d, cell, pair_radius, &
-                                         mic=.TRUE., subcells=subcells, molecular=molecule_only, &
-                                         nlname="sab_orb_mic")
-               CALL set_ks_env(ks_env=ks_env, sab_orb_mic=sab_orb_mic)
-               CALL write_neighbor_lists(sab_orb_mic, particle_set, cell, para_env, neighbor_list_section, &
-                                         "/SAB_ORB_MIC", "sab_orb_mic", "ORBITAL ORBITAL")
-            ENDIF
-         ENDIF
-      ENDIF
-
       IF (dftb) THEN
          ! Build the neighbor lists for the DFTB Ewald methods
          IF (dft_control%qs_control%dftb_control%do_ewald) THEN
@@ -795,9 +771,7 @@ CONTAINS
                CALL set_ks_env(ks_env=ks_env, sab_vdw=sab_vdw)
             END IF
          END IF
-      END IF
-
-      IF (xtb) THEN
+      ELSE IF (xtb) THEN
          ! Build the neighbor lists for the xTB Ewald method
          IF (dft_control%qs_control%xtb_control%do_ewald) THEN
             CALL get_qs_env(qs_env=qs_env, ewald_env=ewald_env)

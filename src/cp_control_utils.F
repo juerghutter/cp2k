@@ -1156,10 +1156,6 @@ CONTAINS
          stda_section => section_vals_get_subs_vals(t_section, "sTDA")
          CALL section_vals_val_get(stda_section, "DO_EWALD", &
                                    l_val=t_control%stda_control%do_ewald)
-         CALL section_vals_val_get(stda_section, "DO_MIC", &
-                                   l_val=t_control%stda_control%do_mic)
-         CALL section_vals_val_get(stda_section, "COULOMB_CUTOFF", &
-                                   r_val=t_control%stda_control%cutoff_cou)
       END IF
    END SUBROUTINE read_tddfpt_control
 ! **************************************************************************************************
