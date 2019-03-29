@@ -10,7 +10,8 @@ MODULE qs_tddfpt_eigensolver
                                               tddfpt_control_type
    USE cp_dbcsr_operations,             ONLY: cp_dbcsr_plus_fm_fm_t,&
                                               cp_dbcsr_sm_fm_multiply
-   USE cp_fm_basic_linalg,              ONLY: cp_fm_scale_and_add,&
+   USE cp_fm_basic_linalg,              ONLY: cp_fm_column_scale,&
+                                              cp_fm_scale_and_add,&
                                               cp_fm_symm,&
                                               cp_fm_trace
    USE cp_fm_diag,                      ONLY: cp_fm_syevd
@@ -190,10 +191,10 @@ CONTAINS
       CHARACTER                                          :: mode
       INTEGER                                            :: col, handle, i, iev, iounit, iter, j, k, &
                                                             max_excitations, max_krylovspace_dim, &
-                                                            max_kv, n_ev, n_kv, nspins, row, spin
+                                                            max_kv, n_ev, n_kv, nspins, spin
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: must_improve
       REAL(dp)                                           :: Atilde_ij, convergence, tmp, tmp2
-      REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals_difference, evals_tmp
+      REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: epre, evals_difference, evals_tmp
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:, :)        :: evals
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_p_type)                                 :: Atilde, Us
@@ -355,6 +356,7 @@ CONTAINS
                      ! preconditioner !
                      !----------------!
                      IF (dft_control%tddfpt_control%precond) THEN
+                        ALLOCATE (epre(p_env%n_mo(spin)))
                         DO col = 1, p_env%n_mo(spin)
                            IF (col <= n_ev) THEN
                               tmp2 = ABS(evals(iev, iter-1)-in_evals(col))
@@ -363,11 +365,11 @@ CONTAINS
                            END IF
                            ! protect against division by 0 by a introducing a cutoff.
                            tmp2 = MAX(tmp2, 100*EPSILON(1.0_dp))
-                           DO row = 1, p_env%n_ao(spin)
-                              CALL cp_fm_get_element(X(spin)%matrix, row, col, tmp)
-                              CALL cp_fm_set_element(b(k, spin)%matrix, row, col, tmp/tmp2)
-                           END DO
+                           epre(col) = 1.0_dp/tmp2
                         END DO
+                        CALL cp_fm_to_fm(X(spin)%matrix, b(k, spin)%matrix)
+                        CALL cp_fm_column_scale(b(k, spin)%matrix, epre)
+                        DEALLOCATE (epre)
                      ELSE
                         CALL cp_fm_to_fm(X(spin)%matrix, b(k, spin)%matrix)
                      END IF
@@ -438,8 +440,6 @@ CONTAINS
          evals_tmp(:) = evals(:, iter)
          CALL cp_fm_syevd(Atilde%matrix, Us%matrix, evals_tmp(:))
          evals(:, iter) = evals_tmp(:)
-!        DO i = 1, k
-!        ENDDO
 
          !-------------------!
          ! check convergence !

@@ -10,6 +10,7 @@
 MODULE qs_tddfpt_utils
    USE admm_types,                      ONLY: admm_type
    USE cp_array_utils,                  ONLY: cp_1d_r_p_type
+   USE cp_blacs_env,                    ONLY: cp_blacs_env_type
    USE cp_control_types,                ONLY: dft_control_type,&
                                               tddfpt_control_type
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
@@ -19,17 +20,17 @@ MODULE qs_tddfpt_utils
                                               cp_fm_trace
    USE cp_fm_cholesky,                  ONLY: cp_fm_cholesky_decompose,&
                                               cp_fm_cholesky_invert
-   USE cp_fm_types,                     ONLY: cp_fm_create,&
-                                              cp_fm_get_submatrix,&
-                                              cp_fm_init_random,&
-                                              cp_fm_p_type,&
-                                              cp_fm_release,&
-                                              cp_fm_set_all,&
-                                              cp_fm_set_submatrix,&
-                                              cp_fm_to_fm
+   USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
+                                              cp_fm_struct_release,&
+                                              cp_fm_struct_type
+   USE cp_fm_types,                     ONLY: &
+        cp_fm_create, cp_fm_get_submatrix, cp_fm_init_random, cp_fm_p_type, cp_fm_release, &
+        cp_fm_set_all, cp_fm_set_submatrix, cp_fm_to_fm, cp_fm_type
+   USE cp_gemm_interface,               ONLY: cp_gemm
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_io_unit,&
                                               cp_logger_type
+   USE cp_para_types,                   ONLY: cp_para_env_type
    USE dbcsr_api,                       ONLY: dbcsr_p_type
    USE input_section_types,             ONLY: section_get_ival,&
                                               section_vals_get_subs_vals,&
@@ -303,8 +304,8 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'co_initial_guess', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: i, n_cols, n_lumos, n_orbits, n_rows, &
-                                                            n_spins, oo, spin, vo
+      INTEGER                                            :: handle, i, n_cols, n_lumos, n_orbits, &
+                                                            n_rows, n_spins, oo, spin, vo
       REAL(KIND=DP)                                      :: evd
       REAL(KIND=DP), ALLOCATABLE, DIMENSION(:, :)        :: guess, lumos
       REAL(KIND=DP), DIMENSION(:), POINTER               :: orbital_eigenvalues
@@ -312,6 +313,8 @@ CONTAINS
       TYPE(simple_solution_sorter), POINTER              :: sorter_iterator, sorter_pointer, &
                                                             sorter_start
       TYPE(tddfpt_control_type), POINTER                 :: tddfpt_control
+
+      CALL timeset(routineN, handle)
 
       NULLIFY (dft_control)
 
@@ -413,6 +416,8 @@ CONTAINS
 
       END DO
 
+      CALL timestop(handle)
+
    END SUBROUTINE co_initial_guess
 
 ! **************************************************************************************************
@@ -428,20 +433,27 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER :: routineN = 'find_contributions', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: i, ii, iounit, j, jspin, n_ev, &
+      INTEGER                                            :: handle, i, ii, iounit, jspin, n_ev, &
                                                             n_ev_from_lumos, n_spins, occ, spin, &
                                                             virt
       INTEGER, DIMENSION(2)                              :: nhomos, nlumos, nrows
       REAL(KIND=dp)                                      :: contribution, summed_contributions
-      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: homo_coeff_col, lumo_coeff_col
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: homo_coeff_col, lumo_coeff_col, ovloc
+      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: S_lumos
+      TYPE(cp_fm_struct_type), POINTER                   :: fmstruct
+      TYPE(cp_fm_type), POINTER                          :: ovmat
+      TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(tddfpt_control_type)                          :: t_control
 
+      CALL timeset(routineN, handle)
+
       NULLIFY (S_lumos, matrix_s, dft_control)
       iounit = cp_logger_get_default_io_unit()
       CALL get_qs_env(qs_env, matrix_s=matrix_s, dft_control=dft_control)
+      CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
 
       IF (iounit > 0) WRITE (iounit, *)
       IF (iounit > 0) WRITE (iounit, *)
@@ -483,24 +495,29 @@ CONTAINS
                      IF (iounit > 0) WRITE (iounit, *) 'beta:'
                   END IF
                END IF
-               searchloop: DO occ = nhomos(jspin), 1, -1
-                  CALL cp_fm_get_submatrix(t_env%evecs(ii, jspin)%matrix, homo_coeff_col, &
-                                           1, occ, nrows(jspin), 1)
+               !
+               CALL cp_fm_struct_create(fmstruct, para_env, blacs_env, nhomos(jspin), nlumos(jspin))
+               NULLIFY (ovmat)
+               CALL cp_fm_create(ovmat, fmstruct)
+               CALL cp_fm_struct_release(fmstruct)
+               CALL cp_gemm("T", "N", nhomos(jspin), nlumos(jspin), nrows(jspin), 1.0_dp, &
+                            t_env%evecs(ii, jspin)%matrix, S_lumos(jspin)%matrix, 0.0_dp, ovmat)
+               ALLOCATE (ovloc(nhomos(jspin), nlumos(jspin)))
+               CALL cp_fm_get_submatrix(ovmat, ovloc, 1, 1, nhomos(jspin), nlumos(jspin))
+               CALL cp_fm_release(ovmat)
+               occloop: DO occ = nhomos(jspin), 1, -1
                   DO virt = 1, nlumos(jspin)
-                     CALL cp_fm_get_submatrix(S_lumos(jspin)%matrix, lumo_coeff_col, &
-                                              1, virt, nrows(jspin), 1)
-                     contribution = 0.0_dp
-                     DO j = 1, nrows(jspin)
-                        contribution = contribution+homo_coeff_col(j, 1)*lumo_coeff_col(j, 1)
-                     END DO
+                     contribution = ovloc(occ, virt)
                      summed_contributions = summed_contributions+(contribution)**2
                      IF (ABS(contribution) > 5.0e-2_dp) THEN
                         IF (iounit > 0) WRITE (iounit, '(14X,I5,A,I5,10X,F8.3,5X,F8.3)') &
                            occ, " ->", nhomos(spin)+virt, ABS(contribution), summed_contributions
                      END IF
-                     IF (ABS(summed_contributions-1.0_dp) < 1.0e-3_dp) CYCLE searchloop
+                     IF (ABS(summed_contributions-1.0_dp) < 1.0e-3_dp) EXIT occloop
                   END DO
-               END DO searchloop
+               END DO occloop
+               DEALLOCATE (ovloc)
+               !
             END DO
             IF (iounit > 0) WRITE (iounit, *)
             ENDIF
@@ -537,6 +554,8 @@ CONTAINS
 
       DEALLOCATE (S_lumos)
 
+      CALL timestop(handle)
+
    END SUBROUTINE find_contributions
 
 ! **************************************************************************************************
@@ -554,8 +573,12 @@ CONTAINS
       TYPE(cp_fm_p_type), DIMENSION(:)                   :: x, tmp_vec
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: metric
 
-      INTEGER                                            :: n_spins, spin
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'normalize', routineP = moduleN//':'//routineN
+
+      INTEGER                                            :: handle, n_spins, spin
       REAL(KIND=dp)                                      :: norm, tmp
+
+      CALL timeset(routineN, handle)
 
       n_spins = SIZE(x)
       norm = 0.0_dp
@@ -574,6 +597,8 @@ CONTAINS
       DO spin = 1, n_spins
          CALL cp_fm_scale((1.0_dp/norm), X(spin)%matrix)
       END DO
+
+      CALL timestop(handle)
 
    END SUBROUTINE normalize
 
