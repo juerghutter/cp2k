@@ -22,6 +22,7 @@ MODULE qs_tddfpt_module
                                               oe_lb,&
                                               oe_none,&
                                               oe_saop,&
+                                              oe_shift,&
                                               oe_sic,&
                                               tddfpt_excitations
    USE input_section_types,             ONLY: section_get_ival,&
@@ -32,6 +33,8 @@ MODULE qs_tddfpt_module
                                               section_vals_set_subs_vals,&
                                               section_vals_type,&
                                               section_vals_val_get
+   USE kinds,                           ONLY: dp
+   USE physcon,                         ONLY: evolt
    USE qs_energy_types,                 ONLY: qs_energy_type
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
@@ -43,7 +46,8 @@ MODULE qs_tddfpt_module
    USE qs_scf_types,                    ONLY: qs_scf_env_type
    USE qs_tddfpt_eigensolver,           ONLY: eigensolver
    USE qs_tddfpt_types,                 ONLY: tddfpt_env_type
-   USE qs_tddfpt_utils,                 ONLY: find_contributions,&
+   USE qs_tddfpt_utils,                 ONLY: ev_shift_operator,&
+                                              find_contributions,&
                                               make_orbital_sets,&
                                               tddfpt_cleanup,&
                                               tddfpt_init
@@ -131,6 +135,7 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       INTEGER                                            :: iounit, oe_corr
+      REAL(KIND=dp)                                      :: eos_shift, ev_shift
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks
       TYPE(qs_energy_type), POINTER                      :: energy
@@ -146,10 +151,9 @@ CONTAINS
 
       IF (iounit > 0) THEN
          WRITE (iounit, "(2X,A)") "", &
-            "-----------------------------------------------------------------------------", &
-            "-                    orbital eigenvalue correction started                  -", &
-            "-----------------------------------------------------------------------------", &
-            ""
+            "------------------------------------------------------------------------------", &
+            "-                    Orbital Eigenvalue Correction Started                   -", &
+            "------------------------------------------------------------------------------"
       END IF
 
       CALL get_qs_env(qs_env, &
@@ -158,29 +162,45 @@ CONTAINS
                       matrix_ks=matrix_ks, &
                       rho=rho)
 
-      !----------------------!
-      ! KS matrix without XC !
-      !----------------------!
-      xc_fun_orig => section_vals_get_subs_vals(input, "DFT%XC%XC_FUNCTIONAL")
-      CALL section_vals_retain(xc_fun_orig)
-      NULLIFY (xc_fun_tmp)
-      CALL section_vals_create(xc_fun_tmp, xc_fun_orig%section)
-      CALL section_vals_set_subs_vals(input, "DFT%XC%XC_FUNCTIONAL", xc_fun_tmp)
-      CALL section_vals_release(xc_fun_tmp)
-
-      CALL get_qs_env(qs_env, energy=energy)
-      CALL qs_ks_build_kohn_sham_matrix(qs_env, calculate_forces=.FALSE., &
-                                        just_energy=.FALSE.)
-
-      CALL section_vals_set_subs_vals(input, "DFT%XC%XC_FUNCTIONAL", xc_fun_orig)
-      CALL section_vals_release(xc_fun_orig)
-
       CALL section_vals_val_get(input, "DFT%TDDFPT%OE_CORR", i_val=oe_corr)
       IF (oe_corr == oe_saop .OR. &
           oe_corr == oe_lb .OR. &
           oe_corr == oe_gllb) THEN
+         !----------------------!
+         ! KS matrix without XC !
+         !----------------------!
+         xc_fun_orig => section_vals_get_subs_vals(input, "DFT%XC%XC_FUNCTIONAL")
+         CALL section_vals_retain(xc_fun_orig)
+         NULLIFY (xc_fun_tmp)
+         CALL section_vals_create(xc_fun_tmp, xc_fun_orig%section)
+         CALL section_vals_set_subs_vals(input, "DFT%XC%XC_FUNCTIONAL", xc_fun_tmp)
+         CALL section_vals_release(xc_fun_tmp)
+
+         CALL get_qs_env(qs_env, energy=energy)
+         CALL qs_ks_build_kohn_sham_matrix(qs_env, calculate_forces=.FALSE., &
+                                           just_energy=.FALSE.)
+
+         CALL section_vals_set_subs_vals(input, "DFT%XC%XC_FUNCTIONAL", xc_fun_orig)
+         CALL section_vals_release(xc_fun_orig)
+
          CALL add_saop_pot(matrix_ks, qs_env, oe_corr)
+
       ELSE IF (oe_corr == oe_sic) THEN
+         CPABORT("OE Correction based on SIC not available")
+      ELSE IF (oe_corr == oe_shift) THEN
+         CALL section_vals_val_get(input, "DFT%TDDFPT%EV_SHIFT", r_val=ev_shift)
+         CALL section_vals_val_get(input, "DFT%TDDFPT%EOS_SHIFT", r_val=eos_shift)
+         IF (iounit > 0) THEN
+            WRITE (iounit, "(T2,A,T71,F10.3)") &
+               " Virtual Orbital Eigenvalue Shift [eV] ", ev_shift*evolt
+            WRITE (iounit, "(T2,A,T71,F10.3)") &
+               " Open Shell Orbital Eigenvalue Shift [eV] ", eos_shift*evolt
+         END IF
+         CALL ev_shift_operator(qs_env, matrix_ks, ev_shift, eos_shift)
+      END IF
+      IF (iounit > 0) THEN
+         WRITE (iounit, "(2X,A)") &
+            "------------------------------------------------------------------------------"
       END IF
 
    END SUBROUTINE orbital_eigenvalue_correction

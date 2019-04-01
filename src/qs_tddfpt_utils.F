@@ -14,6 +14,7 @@ MODULE qs_tddfpt_utils
    USE cp_control_types,                ONLY: dft_control_type,&
                                               tddfpt_control_type
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
+                                              cp_dbcsr_plus_fm_fm_t,&
                                               cp_dbcsr_sm_fm_multiply
    USE cp_fm_basic_linalg,              ONLY: cp_fm_scale,&
                                               cp_fm_scale_and_add,&
@@ -24,14 +25,16 @@ MODULE qs_tddfpt_utils
                                               cp_fm_struct_release,&
                                               cp_fm_struct_type
    USE cp_fm_types,                     ONLY: &
-        cp_fm_create, cp_fm_get_submatrix, cp_fm_init_random, cp_fm_p_type, cp_fm_release, &
-        cp_fm_set_all, cp_fm_set_submatrix, cp_fm_to_fm, cp_fm_type
+        cp_fm_create, cp_fm_get_info, cp_fm_get_submatrix, cp_fm_init_random, cp_fm_p_type, &
+        cp_fm_release, cp_fm_set_all, cp_fm_set_submatrix, cp_fm_to_fm, cp_fm_type
    USE cp_gemm_interface,               ONLY: cp_gemm
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_io_unit,&
                                               cp_logger_type
    USE cp_para_types,                   ONLY: cp_para_env_type
-   USE dbcsr_api,                       ONLY: dbcsr_p_type
+   USE dbcsr_api,                       ONLY: dbcsr_add_on_diag,&
+                                              dbcsr_p_type,&
+                                              dbcsr_type
    USE input_section_types,             ONLY: section_get_ival,&
                                               section_vals_get_subs_vals,&
                                               section_vals_type
@@ -75,6 +78,7 @@ MODULE qs_tddfpt_utils
              co_initial_guess, &
              find_contributions, &
              make_orbital_sets, &
+             ev_shift_operator, &
              normalize, &
              reorthogonalize
 
@@ -649,5 +653,64 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE reorthogonalize
+
+! **************************************************************************************************
+!> \brief Create a shift operator on virtual/open shell space
+!>        Shift operator = Edelta*Q  Q: projector on virtual space (1-PS)
+!>                                      projector on open shell space PosS
+!> \param qs_env the qs_env that is perturbed by this p_env
+!> \param matrix_ks ...
+!> \param ev_shift ...
+!> \param eos_shift ...
+!> \par History
+!>      02.04.2019 adapted for TDDFT use from p_env (JGH)
+!> \author Fawzi Mohamed
+! **************************************************************************************************
+   SUBROUTINE ev_shift_operator(qs_env, matrix_ks, ev_shift, eos_shift)
+
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks
+      REAL(KIND=dp), INTENT(IN)                          :: ev_shift, eos_shift
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'ev_shift_operator', &
+         routineP = moduleN//':'//routineN
+
+      INTEGER                                            :: handle, ispin, n_spins, nhomo
+      TYPE(cp_fm_struct_type), POINTER                   :: fmstruct
+      TYPE(cp_fm_type), POINTER                          :: coeff, cvec
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s
+      TYPE(dbcsr_type), POINTER                          :: smat
+      TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(mo_set_p_type), DIMENSION(:), POINTER         :: mos
+
+      CALL timeset(routineN, handle)
+
+      CALL get_qs_env(qs_env, dft_control=dft_control)
+      n_spins = dft_control%nspins
+
+      IF (ev_shift /= 0.0_dp) THEN
+
+         CALL get_qs_env(qs_env, mos=mos, matrix_s=matrix_s)
+         smat => matrix_s(1)%matrix
+         DO ispin = 1, n_spins
+            CALL dbcsr_add_on_diag(matrix_ks(ispin)%matrix, ev_shift)
+            CALL get_mo_set(qs_env%mos(ispin)%mo_set, mo_coeff=coeff, homo=nhomo)
+            CALL cp_fm_get_info(coeff, matrix_struct=fmstruct)
+            CALL cp_fm_create(cvec, fmstruct)
+            CALL cp_dbcsr_sm_fm_multiply(smat, coeff, cvec, nhomo, 1.0_dp, 0.0_dp)
+            CALL cp_dbcsr_plus_fm_fm_t(matrix_ks(ispin)%matrix, coeff, cvec, nhomo, &
+                                       -ev_shift, keep_sparsity=.TRUE.)
+            CALL cp_fm_release(cvec)
+         END DO
+
+      END IF
+
+      IF (eos_shift /= 0.0_dp) THEN
+         CPABORT("Open Shell Shifts not implemented")
+      END IF
+
+      CALL timestop(handle)
+
+   END SUBROUTINE ev_shift_operator
 
 END MODULE qs_tddfpt_utils

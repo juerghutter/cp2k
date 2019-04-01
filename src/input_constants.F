@@ -554,7 +554,8 @@ MODULE input_constants
                                                oe_lb = 1, &
                                                oe_gllb = 2, &
                                                oe_saop = 3, &
-                                               oe_sic = 4
+                                               oe_sic = 4, &
+                                               oe_shift = 5
    INTEGER, PARAMETER, PUBLIC               :: no_excitations = 0, &
                                                tddfpt_excitations = 1
    INTEGER, PARAMETER, PUBLIC               :: xc_vdw_fun_none = 100, &

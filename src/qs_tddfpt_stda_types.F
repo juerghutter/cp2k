@@ -61,6 +61,8 @@ MODULE qs_tddfpt_stda_types
       ! empirical parameters
       REAL(KIND=dp)                                :: alpha_param
       REAL(KIND=dp)                                :: beta_param
+      ! filter for TD matrix
+      REAL(KIND=dp)                                :: eps_td_filter
       TYPE(stda_kind_p_type), DIMENSION(:), POINTER:: kind_param_set
       !approximated Exchange-type integrals (Mataga-Nishimoto-Ohno-Klopman)
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER    :: gamma_exchange
@@ -201,19 +203,25 @@ CONTAINS
       CALL section_vals_val_get(stda_section, "FRACTION", r_val=stda_env%hfx_fraction)
       IF (iounit > 0) THEN
          WRITE (iounit, *)
-         WRITE (iounit, '(A,T71,F10.3)') " STDA | HFx Fraction a_x [a.u.]", &
+         WRITE (iounit, '(T3,A,T71,F10.3)') "STDA | HFx Fraction a_x [a.u.]", &
             stda_env%hfx_fraction
       END IF
 
       ! alpha and beta parameter
       stda_env%alpha_param = alpha(1)+stda_env%hfx_fraction*alpha(2)
       stda_env%beta_param = beta(1)+stda_env%hfx_fraction*beta(2)
-
       IF (iounit > 0) THEN
-         WRITE (iounit, '(A,T71,F10.3)') " STDA | Alpha parameter [a.u.]", &
+         WRITE (iounit, '(T3,A,T71,F10.3)') "STDA | Alpha parameter [a.u.]", &
             stda_env%alpha_param
-         WRITE (iounit, '(A,T71,F10.3)') " STDA | Beta parameter [a.u.]", &
+         WRITE (iounit, '(T3,A,T71,F10.3)') "STDA | Beta parameter [a.u.]", &
             stda_env%beta_param
+      END IF
+
+      ! TD Filter
+      CALL section_vals_val_get(stda_section, "EPS_TD_FILTER", r_val=stda_env%eps_td_filter)
+      IF (iounit > 0) THEN
+         WRITE (iounit, '(T3,A,T61,G20.3)') "STDA | Threshold TD Matrix", &
+            stda_env%eps_td_filter
       END IF
 
       DO ikind = 1, nkind

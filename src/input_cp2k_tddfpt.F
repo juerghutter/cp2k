@@ -12,7 +12,7 @@
 MODULE input_cp2k_tddfpt
    USE bibliography,                    ONLY: Iannuzzi2005
    USE input_constants,                 ONLY: &
-        oe_gllb, oe_lb, oe_none, oe_saop, oe_sic, tddfpt_davidson, tddfpt_kernel_full, &
+        oe_gllb, oe_lb, oe_none, oe_saop, oe_shift, oe_sic, tddfpt_davidson, tddfpt_kernel_full, &
         tddfpt_kernel_stda, tddfpt_lanczos, tddfpt_singlet, tddfpt_triplet
    USE input_cp2k_xc,                   ONLY: create_sic_section,&
                                               create_xc_section
@@ -174,9 +174,41 @@ CONTAINS
                           description="Which type of orbital eigenvalue correction to use\n"// &
                           "(to yield better HOMO-LUMO energies)", &
                           usage="OE_CORR SAOP", &
-                          enum_c_vals=s2a("NONE", "LB", "LB_ALPHA", "LB94", "GLLB", "GLB", "SAOP", "SIC"), &
-                          enum_i_vals=(/oe_none, oe_lb, oe_lb, oe_lb, oe_gllb, oe_gllb, oe_saop, oe_sic/), &
+                          enum_c_vals=s2a("NONE", "LB", "LB_ALPHA", "LB94", "GLLB", "GLB", "SAOP", &
+                                          "SIC", "SHIFT"), &
+                          enum_i_vals=(/oe_none, oe_lb, oe_lb, oe_lb, oe_gllb, oe_gllb, &
+                                        oe_saop, oe_sic, oe_shift/), &
+                          enum_desc=s2a("No orbital correction scheme is used", &
+                                        "van Leeuwen and Baerends. PRA, 49:2421, 1994", &
+                                        "van Leeuwen and Baerends. PRA, 49:2421, 1994", &
+                                        "van Leeuwen and Baerends. PRA, 49:2421, 1994", &
+                                        "Gritsenko, van Leeuwen, van Lenthe, Baerends. PRA, 51:1944, 1995", &
+                                        "Gritsenko, van Leeuwen, van Lenthe, Baerends. PRA, 51:1944, 1995", &
+                                        "Gritsenko, Schipper, Baerends. Chem. Phys. Lett., 302:199, 1999", &
+                                        "SIC: not implemented", &
+                                        "Constant shift of virtual and open-shell orbitals"), &
                           default_i_val=oe_none)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      ! SHIFTS
+      CALL keyword_create(keyword, name="EV_SHIFT", &
+                          variants=s2a("VIRTUAL_SHIFT"), &
+                          description="Constant shift of virtual state eigenvalues.", &
+                          usage="EV_SHIFT 0.500", &
+                          n_var=1, type_of_var=real_t, &
+                          unit_str="eV", &
+                          default_r_val=0.0_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+      !
+      CALL keyword_create(keyword, name="EOS_SHIFT", &
+                          variants=s2a("OPEN_SHELL_SHIFT"), &
+                          description="Constant shift of open shell eigenvalues.", &
+                          usage="EOS_SHIFT 0.200", &
+                          n_var=1, type_of_var=real_t, &
+                          unit_str="eV", &
+                          default_r_val=0.0_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -234,6 +266,12 @@ CONTAINS
       CALL keyword_create(keyword, name="DO_EWALD", &
                           description="Use Ewald type method for Coulomb interaction", &
                           usage="DO_EWALD", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="EPS_TD_FILTER", &
+                          description="Threshold for filtering the transition density matrix", &
+                          usage="EPS_TD_FILTER", default_r_val=1.e-10_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
