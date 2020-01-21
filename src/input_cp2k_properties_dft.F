@@ -37,7 +37,8 @@ MODULE input_cp2k_properties_dft
         ot_precond_full_all, ot_precond_full_kinetic, ot_precond_full_single, &
         ot_precond_full_single_inverse, ot_precond_none, ot_precond_s_inverse, &
         tddfpt_dipole_berry, tddfpt_dipole_length, tddfpt_dipole_velocity, tddfpt_kernel_full, &
-        tddfpt_kernel_stda, use_mom_ref_coac, use_mom_ref_com, use_mom_ref_user, use_mom_ref_zero
+        tddfpt_kernel_none, tddfpt_kernel_stda, use_mom_ref_coac, use_mom_ref_com, &
+        use_mom_ref_user, use_mom_ref_zero
    USE input_cp2k_atprop,               ONLY: create_atprop_section
    USE input_cp2k_dft,                  ONLY: create_ddapc_restraint_section,&
                                               create_interp_section,&
@@ -1186,8 +1187,8 @@ CONTAINS
       CALL keyword_create(keyword, __LOCATION__, name="KERNEL", &
                           description="Options to compute the kernel", &
                           usage="KERNEL FULL", &
-                          enum_c_vals=s2a("FULL", "sTDA"), &
-                          enum_i_vals=(/tddfpt_kernel_full, tddfpt_kernel_stda/), &
+                          enum_c_vals=s2a("FULL", "sTDA", "NONE"), &
+                          enum_i_vals=(/tddfpt_kernel_full, tddfpt_kernel_stda, tddfpt_kernel_none/), &
                           default_i_val=tddfpt_kernel_full)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)

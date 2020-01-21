@@ -33,8 +33,8 @@ MODULE qs_force
                                               dbcsr_set
    USE dft_plus_u,                      ONLY: plus_u
    USE efield_utils,                    ONLY: calculate_ecore_efield
-   USE excited_states,                  ONLY: excited_state_energy
    USE energy_corrections,              ONLY: energy_correction
+   USE excited_states,                  ONLY: excited_state_energy
    USE input_constants,                 ONLY: do_admm_purify_none
    USE input_section_types,             ONLY: section_vals_get_subs_vals,&
                                               section_vals_type,&
