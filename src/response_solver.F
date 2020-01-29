@@ -136,7 +136,7 @@ MODULE response_solver
 
    LOGICAL, PARAMETER                   :: debug_forces = .TRUE.
 
-   PUBLIC ::  response_equation, response_force, ks_ref_potential
+   PUBLIC ::  response_equation, response_force, ks_ref_potential, admm_projection_derivative
 
 CONTAINS
 
