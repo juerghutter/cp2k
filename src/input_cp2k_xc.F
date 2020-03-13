@@ -1277,13 +1277,6 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
-      CALL keyword_create(keyword, __LOCATION__, name="3RD_DERIV_ANALYTICAL", &
-                          description="Use analytical formulas or finite differences for 3rd derivatives of XC", &
-                          usage="3RD_DERIV_ANALYTICAL logical", default_l_val=.TRUE., &
-                          lone_keyword_l_val=.TRUE.)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
 

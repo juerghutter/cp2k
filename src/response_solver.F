@@ -113,6 +113,7 @@ MODULE response_solver
    USE qs_rho_types,                    ONLY: qs_rho_get,&
                                               qs_rho_type
    USE qs_vxc,                          ONLY: qs_vxc_create
+   USE task_list_types,                 ONLY: task_list_type
    USE virial_types,                    ONLY: virial_type
    USE xc,                              ONLY: xc_calc_2nd_deriv,&
                                               xc_prep_2nd_deriv
@@ -346,6 +347,7 @@ CONTAINS
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
       TYPE(qs_rho_type), POINTER                         :: rho, rho_aux_fit
       TYPE(section_vals_type), POINTER                   :: hfx_section, xc_fun_section, xc_section
+      TYPE(task_list_type), POINTER                      :: task_list_aux_fit
       TYPE(virial_type), POINTER                         :: virial
       TYPE(xc_derivative_set_type), POINTER              :: deriv_set
       TYPE(xc_rho_cflags_type)                           :: needs
@@ -638,7 +640,7 @@ CONTAINS
          ELSE
             ! add ADMM xc_section_aux terms: Pz*Vxc + P0*K0[rhoz]
             CALL get_qs_env(qs_env, admm_env=admm_env, rho_aux_fit=rho_aux_fit, &
-                            matrix_s_aux_fit=scrm)
+                            matrix_s_aux_fit=scrm, task_list_aux_fit=task_list_aux_fit)
             !
             NULLIFY (mpz, mhz)
             ALLOCATE (mpz(nspins, 1))
@@ -662,7 +664,7 @@ CONTAINS
                CALL integrate_v_rspace(v_rspace=v_rspace(ispin), &
                                        hmat=mhz(ispin, 1), pmat=mpz(ispin, 1), &
                                        qs_env=qs_env, calculate_forces=.TRUE., &
-                                       basis_type="AUX_FIT")
+                                       basis_type="AUX_FIT", task_list_external=task_list_aux_fit)
             END DO
             NULLIFY (rho_g_aux, rho_r_aux, tau_r_aux, rhoz_g_aux, rhoz_r_aux)
             IF (debug_forces) THEN
@@ -692,7 +694,8 @@ CONTAINS
             DO ispin = 1, nspins
                CALL calculate_rho_elec(ks_env=ks_env, matrix_p=mpz(ispin, 1)%matrix, &
                                        rho=rhoz_r_aux(ispin), rho_gspace=rhoz_g_aux(ispin), &
-                                       total_rho=total_rhoz_aux, basis_type="AUX_FIT")
+                                       total_rho=total_rhoz_aux, basis_type="AUX_FIT", &
+                                       task_list_external=task_list_aux_fit)
             END DO
             !
             NULLIFY (deriv_set, rho_set, rho1_set)
@@ -723,7 +726,8 @@ CONTAINS
                CALL pw_scale(v_xc(ispin)%pw, v_xc(ispin)%pw%pw_grid%dvol)
                CALL integrate_v_rspace(qs_env=qs_env, v_rspace=v_xc(ispin), &
                                        hmat=mhz(ispin, 1), pmat=matrix_p(ispin, 1), &
-                                       calculate_forces=.TRUE., basis_type="AUX_FIT")
+                                       calculate_forces=.TRUE., basis_type="AUX_FIT", &
+                                       task_list_external=task_list_aux_fit)
             END DO
             IF (debug_forces) THEN
                fodeb(1:3) = force(1)%rho_elec(1:3, 1) - fodeb(1:3)
