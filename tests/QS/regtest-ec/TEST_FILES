@@ -9,4 +9,9 @@ H2_H2O_ecprim.inp                                     11      1e-10             
 H2O_ec.inp                                            11      1e-08                 -17.2629537942
 HF_ec_dipole.inp                                      11      1e-08                 -24.8917060368
 HF_ec_field.inp                                       11      1e-08                 -24.8908706031
+N2_ec.inp                                              1      1e-10                 -19.8023664030
+#N2_ec-hfx.inp                                         1      1e-10                   0.0000000000
+#N2_ec-hfx-admm.inp                                    1      1e-10                   0.0000000000
 #EOF
+
+

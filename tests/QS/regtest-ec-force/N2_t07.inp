@@ -1,11 +1,11 @@
 &FORCE_EVAL
   METHOD Quickstep
   &DFT
-    &PRINT
-       &DERIVATIVES
-       &END
-    &END
-    BASIS_SET_FILE_NAME BASIS_SET
+#    &PRINT
+#       &DERIVATIVES
+#       &END
+#    &END
+    BASIS_SET_FILE_NAME GTH_BASIS_SETS
     POTENTIAL_FILE_NAME GTH_POTENTIALS
     &MGRID
       CUTOFF 400
@@ -15,11 +15,9 @@
     &END QS
     &ENERGY_CORRECTION
       ENERGY_FUNCTIONAL HARRIS
-      HARRIS_BASIS ORBITAL 
+      HARRIS_BASIS HARRIS 
       &XC
-        &XC_FUNCTIONAL 
-           &PADE
-           &END
+        &XC_FUNCTIONAL PADE
         &END
       &END XC
     &END ENERGY_CORRECTION
@@ -28,12 +26,7 @@
       SCF_GUESS ATOMIC 
     &END
     &XC
-       &XC_FUNCTIONAL  NONE
-       &END
-       &HF
-         &SCREENING
-           EPS_SCHWARZ 1.0E-14
-         &END
+       &XC_FUNCTIONAL  PADE
        &END
     &END XC
   &END DFT
@@ -42,12 +35,12 @@
       ABC 6.0 6.0 6.0
     &END CELL
     &COORD
-    N     0.000000     0.000000     0.650000    
-    N     0.000000     0.000000    -0.650000   
+    N     0.400000     0.000000     0.500000    
+    N    -0.400000     0.000000    -0.500000   
     &END COORD
     &KIND N
-      BASIS_SET ORB DZVP-GTH-BLYP
-      BASIS_SET HARRIS DZVP-GTH-BLYP
+      BASIS_SET ORB SZV-GTH
+      BASIS_SET HARRIS DZVP-GTH
       POTENTIAL GTH-PADE-q5
     &END KIND
   &END SUBSYS
@@ -62,5 +55,5 @@
    DEBUG_FORCES T
    DEBUG_STRESS_TENSOR F
    STOP_ON_MISMATCH F
-   DX 0.001
+   DX 0.0001
 &END
