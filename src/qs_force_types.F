@@ -393,29 +393,29 @@ CONTAINS
          CALL mp_sum(qs_force(ikind)%gcp, para_env%group)
          CALL mp_sum(qs_force(ikind)%ehrenfest, para_env%group)
 
-         qs_force(ikind)%total(:, :) = qs_force(ikind)%total(:, :) + &
-                                       qs_force(ikind)%core_overlap(:, :) + &
-                                       qs_force(ikind)%gth_ppl(:, :) + &
-                                       qs_force(ikind)%gth_nlcc(:, :) + &
-                                       qs_force(ikind)%gth_ppnl(:, :) + &
-                                       qs_force(ikind)%all_potential(:, :) + &
-                                       qs_force(ikind)%kinetic(:, :) + &
-                                       qs_force(ikind)%overlap(:, :) + &
-                                       qs_force(ikind)%overlap_admm(:, :) + &
-                                       qs_force(ikind)%rho_core(:, :) + &
-                                       qs_force(ikind)%rho_elec(:, :) + &
-                                       qs_force(ikind)%rho_lri_elec(:, :) + &
-                                       qs_force(ikind)%vhxc_atom(:, :) + &
-                                       qs_force(ikind)%g0s_Vh_elec(:, :) + &
-                                       qs_force(ikind)%fock_4c(:, :) + &
-                                       qs_force(ikind)%mp2_non_sep(:, :) + &
-                                       qs_force(ikind)%mp2_sep(:, :) + &
-                                       qs_force(ikind)%repulsive(:, :) + &
-                                       qs_force(ikind)%dispersion(:, :) + &
-                                       qs_force(ikind)%gcp(:, :) + &
-                                       qs_force(ikind)%ehrenfest(:, :) + &
-                                       qs_force(ikind)%efield(:, :) + &
-                                       qs_force(ikind)%eev(:, :)
+         qs_force(ikind)%total(:, :) = &
+            qs_force(ikind)%core_overlap(:, :) + &
+            qs_force(ikind)%gth_ppl(:, :) + &
+            qs_force(ikind)%gth_nlcc(:, :) + &
+            qs_force(ikind)%gth_ppnl(:, :) + &
+            qs_force(ikind)%all_potential(:, :) + &
+            qs_force(ikind)%kinetic(:, :) + &
+            qs_force(ikind)%overlap(:, :) + &
+            qs_force(ikind)%overlap_admm(:, :) + &
+            qs_force(ikind)%rho_core(:, :) + &
+            qs_force(ikind)%rho_elec(:, :) + &
+            qs_force(ikind)%rho_lri_elec(:, :) + &
+            qs_force(ikind)%vhxc_atom(:, :) + &
+            qs_force(ikind)%g0s_Vh_elec(:, :) + &
+            qs_force(ikind)%fock_4c(:, :) + &
+            qs_force(ikind)%mp2_non_sep(:, :) + &
+            qs_force(ikind)%mp2_sep(:, :) + &
+            qs_force(ikind)%repulsive(:, :) + &
+            qs_force(ikind)%dispersion(:, :) + &
+            qs_force(ikind)%gcp(:, :) + &
+            qs_force(ikind)%ehrenfest(:, :) + &
+            qs_force(ikind)%efield(:, :) + &
+            qs_force(ikind)%eev(:, :)
       END DO
 
    END SUBROUTINE replicate_qs_force

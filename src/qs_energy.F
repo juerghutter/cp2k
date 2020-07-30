@@ -105,7 +105,11 @@ CONTAINS
                      CALL qs_ks_update_qs_env(qs_env, calculate_forces=.FALSE., just_energy=.TRUE.)
                   ENDIF
                ELSE
-                  CALL qs_ks_update_qs_env(qs_env, calculate_forces=.FALSE., just_energy=.TRUE.)
+                  IF (qs_env%excited_state) THEN
+                     CALL qs_ks_update_qs_env(qs_env, calculate_forces=.FALSE., just_energy=.FALSE.)
+                  ELSE
+                     CALL qs_ks_update_qs_env(qs_env, calculate_forces=.FALSE., just_energy=.TRUE.)
+                  END IF
                ENDIF
                ! add MP2 energy if necessary
                IF (ASSOCIATED(qs_env%mp2_env)) THEN
