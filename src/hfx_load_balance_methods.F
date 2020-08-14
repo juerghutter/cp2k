@@ -143,7 +143,7 @@ CONTAINS
       INTEGER, DIMENSION(:, :)                           :: is_assoc_atomic_block_global
       LOGICAL                                            :: do_periodic
       TYPE(hfx_load_balance_type), POINTER               :: load_balance_parameter
-      INTEGER                                            :: kind_of(*)
+      INTEGER, DIMENSION(:)                              :: kind_of
       TYPE(hfx_basis_type), DIMENSION(:), POINTER        :: basis_parameter
       TYPE(hfx_p_kind), DIMENSION(:), POINTER            :: pmax_set
       REAL(dp), DIMENSION(:, :), POINTER                 :: pmax_atom
@@ -437,7 +437,7 @@ CONTAINS
       CASE (hfx_do_eval_forces)
          atomic_pair_list => x_data%atomic_pair_list_forces
       END SELECT
-      CALL build_atomic_pair_list(natom, atomic_pair_list, kind_of, basis_parameter, particle_set, &
+      CALL build_atomic_pair_list(atomic_pair_list, kind_of, basis_parameter, particle_set, &
                                   do_periodic, coeffs_kind, coeffs_kind_max0, log10_eps_schwarz, cell, &
                                   x_data%blocks)
 
@@ -920,7 +920,7 @@ CONTAINS
          INTENT(IN), POINTER                             :: coeffs_kind
       INTEGER, DIMENSION(:, :), INTENT(IN)               :: is_assoc_atomic_block_global
       LOGICAL, INTENT(IN)                                :: do_periodic
-      INTEGER, INTENT(IN)                                :: kind_of(*)
+      INTEGER, DIMENSION(:), INTENT(IN)                  :: kind_of
       TYPE(hfx_basis_type), DIMENSION(:), INTENT(IN), &
          POINTER                                         :: basis_parameter
       TYPE(hfx_p_kind), DIMENSION(:), INTENT(IN), &
@@ -1233,7 +1233,7 @@ CONTAINS
          POINTER                                         :: coeffs_kind
       INTEGER, DIMENSION(:, :)                           :: is_assoc_atomic_block_global
       LOGICAL                                            :: do_periodic
-      INTEGER                                            :: kind_of(*)
+      INTEGER, DIMENSION(:)                              :: kind_of
       TYPE(hfx_basis_type), DIMENSION(:), POINTER        :: basis_parameter
       TYPE(hfx_p_kind), DIMENSION(:), POINTER            :: pmax_set
       REAL(dp), DIMENSION(:, :), POINTER                 :: pmax_atom
@@ -1767,13 +1767,13 @@ CONTAINS
 !>      08.2009 created Joost VandeVondele
 !> \author Joost VandeVondele
 ! **************************************************************************************************
-   FUNCTION cost_model(nsa, nsb, nsc, nsd, npgfa, npgfb, npgfc, npgfd, ratio, p1, p2, p3) RESULT(res)
+   PURE FUNCTION cost_model(nsa, nsb, nsc, nsd, npgfa, npgfb, npgfc, npgfd, ratio, p1, p2, p3) RESULT(res)
       IMPLICIT NONE
-      REAL(KIND=dp) :: estimate1, estimate2, estimate, ratio, switch, mu, sigma
-      INTEGER(KIND=int_8) :: res
+      INTEGER, INTENT(IN)   :: nsa, nsb, nsc, nsd, npgfa, npgfb, npgfc, npgfd
+      REAL(KIND=dp), INTENT(IN) :: ratio
       REAL(KIND=dp), INTENT(IN) :: p1(12), p2(12), p3(2)
-
-      INTEGER   :: nsa, nsb, nsc, nsd, npgfa, npgfb, npgfc, npgfd
+      REAL(KIND=dp) :: estimate1, estimate2, estimate, switch, mu, sigma
+      INTEGER(KIND=int_8) :: res
 
       estimate1 = estimate_basic(p1)
       estimate2 = estimate_basic(p2)
@@ -1790,8 +1790,8 @@ CONTAINS
 !> \param p ...
 !> \return ...
 ! **************************************************************************************************
-      REAL(KIND=dp) FUNCTION estimate_basic(p) RESULT(res)
-      REAL(KIND=dp)                                      :: p(12)
+      REAL(KIND=dp) PURE FUNCTION estimate_basic(p) RESULT(res)
+      REAL(KIND=dp), INTENT(IN)                          :: p(12)
 
       REAL(KIND=dp)                                      :: p1, p10, p11, p12, p2, p3, p4, p5, p6, &
                                                             p7, p8, p9
@@ -1814,9 +1814,9 @@ CONTAINS
 !> \param a2 ...
 !> \return ...
 ! **************************************************************************************************
-      REAL(KIND=dp) FUNCTION poly2(x, a0, a1, a2)
-      INTEGER                                            :: x
-      REAL(KIND=dp)                                      :: a0, a1, a2
+      REAL(KIND=dp) PURE FUNCTION poly2(x, a0, a1, a2)
+      INTEGER, INTENT(IN)                                :: x
+      REAL(KIND=dp), INTENT(IN)                          :: a0, a1, a2
 
          poly2 = a0 + a1*x + a2*x*x
       END FUNCTION poly2
@@ -1975,7 +1975,7 @@ CONTAINS
          DIMENSION(nkind, nkind)                         :: coeffs_kind
       INTEGER, DIMENSION(:, :)                           :: is_assoc_atomic_block_global
       LOGICAL                                            :: do_periodic
-      INTEGER                                            :: kind_of(*)
+      INTEGER, DIMENSION(:)                              :: kind_of
       TYPE(hfx_basis_type), DIMENSION(:), POINTER        :: basis_parameter
       TYPE(hfx_p_kind), DIMENSION(:), POINTER            :: pmax_set
       REAL(dp), DIMENSION(:, :), POINTER                 :: pmax_atom
@@ -2002,12 +2002,12 @@ CONTAINS
 
       estimate_block_cost = 0_int_8
 
-      CALL build_pair_list(natom, list_ij, set_list_ij, iatom_start, iatom_end, jatom_start, jatom_end, &
+      CALL build_pair_list(list_ij, set_list_ij, iatom_start, iatom_end, jatom_start, jatom_end, &
                            kind_of, basis_parameter, particle_set, &
                            do_periodic, coeffs_set, coeffs_kind, coeffs_kind_max0, &
                            log10_eps_schwarz, cell, pmax_blocks, atomic_pair_list)
 
-      CALL build_pair_list(natom, list_kl, set_list_kl, katom_start, katom_end, latom_start, latom_end, &
+      CALL build_pair_list(list_kl, set_list_kl, katom_start, katom_end, latom_start, latom_end, &
                            kind_of, basis_parameter, particle_set, &
                            do_periodic, coeffs_set, coeffs_kind, coeffs_kind_max0, &
                            log10_eps_schwarz, cell, pmax_blocks, atomic_pair_list)
@@ -2185,9 +2185,9 @@ CONTAINS
 
                   IF (max_val2 + actual_pmax_atom < log10_eps_schwarz) CYCLE
                   IF (do_p_screening) THEN
-                     CALL get_pmax_val(ptr_p_1, ptr_p_2, ptr_p_3, ptr_p_4, &
-                                       iset, jset, kset, lset, &
-                                       pmax_entry, swap_id)
+                     pmax_entry = get_pmax_val(ptr_p_1, ptr_p_2, ptr_p_3, ptr_p_4, &
+                                               iset, jset, kset, lset, &
+                                               swap_id)
                      IF (eval_type == hfx_do_eval_forces) THEN
                         pmax_entry = log_2 + pmax_entry
                      END IF
@@ -2273,7 +2273,7 @@ CONTAINS
          POINTER                                         :: coeffs_kind
       INTEGER, DIMENSION(:, :)                           :: is_assoc_atomic_block_global
       LOGICAL                                            :: do_periodic
-      INTEGER                                            :: kind_of(*)
+      INTEGER, DIMENSION(:)                              :: kind_of
       TYPE(hfx_basis_type), DIMENSION(:), POINTER        :: basis_parameter
       TYPE(hfx_p_kind), DIMENSION(:), POINTER            :: pmax_set
       REAL(dp), DIMENSION(:, :), POINTER                 :: pmax_atom

@@ -442,7 +442,7 @@ CONTAINS
       INTEGER :: sphi_c_u1, sphi_c_u2, sphi_c_u3, sphi_d_u1, sphi_d_u2, sphi_d_u3, virtual
       INTEGER(int_8)                                     :: estimate_to_store_int, neris_tmp, &
                                                             neris_total, nprim_ints
-      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: kind_of, nimages
+      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: kind_of
       INTEGER, DIMENSION(:), POINTER                     :: la_max, la_min, lb_max, lb_min, lc_max, &
                                                             lc_min, ld_max, ld_min, npgfa, npgfb, &
                                                             npgfc, npgfd, nsgfa, nsgfb, nsgfc, &
@@ -458,7 +458,6 @@ CONTAINS
                                                             primitive_integrals
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: L_block, L_full_matrix, max_contraction
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :, :)     :: BI1, MNRS
-      REAL(KIND=dp), DIMENSION(:), POINTER               :: p_work
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: shm_pmax_block, zeta, zetb, zetc, zetd
       REAL(KIND=dp), DIMENSION(:, :, :), POINTER         :: sphi_a_ext_set, sphi_b_ext_set, &
                                                             sphi_c_ext_set, sphi_d_ext_set
@@ -502,8 +501,8 @@ CONTAINS
                                  do_periodic, basis_parameter, max_set, particle_set, natom, kind_of, &
                                  nsgf_max, primitive_integrals, ee_work, ee_work2, ee_buffer1, ee_buffer2, &
                                  ee_primitives_tmp, nspins, max_contraction, max_pgf, pgf_list_ij, &
-                                 pgf_list_kl, pgf_product_list, nimages, eps_schwarz, log10_eps_schwarz, &
-                                 private_lib, p_work, screen_coeffs_set, screen_coeffs_kind, screen_coeffs_pgf, &
+                                 pgf_list_kl, pgf_product_list, eps_schwarz, log10_eps_schwarz, &
+                                 private_lib, screen_coeffs_set, screen_coeffs_kind, screen_coeffs_pgf, &
                                  radii_pgf, RI_basis_parameter, RI_basis_info)
 
       ALLOCATE (radii_pgf_large(SIZE(radii_pgf, 1), SIZE(radii_pgf, 2)))
@@ -649,7 +648,7 @@ CONTAINS
                                 sphi_c_ext_set, &
                                 sphi_d_ext_set, &
                                 ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp, &
-                                nimages, do_periodic, p_work)
+                                do_periodic)
 
                   primitive_counter = 0
                   DO llB = 1, nsgfd(lset)
@@ -729,7 +728,7 @@ CONTAINS
       latom_start = 1
       latom_end = natom
 
-      CALL build_pair_list_mp2(natom, list_kl, set_list_kl, katom_start, katom_end, &
+      CALL build_pair_list_mp2(list_kl, set_list_kl, katom_start, katom_end, &
                                latom_start, latom_end, &
                                kind_of, basis_parameter, particle_set, &
                                do_periodic, screen_coeffs_set, screen_coeffs_kind, &
@@ -877,7 +876,7 @@ CONTAINS
                                 sphi_c_ext_set, &
                                 sphi_d_ext_set, &
                                 ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp, &
-                                nimages, do_periodic, p_work)
+                                do_periodic)
 
                   nints = nsgfa(iset)*nsgfb(jset)*nsgfc(kset)*nsgfd(lset)
                   neris_total = neris_total + nints
@@ -945,8 +944,6 @@ CONTAINS
 
       DEALLOCATE (ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp)
 
-      DEALLOCATE (nimages)
-
       IF (mp2_env%potential_parameter%potential_type == do_potential_TShPSC) THEN
          init_TShPSC_lmax = -1
          CALL free_C0()
@@ -983,11 +980,9 @@ CONTAINS
 !> \param pgf_list_ij ...
 !> \param pgf_list_kl ...
 !> \param pgf_product_list ...
-!> \param nimages ...
 !> \param eps_schwarz ...
 !> \param log10_eps_schwarz ...
 !> \param private_lib ...
-!> \param p_work ...
 !> \param screen_coeffs_set ...
 !> \param screen_coeffs_kind ...
 !> \param screen_coeffs_pgf ...
@@ -999,8 +994,8 @@ CONTAINS
                                     do_periodic, basis_parameter, max_set, particle_set, natom, kind_of, &
                                     nsgf_max, primitive_integrals, ee_work, ee_work2, ee_buffer1, ee_buffer2, &
                                     ee_primitives_tmp, nspins, max_contraction, max_pgf, pgf_list_ij, &
-                                    pgf_list_kl, pgf_product_list, nimages, eps_schwarz, log10_eps_schwarz, &
-                                    private_lib, p_work, screen_coeffs_set, screen_coeffs_kind, screen_coeffs_pgf, &
+                                    pgf_list_kl, pgf_product_list, eps_schwarz, log10_eps_schwarz, &
+                                    private_lib, screen_coeffs_set, screen_coeffs_kind, screen_coeffs_pgf, &
                                     radii_pgf, RI_basis_parameter, RI_basis_info)
 
       TYPE(cell_type), POINTER                           :: cell
@@ -1028,10 +1023,8 @@ CONTAINS
          INTENT(OUT)                                     :: pgf_list_ij, pgf_list_kl
       TYPE(hfx_pgf_product_list), ALLOCATABLE, &
          DIMENSION(:), INTENT(OUT)                       :: pgf_product_list
-      INTEGER, ALLOCATABLE, DIMENSION(:), INTENT(OUT)    :: nimages
       REAL(KIND=dp), INTENT(OUT)                         :: eps_schwarz, log10_eps_schwarz
       TYPE(cp_libint_t), INTENT(OUT)                     :: private_lib
-      REAL(KIND=dp), DIMENSION(:), POINTER               :: p_work
       TYPE(hfx_screen_coeff_type), &
          DIMENSION(:, :, :, :), POINTER                  :: screen_coeffs_set
       TYPE(hfx_screen_coeff_type), DIMENSION(:, :), &
@@ -1141,7 +1134,6 @@ CONTAINS
       ALLOCATE (pgf_list_ij(max_pgf**2))
       ALLOCATE (pgf_list_kl(max_pgf**2))
       ALLOCATE (pgf_product_list(nneighbors**3))
-      ALLOCATE (nimages(max_pgf**2))
 
       DO ii = 1, max_pgf**2
          ALLOCATE (pgf_list_ij(ii)%image_list(nneighbors))
@@ -1178,7 +1170,7 @@ CONTAINS
                                        shm_master_x_data%screen_funct_coeffs_kind, &
                                        shm_master_x_data%screen_funct_coeffs_pgf, &
                                        shm_master_x_data%pair_dist_radii_pgf, &
-                                       max_set, max_pgf, n_threads, i_thread, p_work)
+                                       max_set, max_pgf, n_threads, i_thread)
 
          shm_master_x_data%screen_funct_is_initialized = .TRUE.
       END IF

@@ -127,8 +127,7 @@ CONTAINS
          step_size, total_num_RS_task
       INTEGER(int_8)                                     :: estimate_to_store_int, neris_tmp, &
                                                             neris_total, nprim_ints
-      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: kind_of, nimages, proc_map, &
-                                                            proc_num_task, &
+      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: kind_of, proc_map, proc_num_task, &
                                                             same_size_kl_elements_counter
       INTEGER, ALLOCATABLE, DIMENSION(:, :)              :: kl_list_proc, task_counter_RS, &
                                                             task_counter_RS_temp
@@ -152,7 +151,6 @@ CONTAINS
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: BIb_RS_mat_rec, C_beta_T, max_contraction
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :, :)     :: BIb, BIb_RS_mat_rec_big, zero_mat_big
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :, :, :)  :: BI1, MNRS
-      REAL(KIND=dp), DIMENSION(:), POINTER               :: p_work
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: shm_pmax_block, zeta, zetb, zetc, zetd
       REAL(KIND=dp), DIMENSION(:, :, :), POINTER         :: sphi_a_ext_set, sphi_b_ext_set, &
                                                             sphi_c_ext_set, sphi_d_ext_set
@@ -196,8 +194,8 @@ CONTAINS
                                  do_periodic, basis_parameter, max_set, particle_set, natom, kind_of, &
                                  nsgf_max, primitive_integrals, ee_work, ee_work2, ee_buffer1, ee_buffer2, &
                                  ee_primitives_tmp, nspins, max_contraction, max_pgf, pgf_list_ij, &
-                                 pgf_list_kl, pgf_product_list, nimages, eps_schwarz, log10_eps_schwarz, &
-                                 private_lib, p_work, screen_coeffs_set, screen_coeffs_kind, screen_coeffs_pgf, &
+                                 pgf_list_kl, pgf_product_list, eps_schwarz, log10_eps_schwarz, &
+                                 private_lib, screen_coeffs_set, screen_coeffs_kind, screen_coeffs_pgf, &
                                  radii_pgf)
 
       ln_10 = LOG(10.0_dp)
@@ -230,14 +228,14 @@ CONTAINS
       latom_start = 1
       latom_end = natom
 
-      CALL build_pair_list_mp2(natom, list_ij, set_list_ij, iatom_start, iatom_end, &
+      CALL build_pair_list_mp2(list_ij, set_list_ij, iatom_start, iatom_end, &
                                jatom_start, jatom_end, &
                                kind_of, basis_parameter, particle_set, &
                                do_periodic, screen_coeffs_set, screen_coeffs_kind, &
                                coeffs_kind_max0, log10_eps_schwarz, cell, 0.D+00, &
                                shm_atomic_pair_list)
 
-      CALL build_pair_list_mp2(natom, list_kl, set_list_kl, katom_start, katom_end, &
+      CALL build_pair_list_mp2(list_kl, set_list_kl, katom_start, katom_end, &
                                latom_start, latom_end, &
                                kind_of, basis_parameter, particle_set, &
                                do_periodic, screen_coeffs_set, screen_coeffs_kind, &
@@ -528,7 +526,7 @@ CONTAINS
                                    sphi_c_ext_set, &
                                    sphi_d_ext_set, &
                                    ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp, &
-                                   nimages, do_periodic, p_work)
+                                   do_periodic)
 
                      nints = nsgfa(iset)*nsgfb(jset)*nsgfc(kset)*nsgfd(lset)
                      neris_total = neris_total + nints
@@ -829,8 +827,6 @@ CONTAINS
       DEALLOCATE (max_contraction, kind_of)
 
       DEALLOCATE (ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp)
-
-      DEALLOCATE (nimages)
 
       IF (mp2_env%potential_parameter%potential_type == do_potential_TShPSC) THEN
          init_TShPSC_lmax = -1
