@@ -39,6 +39,8 @@ xTB/regtest-3
 xTB/regtest-4
 xTB/regtest-5
 xTB/regtest-debug
+xTB/regtest-stda
+xTB/regtest-stda-force
 QS/regtest-almo-strong
 QS/regtest-elpa-2                                           elpa
 QS/regtest-cdft-5
