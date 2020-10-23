@@ -62,8 +62,8 @@ CONTAINS
       CHARACTER(len=*), PARAMETER                        :: routineN = 'qs_energies'
 
       INTEGER                                            :: handle
-      LOGICAL                                            :: my_calc_forces, run_rtp, &
-                                                            do_consistent_energies
+      LOGICAL                                            :: do_consistent_energies, my_calc_forces, &
+                                                            run_rtp
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(qs_energy_type), POINTER                      :: energy
 
