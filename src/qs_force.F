@@ -60,7 +60,7 @@ MODULE qs_force
    USE qs_force_types,                  ONLY: allocate_qs_force,&
                                               qs_force_type,&
                                               replicate_qs_force,&
-                                              zero_qs_force
+                                              zero_qs_force, write_forces_debug
    USE qs_ks_methods,                   ONLY: qs_ks_update_qs_env
    USE qs_ks_types,                     ONLY: qs_ks_did_change,&
                                               qs_ks_env_type,&
@@ -208,6 +208,10 @@ CONTAINS
 
       ! recalculate energy with forces
       CALL qs_energies(qs_env, calc_forces=.TRUE.)
+!deb
+      write(6,*) "FORCE TEST 1"
+      CALL write_forces_debug(force)
+!deb
 
       NULLIFY (para_env)
       CALL get_qs_env(qs_env, &
@@ -308,10 +312,18 @@ CONTAINS
             CALL build_ri_matrices(lri_env, qs_env, calculate_forces=.TRUE.)
          ENDIF
       END IF
+!deb
+      write(6,*) "FORCE TEST 2"
+      CALL write_forces_debug(force)
+!deb
 
       ! Compute grid-based forces
       CALL qs_ks_update_qs_env(qs_env, calculate_forces=.TRUE.)
 
+!deb
+      write(6,*) "FORCE TEST 3"
+      CALL write_forces_debug(force)
+!deb
       ! MP2 Code
       IF (ASSOCIATED(qs_env%mp2_env)) THEN
          NULLIFY (matrix_p_mp2, matrix_w_mp2, rho, ks_env, energy)
@@ -335,23 +347,15 @@ CONTAINS
          energy%total = energy%total + energy%mp2
 
          ! Compute MP2 properties
-         ! Get the HF+MP2 density
-         DO ispin = 1, dft_control%nspins
-            CALL dbcsr_add(rho_ao(ispin)%matrix, matrix_p_mp2(ispin)%matrix, 1.0_dp, 1.0_dp)
-         END DO
-         CALL qs_rho_update_rho(rho, qs_env=qs_env)
-         CALL qs_ks_did_change(ks_env, rho_changed=.TRUE.)
          CALL qs_scf_compute_properties(qs_env, wf_type='MP2   ')
-         ! Get everything back
-         DO ispin = 1, dft_control%nspins
-            CALL dbcsr_add(rho_ao(ispin)%matrix, matrix_p_mp2(ispin)%matrix, 1.0_dp, -1.0_dp)
-         END DO
-         CALL qs_rho_update_rho(rho, qs_env=qs_env)
-         CALL qs_ks_did_change(ks_env, rho_changed=.TRUE.)
 
          ! deallocate mp2_W
          CALL dbcsr_deallocate_matrix_set(matrix_w_mp2)
          CALL set_ks_env(ks_env, matrix_w_mp2=Null())
+!deb
+      write(6,*) "FORCE TEST mp2"
+      CALL write_forces_debug(force)
+!deb
 
       END IF
 
@@ -381,6 +385,10 @@ CONTAINS
          END DO
          CALL calc_mixed_overlap_force(qs_env)
       END IF
+!deb
+      write(6,*) "FORCE TEST 4"
+      CALL write_forces_debug(force)
+!deb
 
       ! Energy_correction
       CALL energy_correction(qs_env, ec_init=.FALSE., calculate_forces=.TRUE.)

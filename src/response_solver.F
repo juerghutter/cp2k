@@ -159,12 +159,15 @@ CONTAINS
 !> \param qs_env ...
 !> \param p_env ...
 !> \param cpmos RHS of equation as Ax + b = 0 (sign of b)
+!> \param p1_mat ...
 !> \param lr_section ...
 ! **************************************************************************************************
-   SUBROUTINE response_equation(qs_env, p_env, cpmos, lr_section)
+   SUBROUTINE response_equation(qs_env, p_env, cpmos, p1_mat, lr_section)
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(qs_p_env_type), POINTER                       :: p_env
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: cpmos
+      TYPE(cp_fm_p_type), DIMENSION(:), OPTIONAL, &
+         POINTER                                         :: p1_mat
       TYPE(section_vals_type), OPTIONAL, POINTER         :: lr_section
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'response_equation'
@@ -293,10 +296,16 @@ CONTAINS
          CALL calculate_wz_matrix(mos(ispin)%mo_set, psi1(ispin)%matrix, matrix_ks(ispin)%matrix, &
                                   p_env%w1(ispin)%matrix)
       ENDDO
-      DO ispin = 1, nspins
-         CALL cp_fm_release(psi1(ispin)%matrix)
-      ENDDO
-      DEALLOCATE (psi0, psi1)
+      IF (PRESENT(p1_mat)) THEN
+         CPASSERT(.NOT. ASSOCIATED(p1_mat))
+         p1_mat => psi1
+      ELSE
+         DO ispin = 1, nspins
+            CALL cp_fm_release(psi1(ispin)%matrix)
+         ENDDO
+         DEALLOCATE (psi1)
+      END IF
+      DEALLOCATE (psi0)
       CALL linres_control_release(linres_control)
 
       CALL timestop(handle)

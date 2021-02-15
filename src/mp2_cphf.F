@@ -18,6 +18,7 @@ MODULE mp2_cphf
    USE cp_dbcsr_cp2k_link,              ONLY: cp_dbcsr_alloc_block_from_nbl
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               copy_fm_to_dbcsr,&
+                                              cp_dbcsr_sm_fm_multiply,&
                                               dbcsr_allocate_matrix_set
    USE cp_fm_basic_linalg,              ONLY: cp_fm_upper_to_full
    USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
@@ -86,11 +87,14 @@ MODULE mp2_cphf
    USE qs_ks_types,                     ONLY: qs_ks_env_type,&
                                               set_ks_env
    USE qs_neighbor_list_types,          ONLY: neighbor_list_set_p_type
+   USE qs_p_env_types,                  ONLY: p_env_release,&
+                                              qs_p_env_type
    USE qs_rho_methods,                  ONLY: qs_rho_rebuild
    USE qs_rho_types,                    ONLY: qs_rho_create,&
                                               qs_rho_get,&
                                               qs_rho_release,&
                                               qs_rho_type
+   USE response_solver,                 ONLY: response_equation
    USE virial_types,                    ONLY: virial_type
 
 !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num, omp_get_num_threads
@@ -492,22 +496,34 @@ CONTAINS
          CALL cp_fm_struct_release(fm_struct_tmp)
          CALL cp_fm_set_all(P_ia_beta, 0.0_dp)
       ENDIF
-
+      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+      ! CPHF solver
+      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
       IF (.NOT. alpha_beta) THEN
-         CALL solve_z_vector_eq_low(qs_env, mp2_env, para_env, homo, virtual, dimen, unit_nr, &
-                                    mo_coeff, mo_coeff_o, mo_coeff_v, Eigenval, blacs_env, &
-                                    hfx_sections, n_rep_hf, &
-                                    poisson_env, rho_work, pot_g, rho_g, rho_r, mat_mu_nu, &
-                                    P_mu_nu, L_jb, fm_G_mu_nu, fm_back, P_ia)
+         IF(mp2_env%ri_mp2%use_old_grad) THEN
+            CALL solve_z_vector_eq_low(qs_env, mp2_env, para_env, homo, virtual, dimen, unit_nr, &
+                                       mo_coeff, mo_coeff_o, mo_coeff_v, Eigenval, blacs_env, &
+                                       hfx_sections, n_rep_hf, &
+                                       poisson_env, rho_work, pot_g, rho_g, rho_r, mat_mu_nu, &
+                                       P_mu_nu, L_jb, fm_G_mu_nu, fm_back, P_ia)
+         ELSE
+            CALL solve_z_response(qs_env, mp2_env, unit_nr, mo_coeff_o, mo_coeff_v, L_jb, P_ia)
+         END IF
       ELSE
-         CALL solve_z_vector_eq_low(qs_env, mp2_env, para_env, homo, virtual, dimen, unit_nr, &
-                                    mo_coeff, mo_coeff_o, mo_coeff_v, Eigenval, blacs_env, &
-                                    hfx_sections, n_rep_hf, &
-                                    poisson_env, rho_work, pot_g, rho_g, rho_r, mat_mu_nu, &
-                                    P_mu_nu, L_jb, fm_G_mu_nu, fm_back, P_ia, &
-                                    homo_beta, Eigenval_beta, P_ia_beta, mo_coeff_beta, &
-                                    mo_coeff_o_beta, mo_coeff_v_beta, L_jb_beta)
+         IF(mp2_env%ri_mp2%use_old_grad) THEN
+            CALL solve_z_vector_eq_low(qs_env, mp2_env, para_env, homo, virtual, dimen, unit_nr, &
+                                       mo_coeff, mo_coeff_o, mo_coeff_v, Eigenval, blacs_env, &
+                                       hfx_sections, n_rep_hf, &
+                                       poisson_env, rho_work, pot_g, rho_g, rho_r, mat_mu_nu, &
+                                       P_mu_nu, L_jb, fm_G_mu_nu, fm_back, P_ia, &
+                                       homo_beta, Eigenval_beta, P_ia_beta, mo_coeff_beta, &
+                                       mo_coeff_o_beta, mo_coeff_v_beta, L_jb_beta)
+         ELSE
+            CALL solve_z_response(qs_env, mp2_env, unit_nr, mo_coeff_o, mo_coeff_v, L_jb, P_ia, &
+                                  mo_coeff_o_beta, mo_coeff_v_beta, L_jb_beta, P_ia_beta)
+         END IF
       ENDIF
+      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! End CPHF Solver !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
       ! release Lagrangian
       CALL cp_fm_release(L_jb)
@@ -767,6 +783,7 @@ CONTAINS
          CALL cp_fm_release(W_mo_beta)
          CALL cp_fm_release(P_mo_beta)
       ENDIF
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
       ! update the core-forces with the MP2-density contribution
       ! put MP2 density on the grid
@@ -873,6 +890,7 @@ CONTAINS
       mp2_env%not_last_hfx = .FALSE.
       mp2_env%p_screen = restore_p_screen
 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
       ! release stuff
       CALL pw_pool_give_back_pw(auxbas_pw_pool, rho_r%pw)
       CALL pw_pool_give_back_pw(auxbas_pw_pool, rho_g%pw)
@@ -880,7 +898,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE solve_z_vector_eq
 
 ! **************************************************************************************************
 !> \brief Here we performe the CPHF like update using GPW,
@@ -1826,5 +1844,123 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE solve_z_vector_eq_low
+
+! **************************************************************************************************
+!> \brief Low level subroutine for the interface to the response equation solver
+!> \param qs_env ...
+!> \param mp2_env ...
+!> \param unit_nr ...
+!> \param mo_coeff_o ...
+!> \param mo_coeff_v ...
+!> \param L_jb ...
+!> \param P_ia ...
+!> \param mo_coeff_o_beta ...
+!> \param mo_coeff_v_beta ...
+!> \param L_jb_beta ...
+!> \param P_ia_beta ...
+!> \author Mauro Del Ben, Vladimir Rybkin
+! **************************************************************************************************
+   SUBROUTINE solve_z_response(qs_env, mp2_env, unit_nr, &
+                               mo_coeff_o, mo_coeff_v, L_jb, P_ia, &
+                               mo_coeff_o_beta, mo_coeff_v_beta, L_jb_beta, P_ia_beta)
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(mp2_type), POINTER                            :: mp2_env
+      INTEGER, INTENT(IN)                                :: unit_nr
+      TYPE(cp_fm_type), POINTER                          :: mo_coeff_o, mo_coeff_v, L_jb, P_ia
+      TYPE(cp_fm_type), OPTIONAL, POINTER                :: mo_coeff_o_beta, mo_coeff_v_beta, &
+                                                            L_jb_beta, P_ia_beta
+
+      CHARACTER(LEN=*), PARAMETER                        :: routineN = 'solve_z_response'
+
+      INTEGER                                            :: handle, ispin, max_num_iter, nao, noa, &
+                                                            nob, nspins, nva, nvb
+      REAL(KIND=dp)                                      :: eps_conv
+      TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: cpmos, p1_mat, smov
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s
+      TYPE(qs_p_env_type), POINTER                       :: p_env
+
+      CALL timeset(routineN, handle)
+
+      max_num_iter = mp2_env%ri_grad%cphf_max_num_iter
+      eps_conv = mp2_env%ri_grad%cphf_eps_conv
+
+      IF (unit_nr > 0) THEN
+         WRITE (unit_nr, *)
+         WRITE (unit_nr, '(T3,A)') 'MP2_CPHF| Iterative solution of Z-Vector equations'
+         WRITE (unit_nr, '(T3,A)') 'MP2_CPHF| General response solver method'
+         WRITE (unit_nr, '(T3,A,T45,ES8.1)') 'MP2_CPHF| Convergence threshold:', eps_conv
+         WRITE (unit_nr, '(T3,A,T45,I8)') 'MP2_CPHF| Maximum number of iterations: ', max_num_iter
+      END IF
+
+!deb
+      IF (PRESENT(P_ia_beta)) THEN
+         nspins = 2
+      ELSE
+         nspins = 1
+      END IF
+      ! create RHS
+      CALL get_qs_env(qs_env, matrix_s=matrix_s)
+      NULLIFY (cpmos, smov)
+      ALLOCATE (cpmos(nspins), smov(nspins))
+      CALL cp_fm_get_info(mo_coeff_o, nrow_global=nao)
+      CALL cp_fm_get_info(L_jb, nrow_global=noa, ncol_global=nva)
+      CALL cp_fm_create(smov(1)%matrix, mo_coeff_v%matrix_struct)
+      CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, mo_coeff_v, smov(1)%matrix, nva)
+      CALL cp_fm_create(cpmos(1)%matrix, mo_coeff_o%matrix_struct)
+      CALL cp_gemm('N', 'T', nao, noa, nva, 1.0_dp, smov(1)%matrix, L_jb, 0.0_dp, &
+                   cpmos(1)%matrix)
+      IF (nspins == 2) THEN
+         CALL cp_fm_get_info(L_jb_beta, nrow_global=nob, ncol_global=nvb)
+         CALL cp_fm_create(smov(2)%matrix, mo_coeff_v_beta%matrix_struct)
+         CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, mo_coeff_v_beta, smov(2)%matrix, nvb)
+         CALL cp_fm_create(cpmos(2)%matrix, mo_coeff_o_beta%matrix_struct)
+         CALL cp_gemm('N', 'T', nao, nob, nvb, 1.0_dp, smov(2)%matrix, L_jb_beta, 0.0_dp, &
+                      cpmos(2)%matrix)
+      END IF
+      NULLIFY (p_env, p1_mat)
+      CALL response_equation(qs_env, p_env, cpmos, p1_mat=p1_mat)
+!deb
+!        P_ia
+      CALL cp_gemm('T', 'N', noa, nva, nao, 1.0_dp, p1_mat(1)%matrix, smov(1)%matrix, &
+                   0.0_dp, P_ia)
+      IF (nspins == 2) THEN
+         CALL cp_gemm('T', 'N', nob, nvb, nao, 1.0_dp, p1_mat(2)%matrix, smov(2)%matrix, &
+                      0.0_dp, P_ia_beta)
+      END IF
+!deb
+      WRITE (6, *) "P_ia r  ", SUM(P_ia%local_data)
+      CALL cp_fm_set_all(P_ia, 0.0_dp)
+      IF (nspins == 2) THEN
+         WRITE (6, *) "P_ia r  ", SUM(P_ia_beta%local_data)
+         CALL cp_fm_set_all(P_ia_beta, 0.0_dp)
+      END IF
+!deb
+!           ! prepare force array
+!           CALL get_qs_env(qs_env, force=ks_force, atomic_kind_set=atomic_kind_set)
+!           nkind = SIZE(atomic_kind_set)
+!           ALLOCATE (natom_of_kind(nkind))
+!           CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set, natom_of_kind=natom_of_kind)
+!           NULLIFY (lr_force)
+!           CALL allocate_qs_force(lr_force, natom_of_kind)
+!           DEALLOCATE (natom_of_kind)
+!           CALL zero_qs_force(lr_force)
+!           CALL set_qs_env(qs_env, force=lr_force)
+!     CALL response_force(qs_env, p_env, ex_env%vh_rspace, ex_env%vxc_rspace, &
+!                         ex_env%vtau_rspace, ex_env%matrix_hz, ex_env)
+!           ! add TD and KS forces
+!           CALL get_qs_env(qs_env, force=lr_force)
+!           CALL sum_qs_force(ks_force, lr_force)
+!           CALL set_qs_env(qs_env, force=ks_force)
+!           CALL deallocate_qs_force(lr_force)
+      CALL p_env_release(p_env)
+      DO ispin = 1, nspins
+         CALL cp_fm_release(cpmos(ispin)%matrix)
+         CALL cp_fm_release(smov(ispin)%matrix)
+      END DO
+      DEALLOCATE (cpmos, smov)
+
+      CALL timestop(handle)
+
+   END SUBROUTINE solve_z_response
 
 END MODULE mp2_cphf
