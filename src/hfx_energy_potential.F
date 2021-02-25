@@ -1686,7 +1686,9 @@ CONTAINS
       END DO !bin
 
       ! sample the memory prior to deallocation (OMP-max-reduced)
+!$OMP CRITICAL(hfxenergy_mem_sampling)
       CALL m_memory(memsize_after)
+!$OMP END CRITICAL(hfxenergy_mem_sampling)
 
       DEALLOCATE (primitive_integrals)
       DEALLOCATE (pbd_buf, pbc_buf, pad_buf, pac_buf)
@@ -1724,6 +1726,10 @@ CONTAINS
 
       ! cache maintenance if not doing everythong on the fly
       IF (.NOT. memory_parameter%do_all_on_the_fly) THEN
+!$OMP    BARRIER
+         ! Similar to the barrier at the end of the cache initialization: another thread might (or will) be using
+         ! a different threads store_ints container for the dynamic load balancing, hence we have to wait until all
+         ! threads are done using them before we can flush.
          IF (do_dynamic_load_balancing) THEN
             my_bin_size = SIZE(actual_x_data%distribution_energy)
          ELSE
