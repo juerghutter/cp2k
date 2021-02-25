@@ -320,6 +320,7 @@ CONTAINS
       shm_neris_disk = 0
       shm_stor_count_max_val = 0
       shm_mem_compression_counter = 0
+      memsize_after = 0
 
       is_unrestricted = dft_control%nspins == 2
 
