@@ -86,8 +86,7 @@ CONTAINS
          cache%element_counter = cache%element_counter + 1
       ELSE
          cache%data(CACHE_SIZE) = int_val
-         CALL hfx_compress_cache(cache%data(1), container, nbits, memory_usage, use_disk_storage, &
-                                 max_val_memory)
+         CALL hfx_compress_cache(cache%data, container, nbits, memory_usage, use_disk_storage, max_val_memory)
          cache%element_counter = 1
       END IF
    END SUBROUTINE hfx_add_single_cache_element
@@ -107,11 +106,11 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE hfx_compress_cache(full_array, container, nbits, memory_usage, use_disk_storage, &
                                  max_val_memory)
-      INTEGER(int_8)                                     :: full_array(*)
-      TYPE(hfx_container_type)                           :: container
+      INTEGER(int_8), DIMENSION(:), INTENT(IN)           :: full_array
+      TYPE(hfx_container_type), INTENT(INOUT)            :: container
       INTEGER, INTENT(IN)                                :: nbits
-      INTEGER                                            :: memory_usage
-      LOGICAL                                            :: use_disk_storage
+      INTEGER, INTENT(INOUT)                             :: memory_usage
+      LOGICAL, INTENT(IN)                                :: use_disk_storage
       INTEGER(int_8), OPTIONAL                           :: max_val_memory
 
       INTEGER                                            :: end_idx, increment_counter, start_idx, &
@@ -120,34 +119,31 @@ CONTAINS
       start_idx = container%element_counter
       increment_counter = (nbits*CACHE_SIZE + 63)/64
       end_idx = start_idx + increment_counter - 1
+
       IF (end_idx < CACHE_SIZE) THEN
-         CALL ints2bits_specific(nbits, CACHE_SIZE, container%current%data(start_idx), full_array(1))
+         CALL ints2bits_specific(nbits, CACHE_SIZE, container%current%data(start_idx:), full_array)
          container%element_counter = container%element_counter + increment_counter
       ELSE
          !! We have to fill the container first with the remaining number of bits
          tmp_elements = CACHE_SIZE - start_idx + 1
          tmp_nints = (tmp_elements*64)/nbits
-         CALL ints2bits_specific(nbits, tmp_nints, container%current%data(start_idx), full_array(1))
+         CALL ints2bits_specific(nbits, tmp_nints, container%current%data(start_idx:), full_array)
          IF (use_disk_storage) THEN
             !! write to file
             WRITE (container%unit) container%current%data
-!$OMP         ATOMIC
-            memory_usage = memory_usage + 1
             container%file_counter = container%file_counter + 1
          ELSE
             !! Allocate new list entry
             ALLOCATE (container%current%next)
-!$OMP         ATOMIC
-            memory_usage = memory_usage + 1
             container%current%next%next => NULL()
             container%current => container%current%next
             IF (PRESENT(max_val_memory)) max_val_memory = max_val_memory + 1
          END IF
          !! compress remaining ints
-         CALL ints2bits_specific(nbits, CACHE_SIZE - tmp_nints, container%current%data(1), full_array(tmp_nints + 1))
+         CALL ints2bits_specific(nbits, CACHE_SIZE - tmp_nints, container%current%data, full_array(tmp_nints + 1:))
          container%element_counter = 1 + (nbits*(CACHE_SIZE - tmp_nints) + 63)/64
+         memory_usage = memory_usage + 1
       END IF
-
    END SUBROUTINE hfx_compress_cache
 
 ! **************************************************************************************************
@@ -165,23 +161,23 @@ CONTAINS
 !> \author Manuel Guidon
 ! **************************************************************************************************
    SUBROUTINE hfx_get_single_cache_element(value, nbits, cache, container, memory_usage, use_disk_storage)
-      INTEGER(int_8)                                     :: value
-      INTEGER                                            :: nbits
-      TYPE(hfx_cache_type)                               :: cache
-      TYPE(hfx_container_type)                           :: container
-      INTEGER                                            :: memory_usage
-      LOGICAL                                            :: use_disk_storage
+      INTEGER(int_8), INTENT(OUT)                        :: value
+      INTEGER, INTENT(IN)                                :: nbits
+      TYPE(hfx_cache_type), INTENT(INOUT)                :: cache
+      TYPE(hfx_container_type), INTENT(INOUT)            :: container
+      INTEGER, INTENT(INOUT)                             :: memory_usage
+      LOGICAL, INTENT(IN)                                :: use_disk_storage
 
-      IF (cache%element_counter /= CACHE_SIZE) THEN
-         value = cache%data(cache%element_counter)
+      CPASSERT(cache%element_counter > 0 .AND. cache%element_counter <= CACHE_SIZE)
+
+      value = cache%data(cache%element_counter) - shifts(nbits - 1)
+
+      IF (cache%element_counter < CACHE_SIZE) THEN
          cache%element_counter = cache%element_counter + 1
       ELSE
-         value = cache%data(CACHE_SIZE)
-         CALL hfx_decompress_cache(cache%data(1), container, nbits, memory_usage, use_disk_storage)
+         CALL hfx_decompress_cache(cache%data, container, nbits, memory_usage, use_disk_storage)
          cache%element_counter = 1
       END IF
-
-      value = value - shifts(nbits - 1)
 
    END SUBROUTINE hfx_get_single_cache_element
 
@@ -198,11 +194,11 @@ CONTAINS
 !> \author Manuel Guidon
 ! **************************************************************************************************
    SUBROUTINE hfx_decompress_cache(full_array, container, nbits, memory_usage, use_disk_storage)
-      INTEGER(int_8)                                     :: full_array(*)
-      TYPE(hfx_container_type)                           :: container
+      INTEGER(int_8), DIMENSION(:), INTENT(OUT)          :: full_array
+      TYPE(hfx_container_type), INTENT(INOUT)            :: container
       INTEGER, INTENT(IN)                                :: nbits
-      INTEGER                                            :: memory_usage
-      LOGICAL                                            :: use_disk_storage
+      INTEGER, INTENT(INOUT)                             :: memory_usage
+      LOGICAL, INTENT(IN)                                :: use_disk_storage
 
       INTEGER                                            :: end_idx, increment_counter, start_idx, &
                                                             stat, tmp_elements, tmp_nints
@@ -211,28 +207,30 @@ CONTAINS
       increment_counter = (nbits*CACHE_SIZE + 63)/64
       end_idx = start_idx + increment_counter - 1
       IF (end_idx < CACHE_SIZE) THEN
-         CALL bits2ints_specific(nbits, CACHE_SIZE, container%current%data(start_idx), full_array(1))
+         CALL bits2ints_specific(nbits, CACHE_SIZE, container%current%data(start_idx:), full_array)
          container%element_counter = container%element_counter + increment_counter
       ELSE
          !! We have to fill the container first with the remaining number of bits
          tmp_elements = CACHE_SIZE - start_idx + 1
          tmp_nints = (tmp_elements*64)/nbits
-         CALL bits2ints_specific(nbits, tmp_nints, container%current%data(start_idx), full_array(1))
+         CALL bits2ints_specific(nbits, tmp_nints, container%current%data(start_idx:), full_array)
+
          IF (use_disk_storage) THEN
             !! it could happen, that we are at the end of a file and we try to read
             !! This happens in case a container has fully been filled in the compression step
             !! but no other was needed for the current bit size
             !! Therefore we can safely igonore an eof error
             READ (container%unit, IOSTAT=stat) container%current%data
-            memory_usage = memory_usage + 1
             container%file_counter = container%file_counter + 1
          ELSE
             container%current => container%current%next
-            memory_usage = memory_usage + 1
          END IF
+
          !! decompress remaining ints
-         CALL bits2ints_specific(nbits, CACHE_SIZE - tmp_nints, container%current%data(1), full_array(tmp_nints + 1))
+         CALL bits2ints_specific(nbits, CACHE_SIZE - tmp_nints, container%current%data, full_array(tmp_nints + 1:))
          container%element_counter = 1 + (nbits*(CACHE_SIZE - tmp_nints) + 63)/64
+
+         memory_usage = memory_usage + 1
       END IF
    END SUBROUTINE hfx_decompress_cache
 
@@ -248,10 +246,10 @@ CONTAINS
 !> \author Manuel Guidon
 ! **************************************************************************************************
    SUBROUTINE hfx_reset_cache_and_container(cache, container, memory_usage, do_disk_storage)
-      TYPE(hfx_cache_type)                               :: cache
-      TYPE(hfx_container_type)                           :: container
-      INTEGER                                            :: memory_usage
-      LOGICAL                                            :: do_disk_storage
+      TYPE(hfx_cache_type), INTENT(INOUT)                :: cache
+      TYPE(hfx_container_type), INTENT(INOUT)            :: container
+      INTEGER, INTENT(OUT)                               :: memory_usage
+      LOGICAL, INTENT(IN)                                :: do_disk_storage
 
       cache%element_counter = 1
       container%current => container%first
@@ -279,13 +277,13 @@ CONTAINS
 !> \author Manuel Guidon
 ! **************************************************************************************************
    SUBROUTINE hfx_decompress_first_cache(nbits, cache, container, memory_usage, use_disk_storage)
-      INTEGER                                            :: nbits
-      TYPE(hfx_cache_type)                               :: cache
-      TYPE(hfx_container_type)                           :: container
-      INTEGER                                            :: memory_usage
-      LOGICAL                                            :: use_disk_storage
+      INTEGER, INTENT(IN)                                :: nbits
+      TYPE(hfx_cache_type), INTENT(INOUT)                :: cache
+      TYPE(hfx_container_type), INTENT(INOUT)            :: container
+      INTEGER, INTENT(INOUT)                             :: memory_usage
+      LOGICAL, INTENT(IN)                                :: use_disk_storage
 
-      CALL hfx_decompress_cache(cache%data(1), container, nbits, memory_usage, use_disk_storage)
+      CALL hfx_decompress_cache(cache%data, container, nbits, memory_usage, use_disk_storage)
       cache%element_counter = 1
    END SUBROUTINE hfx_decompress_first_cache
 
@@ -302,21 +300,19 @@ CONTAINS
 !> \author Manuel Guidon
 ! **************************************************************************************************
    SUBROUTINE hfx_flush_last_cache(nbits, cache, container, memory_usage, use_disk_storage)
-      INTEGER                                            :: nbits
-      TYPE(hfx_cache_type)                               :: cache
-      TYPE(hfx_container_type)                           :: container
-      INTEGER                                            :: memory_usage
-      LOGICAL                                            :: use_disk_storage
+      INTEGER, INTENT(IN)                                :: nbits
+      TYPE(hfx_cache_type), INTENT(INOUT)                :: cache
+      TYPE(hfx_container_type), INTENT(INOUT)            :: container
+      INTEGER, INTENT(INOUT)                             :: memory_usage
+      LOGICAL, INTENT(IN)                                :: use_disk_storage
 
-      CALL hfx_compress_cache(cache%data(1), container, nbits, memory_usage, use_disk_storage)
+      CALL hfx_compress_cache(cache%data, container, nbits, memory_usage, use_disk_storage)
 
       !!If we store to file, we have to make sure, that the last container is also written to disk
-      IF (use_disk_storage) THEN
-         IF (container%element_counter /= 1) THEN
-            WRITE (container%unit) container%current%data
-            memory_usage = memory_usage + 1
-            container%file_counter = container%file_counter + 1
-         END IF
+      IF (use_disk_storage .AND. container%element_counter /= 1) THEN
+         WRITE (container%unit) container%current%data
+         memory_usage = memory_usage + 1
+         container%file_counter = container%file_counter + 1
       END IF
    END SUBROUTINE hfx_flush_last_cache
 
@@ -338,13 +334,13 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE hfx_add_mult_cache_elements(values, nints, nbits, cache, container, eps_schwarz, pmax_entry, memory_usage, &
                                           use_disk_storage)
-      REAL(dp)                                           :: values(*)
+      REAL(dp), DIMENSION(:), INTENT(INOUT)              :: values
       INTEGER, INTENT(IN)                                :: nints, nbits
-      TYPE(hfx_cache_type)                               :: cache
-      TYPE(hfx_container_type)                           :: container
+      TYPE(hfx_cache_type), INTENT(INOUT)                :: cache
+      TYPE(hfx_container_type), INTENT(INOUT)            :: container
       REAL(dp), INTENT(IN)                               :: eps_schwarz, pmax_entry
-      INTEGER                                            :: memory_usage
-      LOGICAL                                            :: use_disk_storage
+      INTEGER, INTENT(INOUT)                             :: memory_usage
+      LOGICAL, INTENT(IN)                                :: use_disk_storage
 
       INTEGER                                            :: end_idx, i, start_idx, tmp_elements
       INTEGER(int_8)                                     :: shift, tmp
@@ -383,7 +379,7 @@ CONTAINS
                cache%data(i + start_idx - 1) = shift
             END IF
          END DO
-         CALL hfx_compress_cache(cache%data(1), container, nbits, memory_usage, use_disk_storage)
+         CALL hfx_compress_cache(cache%data, container, nbits, memory_usage, use_disk_storage)
          DO i = tmp_elements + 1, nints
             values(i) = values(i)*pmax_entry
             IF (ABS(values(i)) > eps_schwarz) THEN
@@ -418,13 +414,13 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE hfx_get_mult_cache_elements(values, nints, nbits, cache, container, eps_schwarz, pmax_entry, memory_usage, &
                                           use_disk_storage)
-      REAL(dp)                                           :: values(*)
+      REAL(dp), DIMENSION(:), INTENT(INOUT)              :: values
       INTEGER, INTENT(IN)                                :: nints, nbits
-      TYPE(hfx_cache_type)                               :: cache
-      TYPE(hfx_container_type)                           :: container
+      TYPE(hfx_cache_type), INTENT(INOUT)                :: cache
+      TYPE(hfx_container_type), INTENT(INOUT)            :: container
       REAL(dp), INTENT(IN)                               :: eps_schwarz, pmax_entry
-      INTEGER                                            :: memory_usage
-      LOGICAL                                            :: use_disk_storage
+      INTEGER, INTENT(INOUT)                             :: memory_usage
+      LOGICAL, INTENT(IN)                                :: use_disk_storage
 
       INTEGER                                            :: end_idx, i, start_idx, tmp_elements
       INTEGER(int_8)                                     :: shift
@@ -447,7 +443,7 @@ CONTAINS
          DO i = 1, tmp_elements
             values(i) = factor*REAL(cache%data(i + start_idx - 1) - shift, dp)
          END DO
-         CALL hfx_decompress_cache(cache%data(1), container, nbits, memory_usage, use_disk_storage)
+         CALL hfx_decompress_cache(cache%data, container, nbits, memory_usage, use_disk_storage)
          DO i = tmp_elements + 1, nints
             values(i) = factor*REAL(cache%data(i - tmp_elements) - shift, dp)
          END DO
@@ -456,4 +452,3 @@ CONTAINS
    END SUBROUTINE hfx_get_mult_cache_elements
 
 END MODULE hfx_compression_methods
-

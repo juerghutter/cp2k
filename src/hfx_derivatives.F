@@ -1262,7 +1262,7 @@ CONTAINS
                            neris_incore = neris_incore + INT(nints, int_8)
                            DO WHILE (buffer_left > 0)
                               buffer_size = MIN(buffer_left, cache_size)
-                              CALL hfx_get_mult_cache_elements(primitive_forces(buffer_start), &
+                              CALL hfx_get_mult_cache_elements(primitive_forces(buffer_start:), &
                                                                buffer_size, nbits, &
                                                                integral_caches(nbits), &
                                                                integral_containers(nbits), &
@@ -1369,7 +1369,7 @@ CONTAINS
 
                               DO WHILE (buffer_left > 0)
                                  buffer_size = MIN(buffer_left, CACHE_SIZE)
-                                 CALL hfx_add_mult_cache_elements(primitive_forces(buffer_start), &
+                                 CALL hfx_add_mult_cache_elements(primitive_forces(buffer_start:), &
                                                                   buffer_size, nbits, &
                                                                   integral_caches(nbits), &
                                                                   integral_containers(nbits), &

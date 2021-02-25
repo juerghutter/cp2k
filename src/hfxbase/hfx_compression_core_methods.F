@@ -53871,8 +53871,8 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE ints2bits_specific(Nbits, Ndata, packed_data, full_data)
       INTEGER, INTENT(IN)                                :: Nbits, Ndata
-      INTEGER(KIND=int_8), INTENT(OUT)                   :: packed_data(*)
-      INTEGER(KIND=int_8), INTENT(IN)                    :: full_data(*)
+      INTEGER(KIND=int_8), DIMENSION(:), INTENT(OUT)     :: packed_data
+      INTEGER(KIND=int_8), DIMENSION(:), INTENT(IN)      :: full_data
 
       SELECT CASE (Nbits)
       CASE (1)
@@ -54013,8 +54013,8 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE bits2ints_specific(Nbits, Ndata, packed_data, full_data)
       INTEGER, INTENT(IN)                                :: Nbits, Ndata
-      INTEGER(KIND=int_8), INTENT(IN)                    :: packed_data(*)
-      INTEGER(KIND=int_8), INTENT(OUT)                   :: full_data(*)
+      INTEGER(KIND=int_8), DIMENSION(:), INTENT(IN)      :: packed_data
+      INTEGER(KIND=int_8), DIMENSION(:), INTENT(OUT)     :: full_data
 
       SELECT CASE (Nbits)
       CASE (1)
