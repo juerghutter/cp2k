@@ -153,19 +153,18 @@ CONTAINS
 
       CHARACTER(len=default_string_length)               :: eps_scaling_str, eps_schwarz_min_str
       INTEGER :: act_atomic_block_offset, act_set_offset, atomic_offset_ac, atomic_offset_ad, &
-         atomic_offset_bc, atomic_offset_bd, bin, bits_max_val, buffer_left, buffer_size, &
-         buffer_start, cache_size, handle, handle_bin, handle_dist_ks, handle_getP, handle_load, &
-         handle_main, i, i_list_ij, i_list_kl, i_set_list_ij, i_set_list_ij_start, &
-         i_set_list_ij_stop, i_set_list_kl, i_set_list_kl_start, i_set_list_kl_stop, i_thread, &
-         iatom, iatom_block, iatom_end, iatom_start, ikind, img, iset, iw, j, jatom, jatom_block, &
-         jatom_end, jatom_start, jkind, jset, katom, katom_block, katom_end, katom_start
-      INTEGER :: kind_kind_idx, kkind, kp_idx_q, kp_idx_t, kset, l_max, latom, latom_block, &
-         latom_end, latom_start, lkind, lset, ma, max_pgf, max_set, mb, my_bin_id, my_bin_size, &
-         my_task_counter, my_thread_id, n_threads, natom, nbidx, nbits, ncoa, ncob, ncos_max, &
-         nints, nkimages, nkind, nneighbors, nseta, nsetb, nsgf_max, pa, sgfa, &
-         shm_number_of_p_entries, shm_task_counter, shm_total_bins, sphi_a_u1, sphi_a_u2, &
-         sphi_a_u3, sphi_b_u1, sphi_b_u2, sphi_b_u3, sphi_c_u1, sphi_c_u2, sphi_c_u3, sphi_d_u1, &
-         sphi_d_u2, sphi_d_u3, swap_id, tmp_i4, unit_id
+         atomic_offset_bc, atomic_offset_bd, bin, buffer_left, buffer_size, buffer_start, &
+         cache_size, handle, handle_bin, handle_dist_ks, handle_getP, handle_load, i, i_list_ij, &
+         i_list_kl, i_set_list_ij, i_set_list_ij_start, i_set_list_ij_stop, i_set_list_kl, &
+         i_set_list_kl_start, i_set_list_kl_stop, i_thread, iatom, iatom_block, iatom_end, &
+         iatom_start, ikind, img, iset, iw, j, jatom, jatom_block, jatom_end, jatom_start, jkind, &
+         jset, katom, katom_block, katom_end, katom_start, kind_kind_idx, kkind, kp_idx_q
+      INTEGER :: kp_idx_t, kset, l_max, latom, latom_block, latom_end, latom_start, lkind, lset, &
+         ma, max_pgf, max_set, mb, my_bin_id, my_bin_size, my_task_counter, my_thread_id, &
+         n_threads, natom, nbidx, nbits, ncoa, ncob, ncos_max, nints, nkimages, nkind, nneighbors, &
+         nseta, nsetb, nsgf_max, pa, sgfa, shm_number_of_p_entries, shm_task_counter, &
+         shm_total_bins, sphi_a_u1, sphi_a_u2, sphi_a_u3, sphi_b_u1, sphi_b_u2, sphi_b_u3, &
+         sphi_c_u1, sphi_c_u2, sphi_c_u3, sphi_d_u1, sphi_d_u2, sphi_d_u3, swap_id, tmp_i4, unit_id
       INTEGER(int_8) :: atom_block, counter, estimate_to_store_int, max_val_memory, &
          mb_size_buffers, mb_size_p, mem_compression_counter, mem_compression_counter_disk, &
          mem_eris, mem_eris_disk, mem_max_val, memsize_after, memsize_before, my_istart, &
@@ -764,7 +763,7 @@ CONTAINS
 !$OMP                                  coeffs_kind_max0,&
 !$OMP                                  subtr_size_mb) &
 !$OMP PRIVATE(i_thread,actual_x_data,&
-!$OMP         general_parameter,load_balance_parameter,memory_parameter,cache_size,bits_max_val,&
+!$OMP         general_parameter,load_balance_parameter,memory_parameter,cache_size,&
 !$OMP         neris_coulomb,max_val_memory,ikind,&
 !$OMP         nseta,npgfa,la_max,nsgfa,primitive_integrals,pbd_buf,pbc_buf,pad_buf,pac_buf,kbd_buf,kbc_buf,&
 !$OMP         kad_buf,kac_buf,ee_work,ee_work2,ee_buffer1,ee_buffer2,ee_primitives_tmp,&
@@ -773,7 +772,7 @@ CONTAINS
 !$OMP         maxval_container_disk,maxval_cache_disk,integral_containers_disk,integral_caches_disk,&
 !$OMP         eps_storage,buffer_overflow,private_lib,handle_getp,&
 !$OMP         handle_load,my_bin_size,maxval_container,integral_containers,maxval_cache,&
-!$OMP         integral_caches,tmp_task_list,tmp_task_list_cost,tmp_index,handle_main,iset,jset,set_list_ij,&
+!$OMP         integral_caches,tmp_task_list,tmp_task_list_cost,tmp_index,iset,jset,set_list_ij,&
 !$OMP         set_list_kl,iatom,iatom_start,iatom_end,jatom,jatom_start,jatom_end,nblocks,distribution_energy,&
 !$OMP         my_thread_id,my_bin_id,handle_bin,bintime_start,my_istart,my_quartet_counter,latom_block,tmp_block,&
 !$OMP         katom_block,katom_start,katom_end,latom_start,latom_end,pmax_blocks,list_ij,list_kl,i_set_list_ij_start,&
@@ -786,7 +785,7 @@ CONTAINS
 !$OMP         mem_compression_counter_disk,max_val1,sphi_a_ext_set,sphi_b_ext_set,kset,lset,max_val2_set,max_val2,&
 !$OMP         sphi_c_ext_set,sphi_d_ext_set,pmax_entry,log10_pmax,nints,estimate_to_store_int,&
 !$OMP         spherical_estimate,nbits,buffer_left,buffer_start,buffer_size,max_contraction_val,tmp_r_1,tmp_r_2,&
-!$OMP         tmp_screen_pgf1,tmp_screen_pgf2,cartesian_estimate,bintime_stop,iw,j,tmp_i4,&
+!$OMP         tmp_screen_pgf1,tmp_screen_pgf2,cartesian_estimate,bintime_stop,iw,i,j,tmp_i4,&
 !$OMP         bin,eps_scaling_str,eps_schwarz_min_str,nbidx,kp_idx_q,kp_idx_t,iatom_block,jatom_block) &
 !$OMP REDUCTION(+: shm_neris_total,shm_neris_onthefly,shm_neris_incore,shm_neris_disk,&
 !$OMP              shm_nprim_ints,shm_stor_counter_integrals,shm_stor_count_int_disk,&
@@ -803,7 +802,6 @@ CONTAINS
       memory_parameter => actual_x_data%memory_parameter
 
       cache_size = memory_parameter%cache_size
-      bits_max_val = memory_parameter%bits_max_val
 
       !! initialize some counters
       max_val_memory = 1_int_8
@@ -848,13 +846,6 @@ CONTAINS
 
       use_disk_storage = .FALSE.
       counter = 0_int_8
-      IF (do_disk_storage) THEN
-         maxval_container_disk => actual_x_data%store_ints%maxval_container_disk
-         maxval_cache_disk => actual_x_data%store_ints%maxval_cache_disk
-
-         integral_containers_disk => actual_x_data%store_ints%integral_containers_disk
-         integral_caches_disk => actual_x_data%store_ints%integral_caches_disk
-      END IF
 
       IF (my_geo_change) THEN
          memory_parameter%ram_counter = HUGE(memory_parameter%ram_counter)
@@ -888,42 +879,60 @@ CONTAINS
             CALL alloc_containers(actual_x_data%store_ints, my_bin_size)
 
             DO bin = 1, my_bin_size
-               maxval_container => actual_x_data%store_ints%maxval_container(bin)
-               integral_containers => actual_x_data%store_ints%integral_containers(:, bin)
-               CALL hfx_init_container(maxval_container, memory_parameter%actual_memory_usage, .FALSE.)
+               CALL hfx_init_container(actual_x_data%store_ints%maxval_container(bin), &
+                                       memory_parameter%actual_memory_usage, .FALSE.)
                DO i = 1, 64
-                  CALL hfx_init_container(integral_containers(i), memory_parameter%actual_memory_usage, .FALSE.)
+                  CALL hfx_init_container(actual_x_data%store_ints%integral_containers(i, bin), &
+                                          memory_parameter%actual_memory_usage, .FALSE.)
                END DO
             END DO
          ELSE
             !! Decompress the first cache for maxvals and integrals
             DO bin = 1, my_bin_size
-               maxval_cache => actual_x_data%store_ints%maxval_cache(bin)
-               maxval_container => actual_x_data%store_ints%maxval_container(bin)
-               integral_caches => actual_x_data%store_ints%integral_caches(:, bin)
-               integral_containers => actual_x_data%store_ints%integral_containers(:, bin)
-               CALL hfx_decompress_first_cache(bits_max_val, maxval_cache, maxval_container, &
+               CALL hfx_decompress_first_cache(memory_parameter%bits_max_val, &
+                                               actual_x_data%store_ints%maxval_cache(bin), &
+                                               actual_x_data%store_ints%maxval_container(bin), &
                                                memory_parameter%actual_memory_usage, .FALSE.)
                DO i = 1, 64
-                  CALL hfx_decompress_first_cache(i, integral_caches(i), integral_containers(i), &
+                  CALL hfx_decompress_first_cache(i, &
+                                                  actual_x_data%store_ints%integral_caches(i, bin), &
+                                                  actual_x_data%store_ints%integral_containers(i, bin), &
                                                   memory_parameter%actual_memory_usage, .FALSE.)
                END DO
             END DO
          END IF
+
+         IF (my_bin_size > 0) THEN
+            maxval_container => actual_x_data%store_ints%maxval_container(1)
+            maxval_cache => actual_x_data%store_ints%maxval_cache(1)
+
+            integral_containers => actual_x_data%store_ints%integral_containers(:, 1)
+            integral_caches => actual_x_data%store_ints%integral_caches(:, 1)
+         END IF
+         ! Since the load balancing may assign caches previously initialized/decompressed in this thread
+         ! to other threads, we need a barrier here to ensure all threads are done. While this is only needed
+         ! for the dynamic load balancing case, we're doing it anyway to avoid potential deadlocks.
+!$OMP    BARRIER
       END IF
 
       !! Since the I/O routines are no thread-safe, i.e. the procedure to get the unit number, put a lock here
       !! If we do disk storage, we have to initialize the containers/caches
       IF (do_disk_storage) THEN
+         maxval_container_disk => actual_x_data%store_ints%maxval_container_disk
+         maxval_cache_disk => actual_x_data%store_ints%maxval_cache_disk
+
+         integral_containers_disk => actual_x_data%store_ints%integral_containers_disk
+         integral_caches_disk => actual_x_data%store_ints%integral_caches_disk
+
 !$OMP CRITICAL(hfxenergy_io_critical)
          !! IF new md step -> reinitialize containers
          IF (my_geo_change) THEN
-            CALL hfx_init_container(maxval_container_disk, memory_parameter%actual_memory_usage_disk, do_disk_storage)
+            CALL hfx_init_container(maxval_container_disk, memory_parameter%actual_memory_usage_disk, .TRUE.)
             DO i = 1, 64
-               CALL hfx_init_container(integral_containers_disk(i), memory_parameter%actual_memory_usage_disk, do_disk_storage)
+               CALL hfx_init_container(integral_containers_disk(i), memory_parameter%actual_memory_usage_disk, .TRUE.)
             END DO
          ELSE  !! Decompress the first cache for maxvals and integrals
-            CALL hfx_decompress_first_cache(bits_max_val, maxval_cache_disk, maxval_container_disk, &
+            CALL hfx_decompress_first_cache(memory_parameter%bits_max_val, maxval_cache_disk, maxval_container_disk, &
                                             memory_parameter%actual_memory_usage_disk, .TRUE.)
             DO i = 1, 64
                CALL hfx_decompress_first_cache(i, integral_caches_disk(i), integral_containers_disk(i), &
@@ -932,19 +941,6 @@ CONTAINS
          END IF
 !$OMP END CRITICAL(hfxenergy_io_critical)
       END IF
-
-!$OMP BARRIER
-      IF (my_bin_size > 0) THEN
-         maxval_container => actual_x_data%store_ints%maxval_container(1)
-         maxval_cache => actual_x_data%store_ints%maxval_cache(1)
-
-         integral_containers => actual_x_data%store_ints%integral_containers(:, 1)
-         integral_caches => actual_x_data%store_ints%integral_caches(:, 1)
-      END IF
-
-!$OMP BARRIER
-      CALL timeset(routineN//"_main", handle_main)
-!$OMP BARRIER
 
       ALLOCATE (set_list_ij((max_set*load_balance_parameter%block_size)**2))
       ALLOCATE (set_list_kl((max_set*load_balance_parameter%block_size)**2))
@@ -1341,6 +1337,7 @@ CONTAINS
                         max_val2_set = (screen_coeffs_set(lset, kset, lkind, kkind)%x(1)*rcd2 + &
                                         screen_coeffs_set(lset, kset, lkind, kkind)%x(2))
                         max_val2 = max_val1 + max_val2_set
+
                         IF (max_val2 + pmax_atom < log10_eps_schwarz) CYCLE
 
                         !! get max_vals if we screen on initial density
@@ -1454,12 +1451,12 @@ CONTAINS
                                     CALL hfx_add_single_cache_element( &
                                        estimate_to_store_int, 6, &
                                        maxval_cache, maxval_container, memory_parameter%actual_memory_usage, &
-                                       use_disk_storage, max_val_memory)
+                                       .FALSE., max_val_memory)
                                  ELSE
                                     CALL hfx_add_single_cache_element( &
                                        estimate_to_store_int, 6, &
                                        maxval_cache_disk, maxval_container_disk, memory_parameter%actual_memory_usage_disk, &
-                                       use_disk_storage)
+                                       .TRUE.)
                                  END IF
                               END IF
 
@@ -1507,21 +1504,21 @@ CONTAINS
                                  DO WHILE (buffer_left > 0)
                                     buffer_size = MIN(buffer_left, CACHE_SIZE)
                                     IF (.NOT. use_disk_storage) THEN
-                                       CALL hfx_add_mult_cache_elements(primitive_integrals(buffer_start), &
+                                       CALL hfx_add_mult_cache_elements(primitive_integrals(buffer_start:), &
                                                                         buffer_size, nbits, &
                                                                         integral_caches(nbits), &
                                                                         integral_containers(nbits), &
                                                                         eps_storage, pmax_entry, &
                                                                         memory_parameter%actual_memory_usage, &
-                                                                        use_disk_storage)
+                                                                        .FALSE.)
                                     ELSE
-                                       CALL hfx_add_mult_cache_elements(primitive_integrals(buffer_start), &
+                                       CALL hfx_add_mult_cache_elements(primitive_integrals(buffer_start:), &
                                                                         buffer_size, nbits, &
                                                                         integral_caches_disk(nbits), &
                                                                         integral_containers_disk(nbits), &
                                                                         eps_storage, pmax_entry, &
                                                                         memory_parameter%actual_memory_usage_disk, &
-                                                                        use_disk_storage)
+                                                                        .TRUE.)
                                     END IF
                                     buffer_left = buffer_left - buffer_size
                                     buffer_start = buffer_start + buffer_size
@@ -1563,7 +1560,7 @@ CONTAINS
                               DO WHILE (buffer_left > 0)
                                  buffer_size = MIN(buffer_left, cache_size)
                                  IF (.NOT. use_disk_storage) THEN
-                                    CALL hfx_get_mult_cache_elements(primitive_integrals(buffer_start), &
+                                    CALL hfx_get_mult_cache_elements(primitive_integrals(buffer_start:), &
                                                                      buffer_size, nbits, &
                                                                      integral_caches(nbits), &
                                                                      integral_containers(nbits), &
@@ -1571,7 +1568,7 @@ CONTAINS
                                                                      memory_parameter%actual_memory_usage, &
                                                                      use_disk_storage)
                                  ELSE
-                                    CALL hfx_get_mult_cache_elements(primitive_integrals(buffer_start), &
+                                    CALL hfx_get_mult_cache_elements(primitive_integrals(buffer_start:), &
                                                                      buffer_size, nbits, &
                                                                      integral_caches_disk(nbits), &
                                                                      integral_containers_disk(nbits), &
@@ -1632,12 +1629,14 @@ CONTAINS
                         END DO ! kp_idx_t
                      END DO ! i_set_list_kl
                   END DO ! i_set_list_ij
-                  IF (do_disk_storage) THEN
+
+                  IF (do_disk_storage) &
                      buffer_overflow = .TRUE.
-                  END IF
+
                END DO !i_list_ij
             END DO !i_list_kl
          END DO !atom_block
+
          bintime_stop = m_walltime()
          IF (my_geo_change) THEN
             distribution_energy%time_first_scf = bintime_stop - bintime_start
@@ -1682,8 +1681,6 @@ CONTAINS
       ! Calculate how much memory has already been used (needed for in-core forces)
       shm_mem_compression_counter = memory_parameter%actual_memory_usage*memory_parameter%cache_size
 
-      CALL timestop(handle_main)
-
       ! cache maintenance if not doing everythong on the fly
       IF (.NOT. memory_parameter%do_all_on_the_fly) THEN
 !$OMP    BARRIER
@@ -1704,7 +1701,7 @@ CONTAINS
 
             ! flush caches if the geometry changed
             IF (my_geo_change) THEN
-               CALL hfx_flush_last_cache(bits_max_val, maxval_cache, maxval_container, &
+               CALL hfx_flush_last_cache(memory_parameter%bits_max_val, maxval_cache, maxval_container, &
                                          memory_parameter%actual_memory_usage, .FALSE.)
                DO i = 1, 64
                   CALL hfx_flush_last_cache(i, integral_caches(i), integral_containers(i), &
@@ -1724,10 +1721,16 @@ CONTAINS
 
       !! Since the I/O routines are not thread-safe, i.e. the procedure to get the unit number, put a lock here
       IF (do_disk_storage) THEN
+         maxval_container_disk => actual_x_data%store_ints%maxval_container_disk
+         maxval_cache_disk => actual_x_data%store_ints%maxval_cache_disk
+
+         integral_containers_disk => actual_x_data%store_ints%integral_containers_disk
+         integral_caches_disk => actual_x_data%store_ints%integral_caches_disk
+
 !$OMP CRITICAL(hfxenergy_out_critical)
          !! flush caches if the geometry changed
          IF (my_geo_change) THEN
-            CALL hfx_flush_last_cache(bits_max_val, maxval_cache_disk, maxval_container_disk, &
+            CALL hfx_flush_last_cache(memory_parameter%bits_max_val, maxval_cache_disk, maxval_container_disk, &
                                       memory_parameter%actual_memory_usage_disk, .TRUE.)
             DO i = 1, 64
                CALL hfx_flush_last_cache(i, integral_caches_disk(i), integral_containers_disk(i), &

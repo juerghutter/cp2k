@@ -1729,7 +1729,7 @@ CONTAINS
          ALLOCATE (blk_data(nints))
          DO WHILE (buffer_left > 0)
             buffer_size = MIN(buffer_left, cache_size)
-            CALL hfx_get_mult_cache_elements(blk_data(buffer_start), &
+            CALL hfx_get_mult_cache_elements(blk_data(buffer_start:), &
                                              buffer_size, nbits, &
                                              integral_caches(nbits), &
                                              integral_containers(nbits), &
