@@ -1439,10 +1439,7 @@ CONTAINS
                               shm_nprim_ints = shm_nprim_ints + neris_coulomb
 
                               !! Compress the array for storage
-                              spherical_estimate = TINY(spherical_estimate)
-                              DO i = 1, nints
-                                 spherical_estimate = MAX(spherical_estimate, ABS(primitive_integrals(i)))
-                              END DO
+                              spherical_estimate = MAX(TINY(spherical_estimate), MAXVAL(ABS(primitive_integrals(1:nints))))
 
                               estimate_to_store_int = EXPONENT(spherical_estimate)
                               estimate_to_store_int = MAX(estimate_to_store_int, -15_int_8)

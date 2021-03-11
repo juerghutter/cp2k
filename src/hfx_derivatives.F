@@ -212,7 +212,7 @@ CONTAINS
          DIMENSION(:, :, :, :, :, :), POINTER            :: radii_pgf, screen_coeffs_pgf
       TYPE(hfx_screening_type)                           :: screening_parameter
       TYPE(hfx_task_list_type), DIMENSION(:), POINTER    :: shm_task_list, tmp_task_list
-      TYPE(hfx_type), POINTER                            :: actual_x_data
+      TYPE(hfx_type), POINTER                            :: actual_x_data, shm_master_x_data
       TYPE(pair_list_type)                               :: list_ij, list_kl
       TYPE(pair_set_list_type), ALLOCATABLE, &
          DIMENSION(:)                                    :: set_list_ij, set_list_kl
@@ -235,31 +235,35 @@ CONTAINS
                       particle_set=particle_set, &
                       atomic_kind_set=atomic_kind_set, &
                       cell=cell, &
-                      dft_control=dft_control)
+                      dft_control=dft_control, &
+                      force=force, &
+                      virial=virial)
 
       nspins = dft_control%nspins
       nkimages = dft_control%nimages
       CPASSERT(nkimages == 1)
 
       !! One atom systems have no contribution to forces
-      IF (SIZE(particle_set, 1) == 1) THEN
-         IF (.NOT. use_virial) RETURN
-      END IF
+      IF (SIZE(particle_set, 1) == 1 .AND. .NOT. use_virial) &
+         RETURN
 
       CALL timeset(routineN, handle)
+
+      shm_master_x_data => qs_env%x_data(irep, 1)
+
       !! Calculate l_max used in fgamma , because init_md_ftable is definitely not thread safe
       nkind = SIZE(atomic_kind_set, 1)
       l_max = 0
       DO ikind = 1, nkind
-         l_max = MAX(l_max, MAXVAL(qs_env%x_data(1, 1)%basis_parameter(ikind)%lmax))
+         l_max = MAX(l_max, MAXVAL(shm_master_x_data%basis_parameter(ikind)%lmax))
       ENDDO
       l_max = 4*l_max + 1
       CALL init_md_ftable(l_max)
 
-      IF (qs_env%x_data(1, 1)%potential_parameter%potential_type == do_potential_truncated .OR. &
-          qs_env%x_data(1, 1)%potential_parameter%potential_type == do_potential_mix_cl_trunc) THEN
+      IF (shm_master_x_data%potential_parameter%potential_type == do_potential_truncated .OR. &
+          shm_master_x_data%potential_parameter%potential_type == do_potential_mix_cl_trunc) THEN
          IF (l_max > init_t_c_g0_lmax) THEN
-            CALL open_file(unit_number=unit_id, file_name=qs_env%x_data(1, 1)%potential_parameter%filename)
+            CALL open_file(unit_number=unit_id, file_name=shm_master_x_data%potential_parameter%filename)
             CALL init(l_max, unit_id, para_env%mepos, para_env%group)
             CALL close_file(unit_id)
             init_t_c_g0_lmax = l_max
@@ -277,7 +281,7 @@ CONTAINS
       shm_stor_count_max_val = 0
 
       !! get force array
-      CALL get_qs_env(qs_env=qs_env, force=force, virial=virial)
+      CALL get_qs_env(qs_env=qs_env)
 
       my_adiabatic_rescale_factor = 1.0_dp
       IF (PRESENT(adiabatic_rescale_factor)) THEN
@@ -295,12 +299,12 @@ CONTAINS
       n_processes = ncpu*n_threads
 
       !! Set pointer for is_assoc helper
-      shm_is_assoc_atomic_block => qs_env%x_data(irep, 1)%is_assoc_atomic_block
-      shm_number_of_p_entries = qs_env%x_data(irep, 1)%number_of_p_entries
-      shm_atomic_block_offset => qs_env%x_data(irep, 1)%atomic_block_offset
-      shm_set_offset => qs_env%x_data(irep, 1)%set_offset
-      shm_block_offset => qs_env%x_data(irep, 1)%block_offset
-      screen_pmat_forces = qs_env%x_data(irep, 1)%screening_parameter%do_p_screening_forces
+      shm_is_assoc_atomic_block => shm_master_x_data%is_assoc_atomic_block
+      shm_number_of_p_entries = shm_master_x_data%number_of_p_entries
+      shm_atomic_block_offset => shm_master_x_data%atomic_block_offset
+      shm_set_offset => shm_master_x_data%set_offset
+      shm_block_offset => shm_master_x_data%block_offset
+      screen_pmat_forces = shm_master_x_data%screening_parameter%do_p_screening_forces
       NULLIFY (shm_pmax_atom)
       NULLIFY (shm_initial_p)
 
@@ -312,7 +316,7 @@ CONTAINS
       CALL timeset(routineN//"_getP", handle_getP)
       CALL get_full_density(para_env, full_density_alpha(:, 1), rho_ao(1, 1)%matrix, shm_number_of_p_entries, &
                             shm_block_offset, &
-                            kind_of, qs_env%x_data(irep, 1)%basis_parameter, get_max_vals_spin=.FALSE., &
+                            kind_of, shm_master_x_data%basis_parameter, get_max_vals_spin=.FALSE., &
                             antisymmetric=is_anti_symmetric)
       ! for now only closed shell case
       IF (with_resp_density) THEN
@@ -320,7 +324,7 @@ CONTAINS
          ALLOCATE (full_density_resp(shm_block_offset(ncpu + 1)))
          CALL get_full_density(para_env, full_density_resp, rho_ao_resp(1)%matrix, shm_number_of_p_entries, &
                                shm_block_offset, &
-                               kind_of, qs_env%x_data(irep, 1)%basis_parameter, get_max_vals_spin=.FALSE., &
+                               kind_of, shm_master_x_data%basis_parameter, get_max_vals_spin=.FALSE., &
                                antisymmetric=is_anti_symmetric)
       END IF
 
@@ -328,7 +332,7 @@ CONTAINS
          ALLOCATE (full_density_beta(shm_block_offset(ncpu + 1), 1))
          CALL get_full_density(para_env, full_density_beta(:, 1), rho_ao(2, 1)%matrix, shm_number_of_p_entries, &
                                shm_block_offset, &
-                               kind_of, qs_env%x_data(irep, 1)%basis_parameter, get_max_vals_spin=.FALSE., &
+                               kind_of, shm_master_x_data%basis_parameter, get_max_vals_spin=.FALSE., &
                                antisymmetric=is_anti_symmetric)
          ! With resp density
          IF (with_resp_density) THEN
@@ -336,7 +340,7 @@ CONTAINS
             ALLOCATE (full_density_resp_beta(shm_block_offset(ncpu + 1)))
             CALL get_full_density(para_env, full_density_resp_beta, rho_ao_resp(2)%matrix, shm_number_of_p_entries, &
                                   shm_block_offset, &
-                                  kind_of, qs_env%x_data(irep, 1)%basis_parameter, get_max_vals_spin=.FALSE., &
+                                  kind_of, shm_master_x_data%basis_parameter, get_max_vals_spin=.FALSE., &
                                   antisymmetric=is_anti_symmetric)
          END IF
 
@@ -346,22 +350,22 @@ CONTAINS
       !! Calculate max entries for screening on actual density. If screen_p_mat_forces = FALSE, the
       !! matrix is initialized to 1.0
       IF (screen_pmat_forces) THEN
-         shm_initial_p => qs_env%x_data(irep, 1)%initial_p
-         shm_pmax_atom => qs_env%x_data(irep, 1)%pmax_atom
+         shm_initial_p => shm_master_x_data%initial_p
+         shm_pmax_atom => shm_master_x_data%pmax_atom
 
-         IF (qs_env%x_data(irep, 1)%memory_parameter%treat_forces_in_core) THEN
-            shm_initial_p => qs_env%x_data(irep, 1)%initial_p_forces
-            shm_pmax_atom => qs_env%x_data(irep, 1)%pmax_atom_forces
+         IF (shm_master_x_data%memory_parameter%treat_forces_in_core) THEN
+            shm_initial_p => shm_master_x_data%initial_p_forces
+            shm_pmax_atom => shm_master_x_data%pmax_atom_forces
          END IF
-         IF (qs_env%x_data(irep, 1)%memory_parameter%recalc_forces) THEN
+         IF (shm_master_x_data%memory_parameter%recalc_forces) THEN
             CALL update_pmax_mat(shm_initial_p, &
-                                 qs_env%x_data(irep, 1)%map_atom_to_kind_atom, &
-                                 qs_env%x_data(irep, 1)%set_offset, &
-                                 qs_env%x_data(irep, 1)%atomic_block_offset, &
+                                 shm_master_x_data%map_atom_to_kind_atom, &
+                                 shm_master_x_data%set_offset, &
+                                 shm_master_x_data%atomic_block_offset, &
                                  shm_pmax_atom, &
                                  full_density_alpha, full_density_beta, &
-                                 natom, kind_of, qs_env%x_data(irep, 1)%basis_parameter, &
-                                 nkind, qs_env%x_data(irep, 1)%is_assoc_atomic_block)
+                                 natom, kind_of, shm_master_x_data%basis_parameter, &
+                                 nkind, shm_master_x_data%is_assoc_atomic_block)
          END IF
       END IF
 
@@ -376,40 +380,40 @@ CONTAINS
          ! full_density_resp=full_density+full_density_resp
       END IF
 
-      eps_schwarz = qs_env%x_data(irep, 1)%screening_parameter%eps_schwarz_forces
-      screen_coeffs_set => qs_env%x_data(irep, 1)%screen_funct_coeffs_set
-      screen_coeffs_kind => qs_env%x_data(irep, 1)%screen_funct_coeffs_kind
-      screen_coeffs_pgf => qs_env%x_data(irep, 1)%screen_funct_coeffs_pgf
-      radii_pgf => qs_env%x_data(irep, 1)%pair_dist_radii_pgf
-      shm_pmax_block => qs_env%x_data(irep, 1)%pmax_block
+      eps_schwarz = shm_master_x_data%screening_parameter%eps_schwarz_forces
+      screen_coeffs_set => shm_master_x_data%screen_funct_coeffs_set
+      screen_coeffs_kind => shm_master_x_data%screen_funct_coeffs_kind
+      screen_coeffs_pgf => shm_master_x_data%screen_funct_coeffs_pgf
+      radii_pgf => shm_master_x_data%pair_dist_radii_pgf
+      shm_pmax_block => shm_master_x_data%pmax_block
 
       IF (eps_schwarz < 0.0_dp) THEN
          log10_eps_schwarz = log_zero
       ELSE
          !! ** make eps_schwarz tighter in case of a stress calculation
-         IF (use_virial) eps_schwarz = eps_schwarz/qs_env%x_data(irep, 1)%periodic_parameter%R_max_stress
+         IF (use_virial) eps_schwarz = eps_schwarz/shm_master_x_data%periodic_parameter%R_max_stress
          log10_eps_schwarz = LOG10(eps_schwarz)
       END IF
 
       CALL timeset(routineN//"_load", handle_load)
 
       !! Load balance the work
-      IF (qs_env%x_data(irep, 1)%memory_parameter%recalc_forces) THEN
-         IF (qs_env%x_data(irep, 1)%b_first_load_balance_forces) THEN
+      IF (shm_master_x_data%memory_parameter%recalc_forces) THEN
+         IF (shm_master_x_data%b_first_load_balance_forces) THEN
             CALL hfx_load_balance(qs_env%x_data(irep, :), eps_schwarz, particle_set, &
-                                  qs_env%x_data(irep, 1)%basis_info%max_set, para_env, &
+                                  shm_master_x_data%basis_info%max_set, para_env, &
                                   screen_coeffs_set, screen_coeffs_kind, &
                                   shm_is_assoc_atomic_block, do_periodic, &
                                   qs_env%x_data(irep, :)%load_balance_parameter, kind_of, &
-                                  qs_env%x_data(irep, 1)%basis_parameter, &
+                                  shm_master_x_data%basis_parameter, &
                                   shm_initial_p, shm_pmax_atom, &
-                                  cell, screen_pmat_forces, qs_env%x_data(irep, 1)%map_atom_to_kind_atom, &
+                                  cell, screen_pmat_forces, shm_master_x_data%map_atom_to_kind_atom, &
                                   nkind, hfx_do_eval_forces, use_virial)
-            qs_env%x_data(irep, 1)%b_first_load_balance_forces = .FALSE.
+            shm_master_x_data%b_first_load_balance_forces = .FALSE.
          ELSE
             ! update_load_balance only needs a subset of infos from load_balance_parameter, and this data is the same across all threads
             CALL hfx_update_load_balance(qs_env%x_data(irep, :), para_env, &
-                                         qs_env%x_data(irep, 1)%load_balance_parameter, &
+                                         shm_master_x_data%load_balance_parameter, &
                                          hfx_do_eval_forces)
          END IF
       END IF
