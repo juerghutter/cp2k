@@ -360,7 +360,8 @@ CONTAINS
       ! actual usage can vary, though, since storage is per-thread
       do_disk_storage = shm_master_x_data%memory_parameter%do_disk_storage
 
-      do_dynamic_load_balancing = (n_threads > 1) .AND. (.NOT. do_disk_storage)
+      ! KP support messes up the performance model, do round-robin instead
+      do_dynamic_load_balancing = (n_threads > 1) .AND. (.NOT. do_disk_storage) .AND. (nkimages == 1)
 
       ! If we have a hybrid functional, we may need only a fraction of exact exchange
       ! Initialize a prefactor depending on the fraction and the number of spins
@@ -1403,7 +1404,6 @@ CONTAINS
                                                sphi_d_ext_set, &
                                                ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp, &
                                                do_periodic, &
-                                               kpoints, &
                                                kpoints%index_to_cell(:, kp_idx_q), &
                                                kpoints%index_to_cell(:, kp_idx_t))
                               ELSE
@@ -2102,7 +2102,6 @@ CONTAINS
 !> \param ee_buffer2 ...
 !> \param ee_primitives_tmp ...
 !> \param do_periodic ...
-!> \param kpoints ...
 !> \param qcell ...
 !> \param tcell ...
 !> \par History
@@ -2131,7 +2130,7 @@ CONTAINS
                        sphi_a_ext, sphi_b_ext, sphi_c_ext, sphi_d_ext, &
                        ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp, &
                        do_periodic, &
-                       kpoints, qcell, tcell)
+                       qcell, tcell)
 
       TYPE(cp_libint_t)                                  :: lib
       REAL(dp), INTENT(IN)                               :: ra(3), rb(3), rc(3), rd(3)
@@ -2166,7 +2165,6 @@ CONTAINS
       REAL(dp), DIMENSION(:), INTENT(INOUT)              :: ee_work, ee_work2, ee_buffer1, &
                                                             ee_buffer2, ee_primitives_tmp
       LOGICAL, INTENT(IN)                                :: do_periodic
-      TYPE(kpoint_type), INTENT(IN), OPTIONAL            :: kpoints
       INTEGER, INTENT(IN), OPTIONAL                      :: qcell(3), tcell(3)
 
       INTEGER :: ipgf, jpgf, kpgf, la, lb, lc, ld, list_ij, list_kl, lpgf, max_l, ncoa, ncob, &
@@ -2174,14 +2172,25 @@ CONTAINS
          nsob, nsoc, nsod, s_offset_a, s_offset_b, s_offset_c, s_offset_d
       REAL(dp)                                           :: EtaInv, tmp_max, ZetaInv
 
+      CPASSERT(.NOT. XOR(PRESENT(qcell), PRESENT(tcell)))
+
       CALL build_pair_list_pgf(npgfa, npgfb, pgf_list_ij, zeta, zetb, screen1, screen2, &
                                pgf1, R1_pgf, log10_pmax, log10_eps_schwarz, ra, rb, &
                                nelements_ij, &
                                neighbor_cells, do_periodic)
-      CALL build_pair_list_pgf(npgfc, npgfd, pgf_list_kl, zetc, zetd, screen2, screen1, &
-                               pgf2, R2_pgf, log10_pmax, log10_eps_schwarz, rc, rd, &
-                               nelements_kl, &
-                               neighbor_cells, do_periodic)
+
+      IF (PRESENT(tcell)) THEN
+         CALL build_pair_list_pgf(npgfc, npgfd, pgf_list_kl, zetc, zetd, screen2, screen1, &
+                                  pgf2, R2_pgf, log10_pmax, log10_eps_schwarz, rc, rd, &
+                                  nelements_kl, &
+                                  neighbor_cells, do_periodic, &
+                                  pgf_list_ij(1:nelements_ij), qcell, tcell)
+      ELSE
+         CALL build_pair_list_pgf(npgfc, npgfd, pgf_list_kl, zetc, zetd, screen2, screen1, &
+                                  pgf2, R2_pgf, log10_pmax, log10_eps_schwarz, rc, rd, &
+                                  nelements_kl, &
+                                  neighbor_cells, do_periodic)
+      END IF
 
       cart_estimate = 0.0_dp
       neris = 0
@@ -2199,7 +2208,7 @@ CONTAINS
 
             CALL build_pgf_product_list(pgf_list_ij(list_ij), pgf_list_kl(list_kl), pgf_product_list, &
                                         nproducts, log10_pmax, log10_eps_schwarz, neighbor_cells, cell, &
-                                        potential_parameter, max_l, do_periodic, kpoints, qcell, tcell)
+                                        potential_parameter, max_l, do_periodic, tcell)
 
             s_offset_a = 0
             DO la = la_min, la_max

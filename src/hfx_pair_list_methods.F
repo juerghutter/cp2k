@@ -24,8 +24,8 @@ MODULE hfx_pair_list_methods
         do_potential_long, do_potential_mix_cl, do_potential_mix_cl_trunc, do_potential_mix_lg, &
         do_potential_short, do_potential_truncated
    USE kinds,                           ONLY: dp
-   USE kpoint_types,                    ONLY: kpoint_cell_to_index,&
-                                              kpoint_type
+   ! USE kpoint_types,                    ONLY: kpoint_cell_to_index,&
+   !                                            kpoint_type
    USE libint_wrapper,                  ONLY: prim_data_f_size
    USE mathconstants,                   ONLY: pi
    USE mp2_types,                       ONLY: pair_list_type_mp2
@@ -64,14 +64,12 @@ CONTAINS
 !> \param potential_parameter potential/metric to be used
 !> \param m_max ...
 !> \param do_periodic ...
-!> \param kpoints ...
-!> \param qcell ...
 !> \param tcell ...
 ! **************************************************************************************************
    SUBROUTINE build_pgf_product_list(list1, list2, product_list, nproducts, &
                                      log10_pmax, log10_eps_schwarz, neighbor_cells, &
                                      cell, potential_parameter, m_max, do_periodic, &
-                                     kpoints, qcell, tcell)
+                                     tcell)
 
       TYPE(hfx_pgf_list), INTENT(IN)                     :: list1, list2
       TYPE(hfx_pgf_product_list), ALLOCATABLE, &
@@ -84,11 +82,9 @@ CONTAINS
       TYPE(hfx_potential_type), INTENT(IN)               :: potential_parameter
       INTEGER, INTENT(IN)                                :: m_max
       LOGICAL, INTENT(IN)                                :: do_periodic
-      TYPE(kpoint_type), INTENT(IN), OPTIONAL            :: kpoints
-      INTEGER, INTENT(IN), OPTIONAL                      :: qcell(3), tcell(3)
+      INTEGER, INTENT(IN), OPTIONAL                      :: tcell(3)
 
-      INTEGER                                            :: cell_sqt(3), i, j, k, l, nimages1, &
-                                                            nimages2, tmp_i4
+      INTEGER                                            :: i, j, k, l, nimages1, nimages2, tmp_i4
       LOGICAL                                            :: use_gamma
       REAL(dp) :: den, Eta, EtaInv, factor, Fm(prim_data_f_size), G(3), im_rc(3), im_rd(3), num, &
          omega2, omega_corr, omega_corr2, P(3), pgf_max_1, pgf_max_2, PQ(3), Q(3), R, R1, R2, &
@@ -113,15 +109,8 @@ CONTAINS
          pgf_max_1 = list1%image_list(i)%pgf_max
          ra = list1%image_list(i)%ra
          rb = list1%image_list(i)%rb
-         DO j = 1, nimages2
-            IF (PRESENT(kpoints)) THEN
-               ! the rhs pair list gets shifted by T, so we need the S+Q-T image here
-               cell_sqt = list1%image_list(i)%bcell + qcell - tcell
-               ! verify that this cell exists in the KP image list and matches the one from this iteration
-               IF (kpoint_cell_to_index(kpoints, cell_sqt) == 0 .OR. ANY(cell_sqt /= list2%image_list(j)%bcell)) &
-                  CYCLE
-            END IF
 
+         DO j = 1, nimages2
             pgf_max_2 = list2%image_list(j)%pgf_max
             IF (pgf_max_1 + pgf_max_2 + log10_pmax < log10_eps_schwarz) CYCLE
             Q = list2%image_list(j)%P
@@ -145,7 +134,7 @@ CONTAINS
             END IF
 
             DO k = 1, SIZE(neighbor_cells)
-               IF (PRESENT(kpoints)) THEN
+               IF (PRESENT(tcell)) THEN
                   ! also here we only need the image for the given Fock matrix
                   IF (ANY(neighbor_cells(k)%cell /= tcell)) &
                      CYCLE
@@ -357,10 +346,13 @@ CONTAINS
 !> \param nelements Number of relevant pairs
 !> \param neighbor_cells ...
 !> \param do_periodic ...
+!> \param ref_list ...
+!> \param qcell ...
+!> \param tcell ...
 ! **************************************************************************************************
    SUBROUTINE build_pair_list_pgf(npgfa, npgfb, list, zeta, zetb, screen1, screen2, pgf, R_pgf, &
                                   log10_pmax, log10_eps_schwarz, ra, rb, nelements, &
-                                  neighbor_cells, do_periodic)
+                                  neighbor_cells, do_periodic, ref_list, qcell, tcell)
       INTEGER, INTENT(IN)                                :: npgfa, npgfb
       TYPE(hfx_pgf_list), DIMENSION(npgfa*npgfb), &
          INTENT(INOUT)                                   :: list
@@ -375,8 +367,12 @@ CONTAINS
       TYPE(hfx_cell_type), DIMENSION(:), INTENT(IN), &
          POINTER                                         :: neighbor_cells
       LOGICAL, INTENT(IN)                                :: do_periodic
+      TYPE(hfx_pgf_list), DIMENSION(:), INTENT(IN), &
+         OPTIONAL                                        :: ref_list
+      INTEGER, INTENT(IN), OPTIONAL                      :: qcell(3), tcell(3)
 
-      INTEGER                                            :: element_counter, i, ipgf, j, jpgf
+      INTEGER                                            :: cell_sqt(3), element_counter, i, ipgf, &
+                                                            j, jpgf, ref_list_idx, ref_list_nb_idx
       REAL(dp)                                           :: im_B(3), pgf_max, rab2, Zeta1, Zeta_A, &
                                                             Zeta_B, ZetaInv
 
@@ -384,57 +380,112 @@ CONTAINS
       nelements = npgfa*npgfb
       list(1:nelements)%nimages = 0
 
-      DO i = 1, SIZE(neighbor_cells)
-         IF (do_periodic) THEN
-            im_B = rb + neighbor_cells(i)%cell_r(:)
-         ELSE
-            im_B = rb
-         END IF
+      IF (PRESENT(ref_list)) THEN
+         ! for the kpoint case we need a specific subset of neighbors for the RHS pair |cd)
+         DO ref_list_idx = 1, SIZE(ref_list)
+            DO ref_list_nb_idx = 1, ref_list(ref_list_idx)%nimages
+               cell_sqt = ref_list(ref_list_idx)%image_list(ref_list_nb_idx)%bcell + qcell - tcell
 
-         rab2 = SUM((ra - im_B)**2)
+               ! always periodic
+               im_B = rb + REAL(cell_sqt, dp)
+               rab2 = SUM((ra - im_B)**2)
 
-         IF (screen1(1)*rab2 + screen1(2) + screen2(2) + log10_pmax < log10_eps_schwarz) CYCLE
+               IF (screen1(1)*rab2 + screen1(2) + screen2(2) + log10_pmax < log10_eps_schwarz) CYCLE
 
-         element_counter = 0
-         DO ipgf = 1, npgfa
-            DO jpgf = 1, npgfb
-               element_counter = element_counter + 1
-               pgf_max = pgf(jpgf, ipgf)%x(1)*rab2 + pgf(jpgf, ipgf)%x(2)
-               IF (pgf_max + screen2(2) + log10_pmax < log10_eps_schwarz) THEN
-                  CYCLE
-               END IF
-               list(element_counter)%nimages = list(element_counter)%nimages + 1
+               element_counter = 0
+               DO ipgf = 1, npgfa
+                  DO jpgf = 1, npgfb
+                     element_counter = element_counter + 1
+                     pgf_max = pgf(jpgf, ipgf)%x(1)*rab2 + pgf(jpgf, ipgf)%x(2)
+                     IF (pgf_max + screen2(2) + log10_pmax < log10_eps_schwarz) THEN
+                        CYCLE
+                     END IF
+                     list(element_counter)%nimages = list(element_counter)%nimages + 1
 
-               Zeta_A = zeta(ipgf)
-               Zeta_B = zetb(jpgf)
-               Zeta1 = Zeta_A + Zeta_B
-               ZetaInv = 1.0_dp/Zeta1
+                     Zeta_A = zeta(ipgf)
+                     Zeta_B = zetb(jpgf)
+                     Zeta1 = Zeta_A + Zeta_B
+                     ZetaInv = 1.0_dp/Zeta1
 
-               ! data shared for pairs over different images
-               IF (list(element_counter)%nimages == 1) THEN
-                  list(element_counter)%ipgf = ipgf
-                  list(element_counter)%jpgf = jpgf
-                  list(element_counter)%zetaInv = ZetaInv
-                  list(element_counter)%zetapzetb = Zeta1
-                  list(element_counter)%zeta = Zeta_A
-                  list(element_counter)%zetb = Zeta_B
-               END IF
+                     ! data shared for pairs over different images
+                     IF (list(element_counter)%nimages == 1) THEN
+                        list(element_counter)%ipgf = ipgf
+                        list(element_counter)%jpgf = jpgf
+                        list(element_counter)%zetaInv = ZetaInv
+                        list(element_counter)%zetapzetb = Zeta1
+                        list(element_counter)%zeta = Zeta_A
+                        list(element_counter)%zetb = Zeta_B
+                     END IF
 
-               ! unique values for each pair & image
-               ASSOCIATE (pair=>list(element_counter)%image_list(list(element_counter)%nimages))
-                  pair%pgf_max = pgf_max
-                  pair%ra = ra
-                  pair%rb = im_B
-                  pair%rab2 = rab2
-                  pair%bcell = neighbor_cells(i)%cell ! remember the coords of the neighbor_cell for this pair
+                     ! unique values for each pair & image
+                     ASSOCIATE (pair=>list(element_counter)%image_list(list(element_counter)%nimages))
+                        pair%pgf_max = pgf_max
+                        pair%ra = ra
+                        pair%rb = im_B
+                        pair%rab2 = rab2
+                        pair%bcell = cell_sqt ! remember the coords of the neighbor_cell for this pair
 
-                  pair%S1234 = (-Zeta_A*Zeta_B*ZetaInv*rab2)
-                  pair%P = (Zeta_A*ra + Zeta_B*im_B)*ZetaInv
-                  pair%R = MAX(0.0_dp, R_pgf(jpgf, ipgf)%x(1)*rab2 + R_pgf(jpgf, ipgf)%x(2))
-               END ASSOCIATE
+                        pair%S1234 = (-Zeta_A*Zeta_B*ZetaInv*rab2)
+                        pair%P = (Zeta_A*ra + Zeta_B*im_B)*ZetaInv
+                        pair%R = MAX(0.0_dp, R_pgf(jpgf, ipgf)%x(1)*rab2 + R_pgf(jpgf, ipgf)%x(2))
+                     END ASSOCIATE
+                  END DO
+               END DO
             END DO
          END DO
-      END DO
+      ELSE
+         DO i = 1, SIZE(neighbor_cells)
+            IF (do_periodic) THEN
+               im_B = rb + neighbor_cells(i)%cell_r(:)
+            ELSE
+               im_B = rb
+            END IF
+
+            rab2 = SUM((ra - im_B)**2)
+
+            IF (screen1(1)*rab2 + screen1(2) + screen2(2) + log10_pmax < log10_eps_schwarz) CYCLE
+
+            element_counter = 0
+            DO ipgf = 1, npgfa
+               DO jpgf = 1, npgfb
+                  element_counter = element_counter + 1
+                  pgf_max = pgf(jpgf, ipgf)%x(1)*rab2 + pgf(jpgf, ipgf)%x(2)
+                  IF (pgf_max + screen2(2) + log10_pmax < log10_eps_schwarz) THEN
+                     CYCLE
+                  END IF
+                  list(element_counter)%nimages = list(element_counter)%nimages + 1
+
+                  Zeta_A = zeta(ipgf)
+                  Zeta_B = zetb(jpgf)
+                  Zeta1 = Zeta_A + Zeta_B
+                  ZetaInv = 1.0_dp/Zeta1
+
+                  ! data shared for pairs over different images
+                  IF (list(element_counter)%nimages == 1) THEN
+                     list(element_counter)%ipgf = ipgf
+                     list(element_counter)%jpgf = jpgf
+                     list(element_counter)%zetaInv = ZetaInv
+                     list(element_counter)%zetapzetb = Zeta1
+                     list(element_counter)%zeta = Zeta_A
+                     list(element_counter)%zetb = Zeta_B
+                  END IF
+
+                  ! unique values for each pair & image
+                  ASSOCIATE (pair=>list(element_counter)%image_list(list(element_counter)%nimages))
+                     pair%pgf_max = pgf_max
+                     pair%ra = ra
+                     pair%rb = im_B
+                     pair%rab2 = rab2
+                     pair%bcell = neighbor_cells(i)%cell ! remember the coords of the neighbor_cell for this pair
+
+                     pair%S1234 = (-Zeta_A*Zeta_B*ZetaInv*rab2)
+                     pair%P = (Zeta_A*ra + Zeta_B*im_B)*ZetaInv
+                     pair%R = MAX(0.0_dp, R_pgf(jpgf, ipgf)%x(1)*rab2 + R_pgf(jpgf, ipgf)%x(2))
+                  END ASSOCIATE
+               END DO
+            END DO
+         END DO
+      END IF
 
       ! ** move used elements to the beginning of the list
       element_counter = 0
