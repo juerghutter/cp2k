@@ -382,6 +382,12 @@ CONTAINS
          CALL ec_disp(qs_env, ec_env, calculate_forces=.TRUE.)
          CALL ec_build_core_hamiltonian_force(qs_env, ec_env)
          CALL ec_build_ks_matrix_force(qs_env, ec_env)
+         IF (ec_env%mao) THEN
+            ! MAO Lagrange multipliers
+!deb        CALL mao_lagrangian(qs_env, ec_env)
+            ! MAO contribution to RHS of z-vector equation
+!deb        CALL mao_zvector_rhs(qs_env, ec_env)
+         END IF
 
          CALL response_calculation(qs_env, ec_env)
 
@@ -397,10 +403,15 @@ CONTAINS
                              zehartree=ec_env%ehartree, &
                              p_env=ec_env%p_env, &
                              zexc=ec_env%exc)
+         IF (ec_env%mao) THEN
+            ! MAO direct forces
+!deb        CALL mao_basis_forces(qs_env, ec_env)
+         END IF
 
          CALL ec_properties(qs_env, ec_env)
 
          ! Deallocate matrices
+         ! is this needed here????
          IF (ASSOCIATED(ec_env%matrix_ks)) CALL dbcsr_deallocate_matrix_set(ec_env%matrix_ks)
          IF (ASSOCIATED(ec_env%matrix_h)) CALL dbcsr_deallocate_matrix_set(ec_env%matrix_h)
          IF (ASSOCIATED(ec_env%matrix_s)) CALL dbcsr_deallocate_matrix_set(ec_env%matrix_s)
