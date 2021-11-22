@@ -20,6 +20,7 @@ MODULE ec_env_types
                                               ls_scf_release
    USE input_section_types,             ONLY: section_vals_type
    USE kinds,                           ONLY: dp
+   USE mao_types,                       ONLY: mao_type, create_mao_type, release_mao_type
    USE pw_types,                        ONLY: pw_p_type,&
                                               pw_release
    USE qs_dispersion_types,             ONLY: qs_dispersion_release,&
@@ -90,7 +91,9 @@ MODULE ec_env_types
                                                           matrix_p, &
                                                           matrix_w
       ! reduce basis
+      TYPE(mao_type), POINTER                          :: mao_env => NULL()
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER        :: mao_coef
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER        :: mao_lagr
       ! CP equations
       TYPE(qs_p_env_type), POINTER                     :: p_env
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER        :: cpmos
@@ -138,6 +141,8 @@ CONTAINS
          END IF
          ! reduced basis
          IF (ASSOCIATED(ec_env%mao_coef)) CALL dbcsr_deallocate_matrix_set(ec_env%mao_coef)
+         IF (ASSOCIATED(ec_env%mao_lagr)) CALL dbcsr_deallocate_matrix_set(ec_env%mao_lagr)
+         CALL release_mao_type(ec_env%mao_env)
          ! dispersion environment
          IF (ASSOCIATED(ec_env%dispersion_env)) THEN
             CALL qs_dispersion_release(ec_env%dispersion_env)

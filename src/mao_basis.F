@@ -25,6 +25,7 @@ MODULE mao_basis
                                               dbcsr_reserve_diag_blocks,&
                                               dbcsr_type_no_symmetry
    USE kinds,                           ONLY: dp
+   USE mao_types,                       ONLY: mao_type, create_mao_type, release_mao_type
    USE mao_methods,                     ONLY: mao_build_q
    USE mao_optimizer,                   ONLY: mao_optimize
    USE particle_methods,                ONLY: get_particle_set
@@ -57,32 +58,24 @@ CONTAINS
 ! **************************************************************************************************
 !> \brief ...
 !> \param qs_env ...
+!> \param mao_env ...
 !> \param mao_coef ...
 !> \param ref_basis_set ...
 !> \param pmat_external ...
 !> \param smat_external ...
-!> \param molecular ...
-!> \param max_iter ...
-!> \param eps_grad ...
 !> \param nmao_external ...
-!> \param eps1_mao ...
-!> \param iolevel ...
 !> \param unit_nr ...
 ! **************************************************************************************************
-   SUBROUTINE mao_generate_basis(qs_env, mao_coef, ref_basis_set, pmat_external, smat_external, &
-                                 molecular, max_iter, eps_grad, nmao_external, &
-                                 eps1_mao, iolevel, unit_nr)
+   SUBROUTINE mao_generate_basis(qs_env, mao_env, mao_coef, &
+                                 ref_basis_set, pmat_external, smat_external, nmao_external, unit_nr)
       TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(mao_type), POINTER                            :: mao_env
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mao_coef
       CHARACTER(len=*), OPTIONAL                         :: ref_basis_set
       TYPE(dbcsr_p_type), DIMENSION(:, :), OPTIONAL, &
          POINTER                                         :: pmat_external, smat_external
-      LOGICAL, INTENT(IN), OPTIONAL                      :: molecular
-      INTEGER, INTENT(IN), OPTIONAL                      :: max_iter
-      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: eps_grad
       INTEGER, DIMENSION(:), INTENT(IN), OPTIONAL        :: nmao_external
-      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: eps1_mao
-      INTEGER, INTENT(IN), OPTIONAL                      :: iolevel, unit_nr
+      INTEGER, INTENT(IN), OPTIONAL                      :: unit_nr
 
       CHARACTER(len=*), PARAMETER :: routineN = 'mao_generate_basis'
 
@@ -121,48 +114,23 @@ CONTAINS
       ELSE
          iw = -1
       END IF
-      IF (PRESENT(iolevel)) THEN
-         iolev = iolevel
-      ELSE
-         iolev = 1
-      END IF
-      IF (iolevel == 0) THEN
-         iw = -1
-      END IF
+      iolev = mao_env%iolevel
+      IF (iolev == 0) iw = -1
 
       ! molecules
-      IF (PRESENT(molecular)) THEN
-         molecule = molecular
-      ELSE
-         molecule = .FALSE.
-      END IF
-
+      molecule = mao_env%molecular
       ! iterations
-      IF (PRESENT(max_iter)) THEN
-         mao_max_iter = max_iter
-      ELSE
-         mao_max_iter = 0
-      END IF
-
-      ! threshold
-      IF (PRESENT(eps_grad)) THEN
-         mao_eps_grad = eps_grad
-      ELSE
-         mao_eps_grad = 0.00001_dp
-      END IF
+      mao_max_iter = mao_env%max_iter
+      ! mao gradient
+      mao_eps_grad = mao_env%eps_grad
       eps_fun = 10._dp*mao_eps_grad
+      ! mao_threshold
+      eps1 = mao_env%eps1_mao
 
       do_nmao_external = .FALSE.
       ! external number of MAOs per atom
       IF (PRESENT(nmao_external)) THEN
          do_nmao_external = .TRUE.
-      END IF
-
-      ! mao_threshold
-      IF (PRESENT(eps1_mao)) THEN
-         eps1 = eps1_mao
-      ELSE
-         eps1 = 1000._dp
       END IF
 
       IF (iw > 0) THEN
@@ -278,15 +246,14 @@ CONTAINS
       CALL mao_optimize(mao_coef, matrix_q, matrix_smm, electra, mao_max_iter, mao_eps_grad, eps1, &
                         iolev, iw)
 
-      ! Deallocate the neighbor list structure
-      CALL release_neighbor_list_sets(smm_list)
-      CALL release_neighbor_list_sets(smo_list)
-
       DEALLOCATE (mao_basis_set_list, orb_basis_set_list)
 
-      IF (ASSOCIATED(matrix_smm)) CALL dbcsr_deallocate_matrix_set(matrix_smm)
-      IF (ASSOCIATED(matrix_smo)) CALL dbcsr_deallocate_matrix_set(matrix_smo)
-      IF (ASSOCIATED(matrix_q)) CALL dbcsr_deallocate_matrix_set(matrix_q)
+      ! save lists and matrices
+      mao_env%matrix_q => matrix_q
+      mao_env%matrix_smm => matrix_smm
+      mao_env%matrix_smo => matrix_smo
+      mao_env%smm_list => smm_list
+      mao_env%smo_list => smo_list
 
       CALL timestop(handle)
 

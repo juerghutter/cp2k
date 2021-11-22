@@ -39,6 +39,7 @@ MODULE minbas_methods
    USE kinds,                           ONLY: dp
    USE lapack,                          ONLY: lapack_ssyev
    USE mao_basis,                       ONLY: mao_generate_basis
+   USE mao_types,                       ONLY: mao_type, create_mao_type, release_mao_type
    USE particle_methods,                ONLY: get_particle_set
    USE particle_types,                  ONLY: particle_type
    USE qs_environment_types,            ONLY: get_qs_env,&
@@ -102,6 +103,7 @@ CONTAINS
       TYPE(dbcsr_type)                                   :: smao, sortho
       TYPE(dbcsr_type), POINTER                          :: smat
       TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(mao_type), POINTER                            :: mao_env
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
@@ -195,7 +197,9 @@ CONTAINS
 
          ! initialize MAOs
          ! optimize MAOs (mao_coef is allocated in the routine)
-         CALL mao_generate_basis(qs_env, mao_coef)
+         CALL create_mao_type(mao_env)
+         CALL mao_generate_basis(qs_env, mao_env, mao_coef)
+         CALL release_mao_type(mao_env)
 
          ! sortho (nmao x nmao)
          CALL dbcsr_create(sortho, name="SORTHO", dist=dbcsr_dist, matrix_type=dbcsr_type_no_symmetry, &

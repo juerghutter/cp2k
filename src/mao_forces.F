@@ -20,11 +20,21 @@ MODULE mao_forces
                                               dbcsr_deallocate_matrix_set
    USE dbcsr_api,                       ONLY: dbcsr_create,&
                                               dbcsr_distribution_type,&
+                                              dbcsr_norm_maxabsnorm,&
+                                              dbcsr_set,&
+                                              dbcsr_copy,&
+                                              dbcsr_norm,&
+                                              dbcsr_add,&
+                                              dbcsr_dot,&
+                                              dbcsr_multiply,&
+                                              dbcsr_type,&
                                               dbcsr_p_type,&
+                                              dbcsr_release,&
                                               dbcsr_reserve_diag_blocks,&
                                               dbcsr_type_no_symmetry
    USE kinds,                           ONLY: dp
-   USE mao_methods,                     ONLY: mao_build_q
+   USE mao_types,                       ONLY: mao_type
+   USE mao_methods,                     ONLY: mao_build_q, mao_project_gradient
    USE mao_optimizer,                   ONLY: mao_optimize
    USE particle_methods,                ONLY: get_particle_set
    USE particle_types,                  ONLY: particle_type
@@ -47,7 +57,7 @@ MODULE mao_forces
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'mao_forces'
 
-   PUBLIC ::  mao_lagrangian
+   PUBLIC ::  mao_lagrangian, mao_rhs_zvector, mao_basis_forces
 
 ! **************************************************************************************************
 
@@ -56,63 +66,31 @@ CONTAINS
 ! **************************************************************************************************
 !> \brief ...
 !> \param qs_env ...
+!> \param mao_env ...
 !> \param mao_coef ...
-!> \param ref_basis_set ...
-!> \param pmat_external ...
-!> \param smat_external ...
-!> \param molecular ...
-!> \param max_iter ...
-!> \param eps_grad ...
-!> \param nmao_external ...
-!> \param eps1_mao ...
-!> \param iolevel ...
 !> \param unit_nr ...
 ! **************************************************************************************************
-   SUBROUTINE mao_lagrangian(qs_env, mao_coef, ref_basis_set, pmat_external, smat_external, &
-                                 molecular, max_iter, eps_grad, nmao_external, &
-                                 eps1_mao, iolevel, unit_nr)
+   SUBROUTINE mao_lagrangian(qs_env, mao_env, mao_coef, mao_lagr, ksmat, unit_nr)
       TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(mao_type), POINTER                            :: mao_env
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mao_coef
-      CHARACTER(len=*), OPTIONAL                         :: ref_basis_set
-      TYPE(dbcsr_p_type), DIMENSION(:, :), OPTIONAL, &
-         POINTER                                         :: pmat_external, smat_external
-      LOGICAL, INTENT(IN), OPTIONAL                      :: molecular
-      INTEGER, INTENT(IN), OPTIONAL                      :: max_iter
-      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: eps_grad
-      INTEGER, DIMENSION(:), INTENT(IN), OPTIONAL        :: nmao_external
-      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: eps1_mao
-      INTEGER, INTENT(IN), OPTIONAL                      :: iolevel, unit_nr
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mao_lagr
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: ksmat
+      INTEGER, INTENT(IN), OPTIONAL                      :: unit_nr
 
-      CHARACTER(len=*), PARAMETER :: routineN = 'mao_generate_basis'
+      CHARACTER(len=*), PARAMETER                        :: routineN = 'mao_lagrangian'
 
-      CHARACTER(len=10)                                  :: mao_basis_set
-      INTEGER                                            :: handle, iab, iatom, ikind, iolev, ispin, &
-                                                            iw, mao_max_iter, natom, nbas, &
-                                                            nimages, nkind, nmao, nspin
-      INTEGER, DIMENSION(:), POINTER                     :: col_blk_sizes, row_blk_sizes
-      LOGICAL                                            :: do_nmao_external, molecule
-      REAL(KIND=dp)                                      :: electra(2), eps1, eps_filter, eps_fun, &
-                                                            mao_eps_grad
-      TYPE(dbcsr_distribution_type), POINTER             :: dbcsr_dist
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_q, matrix_smm, matrix_smo
-      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_p, matrix_s
-      TYPE(dft_control_type), POINTER                    :: dft_control
-      TYPE(gto_basis_set_p_type), DIMENSION(:), POINTER  :: mao_basis_set_list, orb_basis_set_list
-      TYPE(gto_basis_set_type), POINTER                  :: basis_set_a, basis_set_b
-      TYPE(neighbor_list_set_p_type), DIMENSION(:), &
-         POINTER                                         :: smm_list, smo_list
-      TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
-      TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
-      TYPE(qs_kind_type), POINTER                        :: qs_kind
-      TYPE(qs_ks_env_type), POINTER                      :: ks_env
-      TYPE(qs_rho_type), POINTER                         :: rho
+      INTEGER                                            :: handle, iw, iolev, nspins, ispin, iter
+      REAL(KIND=dp)                                      :: rrk, rrk1, dzk, alpha, beta, rnorm
+      TYPE(dbcsr_type)                                   :: cgmat, rhsmat, emat, scrmat, dmat, smat
+      TYPE(dbcsr_type), POINTER                          :: matrix_q, matrix_s
 
       CALL timeset(routineN, handle)
 
-      ! k-points?
-      CALL get_qs_env(qs_env, dft_control=dft_control)
-      nimages = dft_control%nimages
-      CPASSERT(nimages == 1)
+      MARK_USED(qs_env)
+      MARK_USED(mao_coef)
+      MARK_USED(mao_lagr)
+      MARK_USED(ksmat)
 
       ! output
       IF (PRESENT(unit_nr)) THEN
@@ -120,172 +98,93 @@ CONTAINS
       ELSE
          iw = -1
       END IF
-      IF (PRESENT(iolevel)) THEN
-         iolev = iolevel
-      ELSE
-         iolev = 1
-      END IF
-      IF (iolevel == 0) THEN
-         iw = -1
-      END IF
+      iolev = mao_env%iolevel
+      IF (iolev == 0) iw = -1
 
-      ! molecules
-      IF (PRESENT(molecular)) THEN
-         molecule = molecular
-      ELSE
-         molecule = .FALSE.
-      END IF
-
-      ! iterations
-      IF (PRESENT(max_iter)) THEN
-         mao_max_iter = max_iter
-      ELSE
-         mao_max_iter = 0
-      END IF
-
-      ! threshold
-      IF (PRESENT(eps_grad)) THEN
-         mao_eps_grad = eps_grad
-      ELSE
-         mao_eps_grad = 0.00001_dp
-      END IF
-      eps_fun = 10._dp*mao_eps_grad
-
-      do_nmao_external = .FALSE.
-      ! external number of MAOs per atom
-      IF (PRESENT(nmao_external)) THEN
-         do_nmao_external = .TRUE.
-      END IF
-
-      ! mao_threshold
-      IF (PRESENT(eps1_mao)) THEN
-         eps1 = eps1_mao
-      ELSE
-         eps1 = 1000._dp
-      END IF
-
-      IF (iw > 0) THEN
-         WRITE (iw, '(/,T2,A)') '!-----------------------------------------------------------------------------!'
-         WRITE (UNIT=iw, FMT="(T37,A)") "MAO BASIS"
-         WRITE (iw, '(T2,A)') '!-----------------------------------------------------------------------------!'
-      END IF
-
-      ! Reference basis set
-      IF (PRESENT(ref_basis_set)) THEN
-         mao_basis_set = ref_basis_set
-      ELSE
-         mao_basis_set = "ORB"
-      END IF
-
-      CALL get_qs_env(qs_env=qs_env, qs_kind_set=qs_kind_set)
-      nkind = SIZE(qs_kind_set)
-      ALLOCATE (mao_basis_set_list(nkind), orb_basis_set_list(nkind))
-      DO ikind = 1, nkind
-         qs_kind => qs_kind_set(ikind)
-         NULLIFY (mao_basis_set_list(ikind)%gto_basis_set)
-         NULLIFY (orb_basis_set_list(ikind)%gto_basis_set)
-         NULLIFY (basis_set_a, basis_set_b)
-         CALL get_qs_kind(qs_kind=qs_kind, basis_set=basis_set_a, basis_type="ORB")
-         IF (ASSOCIATED(basis_set_a)) orb_basis_set_list(ikind)%gto_basis_set => basis_set_a
-         CALL get_qs_kind(qs_kind=qs_kind, basis_set=basis_set_b, basis_type=mao_basis_set)
-         IF (ASSOCIATED(basis_set_b)) mao_basis_set_list(ikind)%gto_basis_set => basis_set_b
+      nspins = SIZE(mao_coef)
+      CALL dbcsr_allocate_matrix_set(mao_lagr, nspins)
+      DO ispin = 1, nspins
+         ALLOCATE (mao_lagr(ispin)%matrix)
+         CALL dbcsr_create(mao_lagr(ispin)%matrix, name="MAO LAGR", &
+                           template=mao_coef(ispin)%matrix)
+         CALL dbcsr_reserve_diag_blocks(matrix=mao_lagr(ispin)%matrix)
       END DO
-      IF (iw > 0) THEN
-         DO ikind = 1, nkind
-            IF (.NOT. ASSOCIATED(mao_basis_set_list(ikind)%gto_basis_set)) THEN
-               WRITE (UNIT=iw, FMT="(T2,A,I4)") &
-                  "WARNING: No MAO basis set associated with Kind ", ikind
-            ELSE
-               IF (do_nmao_external) THEN
-                  nmao = nmao_external(ikind)
-               ELSE
-                  CALL get_qs_kind(qs_kind_set(ikind), mao=nmao)
+
+      DO ispin = 1, nspins
+         CALL dbcsr_set(mao_lagr(ispin)%matrix, 0.0_dp)
+         CALL dbcsr_create(cgmat, template=mao_coef(ispin)%matrix)
+         CALL dbcsr_create(rhsmat, template=mao_coef(ispin)%matrix)
+         CALL dbcsr_reserve_diag_blocks(matrix=rhsmat)
+         CALL dbcsr_multiply("N", "N", 1.0_dp, ksmat(ispin, 1)%matrix, mao_coef(ispin)%matrix, &
+                             0.0_dp, cgmat)
+         CALL dbcsr_multiply("N", "N", -2.0_dp, cgmat, mao_env%matrix_p(ispin, 1)%matrix, &
+                             0.0_dp, rhsmat, retain_sparsity=.TRUE.)
+         matrix_s => mao_env%matrix_smm(ispin)%matrix
+         matrix_q => mao_env%matrix_q(ispin)%matrix
+         ! emat = T*Q*T(T)
+         IF(mao_env%max_iter < 1) THEN
+            CALL dbcsr_create(emat, template=mao_env%matrix_s(1,1)%matrix)
+            CALL dbcsr_reserve_diag_blocks(matrix=emat)
+            CALL dbcsr_multiply("N", "N", 1.0_dp, matrix_q, mao_coef(ispin)%matrix, 0.0_dp, cgmat)
+            CALL dbcsr_multiply("T", "N", 1.0_dp, mao_coef(ispin)%matrix, cgmat, 0.0_dp, emat, retain_sparsity=.TRUE.)
+         ELSE
+            CALL dbcsr_create(emat, template=mao_env%matrix_s(1,1)%matrix)
+            CALL dbcsr_multiply("N", "N", 1.0_dp, matrix_q, mao_coef(ispin)%matrix, 0.0_dp, cgmat)
+            CALL dbcsr_multiply("T", "N", 1.0_dp, mao_coef(ispin)%matrix, cgmat, 0.0_dp, emat)
+         END IF
+         CALL dbcsr_release(cgmat)
+         ! CG method
+         CALL dbcsr_create(scrmat, template=mao_coef(ispin)%matrix)
+         CALL dbcsr_reserve_diag_blocks(matrix=scrmat)
+         CALL dbcsr_create(dmat, template=mao_coef(ispin)%matrix)
+         CALL dbcsr_reserve_diag_blocks(matrix=dmat)
+         CALL dbcsr_create(cgmat, template=mao_coef(ispin)%matrix)
+         CALL dbcsr_reserve_diag_blocks(matrix=cgmat)
+         IF(mao_env%max_iter < 1) THEN
+            CALL dbcsr_create(smat, template=matrix_s)
+            CALL dbcsr_reserve_diag_blocks(matrix=smat)
+            CALL dbcsr_copy(smat, matrix_s, keep_sparsity=.TRUE.)
+            CALL mao_project_gradient(mao_coef(ispin)%matrix, rhsmat, smat)
+            CALL dbcsr_copy(dmat, rhsmat, keep_sparsity=.TRUE.)
+            DO iter = 1, 250
+               ! A*d
+               CALL dbcsr_multiply("N", "N", 2.0_dp, matrix_q, dmat, &
+                                   0.0_dp, cgmat, retain_sparsity=.TRUE.)
+               CALL dbcsr_multiply("N", "N", 1.0_dp, dmat, emat, &
+                                   0.0_dp, scrmat, retain_sparsity=.TRUE.)
+               CALL dbcsr_multiply("N", "N", -2.0_dp, mao_env%matrix_smm(1)%matrix, scrmat, &
+                                   1.0_dp, cgmat, retain_sparsity=.TRUE.)
+               CALL mao_project_gradient(mao_coef(ispin)%matrix, cgmat, smat)
+               ! alpha
+               call dbcsr_dot(rhsmat,rhsmat,rrk)
+               call dbcsr_dot(dmat,cgmat,dzk)
+               alpha = rrk/dzk
+               !
+               CALL dbcsr_add(mao_lagr(ispin)%matrix, dmat, 1.0_dp, alpha)
+               CALL dbcsr_add(rhsmat, cgmat, 1.0_dp, -alpha)
+               CALL dbcsr_norm(rhsmat, dbcsr_norm_maxabsnorm, norm_scalar=rnorm)
+               !
+               IF(iw > 0) THEN
+                   WRITE(iw,*) iter,rnorm
                END IF
-               nbas = mao_basis_set_list(ikind)%gto_basis_set%nsgf
-               WRITE (UNIT=iw, FMT="(T2,A,I4,T30,A,I2,T56,A,I10)") &
-                  "MAO basis set Kind ", ikind, " MinNum of MAO:", nmao, " Number of BSF:", nbas
-            END IF
-         END DO
-      END IF
-
-      ! neighbor lists
-      NULLIFY (smm_list, smo_list)
-      CALL setup_neighbor_list(smm_list, mao_basis_set_list, molecular=molecule, qs_env=qs_env)
-      CALL setup_neighbor_list(smo_list, mao_basis_set_list, orb_basis_set_list, &
-                               molecular=molecule, qs_env=qs_env)
-
-      ! overlap matrices
-      NULLIFY (matrix_smm, matrix_smo)
-      CALL get_qs_env(qs_env, ks_env=ks_env)
-      CALL build_overlap_matrix_simple(ks_env, matrix_smm, &
-                                       mao_basis_set_list, mao_basis_set_list, smm_list)
-      CALL build_overlap_matrix_simple(ks_env, matrix_smo, &
-                                       mao_basis_set_list, orb_basis_set_list, smo_list)
-
-      ! get reference density matrix and overlap matrix
-      IF (PRESENT(pmat_external)) THEN
-         matrix_p => pmat_external
-      ELSE
-         CALL get_qs_env(qs_env, rho=rho)
-         CALL qs_rho_get(rho, rho_ao_kp=matrix_p)
-      END IF
-      IF (PRESENT(smat_external)) THEN
-         matrix_s => smat_external
-      ELSE
-         CALL get_qs_env(qs_env, matrix_s_kp=matrix_s)
-      END IF
-
-      nspin = SIZE(matrix_p, 1)
-      eps_filter = 0.0_dp
-      ! Q matrix
-      CALL mao_build_q(matrix_q, matrix_p, matrix_s, matrix_smm, matrix_smo, smm_list, electra, eps_filter)
-
-      ! MAO matrices
-      CALL get_qs_env(qs_env=qs_env, natom=natom)
-      CALL get_ks_env(ks_env=ks_env, particle_set=particle_set, dbcsr_dist=dbcsr_dist)
-      NULLIFY (mao_coef)
-      CALL dbcsr_allocate_matrix_set(mao_coef, nspin)
-      ALLOCATE (row_blk_sizes(natom), col_blk_sizes(natom))
-      CALL get_particle_set(particle_set, qs_kind_set, nsgf=row_blk_sizes, &
-                            basis=mao_basis_set_list)
-      IF (do_nmao_external) THEN
-         DO iatom = 1, natom
-            CALL get_atomic_kind(atomic_kind=particle_set(iatom)%atomic_kind, &
-                                 kind_number=ikind)
-            col_blk_sizes(iatom) = nmao_external(ikind)
-         END DO
-      ELSE
-         CALL get_particle_set(particle_set, qs_kind_set, nmao=col_blk_sizes)
-      END IF
-
-      ! check if MAOs have been specified
-      DO iab = 1, natom
-         IF (col_blk_sizes(iab) < 0) &
-            CPABORT("Minimum number of MAOs has to be specified in KIND section for all elements")
+               !
+               call dbcsr_dot(rhsmat,rhsmat,rrk1)
+               beta = rrk1/rrk
+               !!call dbcsr_dot(rhsmat,cgmat,rrk1)
+               !!beta = rrk1/dzk
+               CALL dbcsr_add(dmat, rhsmat, beta, 1.0_dp)
+            END DO
+            CALL mao_project_gradient(mao_coef(ispin)%matrix, mao_lagr(ispin)%matrix, smat)
+            CALL dbcsr_release(smat)
+         ELSE
+            stop
+         END IF
+         CALL dbcsr_release(dmat)
+         CALL dbcsr_release(scrmat)
+         CALL dbcsr_release(emat)
+         CALL dbcsr_release(cgmat)
+         CALL dbcsr_release(rhsmat)
       END DO
-      DO ispin = 1, nspin
-         ! coefficients
-         ALLOCATE (mao_coef(ispin)%matrix)
-         CALL dbcsr_create(matrix=mao_coef(ispin)%matrix, &
-                           name="MAO_COEF", dist=dbcsr_dist, matrix_type=dbcsr_type_no_symmetry, &
-                           row_blk_size=row_blk_sizes, col_blk_size=col_blk_sizes, nze=0)
-         CALL dbcsr_reserve_diag_blocks(matrix=mao_coef(ispin)%matrix)
-      END DO
-      DEALLOCATE (row_blk_sizes, col_blk_sizes)
-
-      ! optimize MAOs
-      CALL mao_optimize(mao_coef, matrix_q, matrix_smm, electra, mao_max_iter, mao_eps_grad, eps1, &
-                        iolev, iw)
-
-      ! Deallocate the neighbor list structure
-      CALL release_neighbor_list_sets(smm_list)
-      CALL release_neighbor_list_sets(smo_list)
-
-      DEALLOCATE (mao_basis_set_list, orb_basis_set_list)
-
-      IF (ASSOCIATED(matrix_smm)) CALL dbcsr_deallocate_matrix_set(matrix_smm)
-      IF (ASSOCIATED(matrix_smo)) CALL dbcsr_deallocate_matrix_set(matrix_smo)
-      IF (ASSOCIATED(matrix_q)) CALL dbcsr_deallocate_matrix_set(matrix_q)
 
       CALL timestop(handle)
 
@@ -294,63 +193,24 @@ CONTAINS
 ! **************************************************************************************************
 !> \brief ...
 !> \param qs_env ...
+!> \param mao_env ...
 !> \param mao_coef ...
-!> \param ref_basis_set ...
-!> \param pmat_external ...
-!> \param smat_external ...
-!> \param molecular ...
-!> \param max_iter ...
-!> \param eps_grad ...
-!> \param nmao_external ...
-!> \param eps1_mao ...
-!> \param iolevel ...
 !> \param unit_nr ...
 ! **************************************************************************************************
-   SUBROUTINE mao_rhs_zvector(qs_env, mao_coef, ref_basis_set, pmat_external, smat_external, &
-                                 molecular, max_iter, eps_grad, nmao_external, &
-                                 eps1_mao, iolevel, unit_nr)
+   SUBROUTINE mao_rhs_zvector(qs_env, mao_env, mao_coef, unit_nr)
       TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(mao_type), POINTER                            :: mao_env
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mao_coef
-      CHARACTER(len=*), OPTIONAL                         :: ref_basis_set
-      TYPE(dbcsr_p_type), DIMENSION(:, :), OPTIONAL, &
-         POINTER                                         :: pmat_external, smat_external
-      LOGICAL, INTENT(IN), OPTIONAL                      :: molecular
-      INTEGER, INTENT(IN), OPTIONAL                      :: max_iter
-      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: eps_grad
-      INTEGER, DIMENSION(:), INTENT(IN), OPTIONAL        :: nmao_external
-      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: eps1_mao
-      INTEGER, INTENT(IN), OPTIONAL                      :: iolevel, unit_nr
+      INTEGER, INTENT(IN), OPTIONAL                      :: unit_nr
 
-      CHARACTER(len=*), PARAMETER :: routineN = 'mao_rhs_zvector'
+      CHARACTER(len=*), PARAMETER                        :: routineN = 'mao_rhs_zvector'
 
-      CHARACTER(len=10)                                  :: mao_basis_set
-      INTEGER                                            :: handle, iab, iatom, ikind, iolev, ispin, &
-                                                            iw, mao_max_iter, natom, nbas, &
-                                                            nimages, nkind, nmao, nspin
-      INTEGER, DIMENSION(:), POINTER                     :: col_blk_sizes, row_blk_sizes
-      LOGICAL                                            :: do_nmao_external, molecule
-      REAL(KIND=dp)                                      :: electra(2), eps1, eps_filter, eps_fun, &
-                                                            mao_eps_grad
-      TYPE(dbcsr_distribution_type), POINTER             :: dbcsr_dist
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_q, matrix_smm, matrix_smo
-      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_p, matrix_s
-      TYPE(dft_control_type), POINTER                    :: dft_control
-      TYPE(gto_basis_set_p_type), DIMENSION(:), POINTER  :: mao_basis_set_list, orb_basis_set_list
-      TYPE(gto_basis_set_type), POINTER                  :: basis_set_a, basis_set_b
-      TYPE(neighbor_list_set_p_type), DIMENSION(:), &
-         POINTER                                         :: smm_list, smo_list
-      TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
-      TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
-      TYPE(qs_kind_type), POINTER                        :: qs_kind
-      TYPE(qs_ks_env_type), POINTER                      :: ks_env
-      TYPE(qs_rho_type), POINTER                         :: rho
+      INTEGER                                            :: handle, iw, iolev
 
       CALL timeset(routineN, handle)
 
-      ! k-points?
-      CALL get_qs_env(qs_env, dft_control=dft_control)
-      nimages = dft_control%nimages
-      CPASSERT(nimages == 1)
+      MARK_USED(qs_env)
+      MARK_USED(mao_coef)
 
       ! output
       IF (PRESENT(unit_nr)) THEN
@@ -358,172 +218,8 @@ CONTAINS
       ELSE
          iw = -1
       END IF
-      IF (PRESENT(iolevel)) THEN
-         iolev = iolevel
-      ELSE
-         iolev = 1
-      END IF
-      IF (iolevel == 0) THEN
-         iw = -1
-      END IF
-
-      ! molecules
-      IF (PRESENT(molecular)) THEN
-         molecule = molecular
-      ELSE
-         molecule = .FALSE.
-      END IF
-
-      ! iterations
-      IF (PRESENT(max_iter)) THEN
-         mao_max_iter = max_iter
-      ELSE
-         mao_max_iter = 0
-      END IF
-
-      ! threshold
-      IF (PRESENT(eps_grad)) THEN
-         mao_eps_grad = eps_grad
-      ELSE
-         mao_eps_grad = 0.00001_dp
-      END IF
-      eps_fun = 10._dp*mao_eps_grad
-
-      do_nmao_external = .FALSE.
-      ! external number of MAOs per atom
-      IF (PRESENT(nmao_external)) THEN
-         do_nmao_external = .TRUE.
-      END IF
-
-      ! mao_threshold
-      IF (PRESENT(eps1_mao)) THEN
-         eps1 = eps1_mao
-      ELSE
-         eps1 = 1000._dp
-      END IF
-
-      IF (iw > 0) THEN
-         WRITE (iw, '(/,T2,A)') '!-----------------------------------------------------------------------------!'
-         WRITE (UNIT=iw, FMT="(T37,A)") "MAO BASIS"
-         WRITE (iw, '(T2,A)') '!-----------------------------------------------------------------------------!'
-      END IF
-
-      ! Reference basis set
-      IF (PRESENT(ref_basis_set)) THEN
-         mao_basis_set = ref_basis_set
-      ELSE
-         mao_basis_set = "ORB"
-      END IF
-
-      CALL get_qs_env(qs_env=qs_env, qs_kind_set=qs_kind_set)
-      nkind = SIZE(qs_kind_set)
-      ALLOCATE (mao_basis_set_list(nkind), orb_basis_set_list(nkind))
-      DO ikind = 1, nkind
-         qs_kind => qs_kind_set(ikind)
-         NULLIFY (mao_basis_set_list(ikind)%gto_basis_set)
-         NULLIFY (orb_basis_set_list(ikind)%gto_basis_set)
-         NULLIFY (basis_set_a, basis_set_b)
-         CALL get_qs_kind(qs_kind=qs_kind, basis_set=basis_set_a, basis_type="ORB")
-         IF (ASSOCIATED(basis_set_a)) orb_basis_set_list(ikind)%gto_basis_set => basis_set_a
-         CALL get_qs_kind(qs_kind=qs_kind, basis_set=basis_set_b, basis_type=mao_basis_set)
-         IF (ASSOCIATED(basis_set_b)) mao_basis_set_list(ikind)%gto_basis_set => basis_set_b
-      END DO
-      IF (iw > 0) THEN
-         DO ikind = 1, nkind
-            IF (.NOT. ASSOCIATED(mao_basis_set_list(ikind)%gto_basis_set)) THEN
-               WRITE (UNIT=iw, FMT="(T2,A,I4)") &
-                  "WARNING: No MAO basis set associated with Kind ", ikind
-            ELSE
-               IF (do_nmao_external) THEN
-                  nmao = nmao_external(ikind)
-               ELSE
-                  CALL get_qs_kind(qs_kind_set(ikind), mao=nmao)
-               END IF
-               nbas = mao_basis_set_list(ikind)%gto_basis_set%nsgf
-               WRITE (UNIT=iw, FMT="(T2,A,I4,T30,A,I2,T56,A,I10)") &
-                  "MAO basis set Kind ", ikind, " MinNum of MAO:", nmao, " Number of BSF:", nbas
-            END IF
-         END DO
-      END IF
-
-      ! neighbor lists
-      NULLIFY (smm_list, smo_list)
-      CALL setup_neighbor_list(smm_list, mao_basis_set_list, molecular=molecule, qs_env=qs_env)
-      CALL setup_neighbor_list(smo_list, mao_basis_set_list, orb_basis_set_list, &
-                               molecular=molecule, qs_env=qs_env)
-
-      ! overlap matrices
-      NULLIFY (matrix_smm, matrix_smo)
-      CALL get_qs_env(qs_env, ks_env=ks_env)
-      CALL build_overlap_matrix_simple(ks_env, matrix_smm, &
-                                       mao_basis_set_list, mao_basis_set_list, smm_list)
-      CALL build_overlap_matrix_simple(ks_env, matrix_smo, &
-                                       mao_basis_set_list, orb_basis_set_list, smo_list)
-
-      ! get reference density matrix and overlap matrix
-      IF (PRESENT(pmat_external)) THEN
-         matrix_p => pmat_external
-      ELSE
-         CALL get_qs_env(qs_env, rho=rho)
-         CALL qs_rho_get(rho, rho_ao_kp=matrix_p)
-      END IF
-      IF (PRESENT(smat_external)) THEN
-         matrix_s => smat_external
-      ELSE
-         CALL get_qs_env(qs_env, matrix_s_kp=matrix_s)
-      END IF
-
-      nspin = SIZE(matrix_p, 1)
-      eps_filter = 0.0_dp
-      ! Q matrix
-      CALL mao_build_q(matrix_q, matrix_p, matrix_s, matrix_smm, matrix_smo, smm_list, electra, eps_filter)
-
-      ! MAO matrices
-      CALL get_qs_env(qs_env=qs_env, natom=natom)
-      CALL get_ks_env(ks_env=ks_env, particle_set=particle_set, dbcsr_dist=dbcsr_dist)
-      NULLIFY (mao_coef)
-      CALL dbcsr_allocate_matrix_set(mao_coef, nspin)
-      ALLOCATE (row_blk_sizes(natom), col_blk_sizes(natom))
-      CALL get_particle_set(particle_set, qs_kind_set, nsgf=row_blk_sizes, &
-                            basis=mao_basis_set_list)
-      IF (do_nmao_external) THEN
-         DO iatom = 1, natom
-            CALL get_atomic_kind(atomic_kind=particle_set(iatom)%atomic_kind, &
-                                 kind_number=ikind)
-            col_blk_sizes(iatom) = nmao_external(ikind)
-         END DO
-      ELSE
-         CALL get_particle_set(particle_set, qs_kind_set, nmao=col_blk_sizes)
-      END IF
-
-      ! check if MAOs have been specified
-      DO iab = 1, natom
-         IF (col_blk_sizes(iab) < 0) &
-            CPABORT("Minimum number of MAOs has to be specified in KIND section for all elements")
-      END DO
-      DO ispin = 1, nspin
-         ! coefficients
-         ALLOCATE (mao_coef(ispin)%matrix)
-         CALL dbcsr_create(matrix=mao_coef(ispin)%matrix, &
-                           name="MAO_COEF", dist=dbcsr_dist, matrix_type=dbcsr_type_no_symmetry, &
-                           row_blk_size=row_blk_sizes, col_blk_size=col_blk_sizes, nze=0)
-         CALL dbcsr_reserve_diag_blocks(matrix=mao_coef(ispin)%matrix)
-      END DO
-      DEALLOCATE (row_blk_sizes, col_blk_sizes)
-
-      ! optimize MAOs
-      CALL mao_optimize(mao_coef, matrix_q, matrix_smm, electra, mao_max_iter, mao_eps_grad, eps1, &
-                        iolev, iw)
-
-      ! Deallocate the neighbor list structure
-      CALL release_neighbor_list_sets(smm_list)
-      CALL release_neighbor_list_sets(smo_list)
-
-      DEALLOCATE (mao_basis_set_list, orb_basis_set_list)
-
-      IF (ASSOCIATED(matrix_smm)) CALL dbcsr_deallocate_matrix_set(matrix_smm)
-      IF (ASSOCIATED(matrix_smo)) CALL dbcsr_deallocate_matrix_set(matrix_smo)
-      IF (ASSOCIATED(matrix_q)) CALL dbcsr_deallocate_matrix_set(matrix_q)
+      iolev = mao_env%iolevel
+      IF (iolev == 0) iw = -1
 
       CALL timestop(handle)
 
@@ -532,63 +228,24 @@ CONTAINS
 ! **************************************************************************************************
 !> \brief ...
 !> \param qs_env ...
+!> \param mao_env ...
 !> \param mao_coef ...
-!> \param ref_basis_set ...
-!> \param pmat_external ...
-!> \param smat_external ...
-!> \param molecular ...
-!> \param max_iter ...
-!> \param eps_grad ...
-!> \param nmao_external ...
-!> \param eps1_mao ...
-!> \param iolevel ...
 !> \param unit_nr ...
 ! **************************************************************************************************
-   SUBROUTINE mao_basis_forces(qs_env, mao_coef, ref_basis_set, pmat_external, smat_external, &
-                                 molecular, max_iter, eps_grad, nmao_external, &
-                                 eps1_mao, iolevel, unit_nr)
+   SUBROUTINE mao_basis_forces(qs_env, mao_env, mao_coef, unit_nr)
       TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(mao_type), POINTER                            :: mao_env
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mao_coef
-      CHARACTER(len=*), OPTIONAL                         :: ref_basis_set
-      TYPE(dbcsr_p_type), DIMENSION(:, :), OPTIONAL, &
-         POINTER                                         :: pmat_external, smat_external
-      LOGICAL, INTENT(IN), OPTIONAL                      :: molecular
-      INTEGER, INTENT(IN), OPTIONAL                      :: max_iter
-      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: eps_grad
-      INTEGER, DIMENSION(:), INTENT(IN), OPTIONAL        :: nmao_external
-      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: eps1_mao
-      INTEGER, INTENT(IN), OPTIONAL                      :: iolevel, unit_nr
+      INTEGER, INTENT(IN), OPTIONAL                      :: unit_nr
 
-      CHARACTER(len=*), PARAMETER :: routineN = 'mao_basis_forces'
+      CHARACTER(len=*), PARAMETER                        :: routineN = 'mao_basis_forces'
 
-      CHARACTER(len=10)                                  :: mao_basis_set
-      INTEGER                                            :: handle, iab, iatom, ikind, iolev, ispin, &
-                                                            iw, mao_max_iter, natom, nbas, &
-                                                            nimages, nkind, nmao, nspin
-      INTEGER, DIMENSION(:), POINTER                     :: col_blk_sizes, row_blk_sizes
-      LOGICAL                                            :: do_nmao_external, molecule
-      REAL(KIND=dp)                                      :: electra(2), eps1, eps_filter, eps_fun, &
-                                                            mao_eps_grad
-      TYPE(dbcsr_distribution_type), POINTER             :: dbcsr_dist
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_q, matrix_smm, matrix_smo
-      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_p, matrix_s
-      TYPE(dft_control_type), POINTER                    :: dft_control
-      TYPE(gto_basis_set_p_type), DIMENSION(:), POINTER  :: mao_basis_set_list, orb_basis_set_list
-      TYPE(gto_basis_set_type), POINTER                  :: basis_set_a, basis_set_b
-      TYPE(neighbor_list_set_p_type), DIMENSION(:), &
-         POINTER                                         :: smm_list, smo_list
-      TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
-      TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
-      TYPE(qs_kind_type), POINTER                        :: qs_kind
-      TYPE(qs_ks_env_type), POINTER                      :: ks_env
-      TYPE(qs_rho_type), POINTER                         :: rho
+      INTEGER                                            :: handle, iw, iolev
 
       CALL timeset(routineN, handle)
 
-      ! k-points?
-      CALL get_qs_env(qs_env, dft_control=dft_control)
-      nimages = dft_control%nimages
-      CPASSERT(nimages == 1)
+      MARK_USED(qs_env)
+      MARK_USED(mao_coef)
 
       ! output
       IF (PRESENT(unit_nr)) THEN
@@ -596,172 +253,8 @@ CONTAINS
       ELSE
          iw = -1
       END IF
-      IF (PRESENT(iolevel)) THEN
-         iolev = iolevel
-      ELSE
-         iolev = 1
-      END IF
-      IF (iolevel == 0) THEN
-         iw = -1
-      END IF
-
-      ! molecules
-      IF (PRESENT(molecular)) THEN
-         molecule = molecular
-      ELSE
-         molecule = .FALSE.
-      END IF
-
-      ! iterations
-      IF (PRESENT(max_iter)) THEN
-         mao_max_iter = max_iter
-      ELSE
-         mao_max_iter = 0
-      END IF
-
-      ! threshold
-      IF (PRESENT(eps_grad)) THEN
-         mao_eps_grad = eps_grad
-      ELSE
-         mao_eps_grad = 0.00001_dp
-      END IF
-      eps_fun = 10._dp*mao_eps_grad
-
-      do_nmao_external = .FALSE.
-      ! external number of MAOs per atom
-      IF (PRESENT(nmao_external)) THEN
-         do_nmao_external = .TRUE.
-      END IF
-
-      ! mao_threshold
-      IF (PRESENT(eps1_mao)) THEN
-         eps1 = eps1_mao
-      ELSE
-         eps1 = 1000._dp
-      END IF
-
-      IF (iw > 0) THEN
-         WRITE (iw, '(/,T2,A)') '!-----------------------------------------------------------------------------!'
-         WRITE (UNIT=iw, FMT="(T37,A)") "MAO BASIS"
-         WRITE (iw, '(T2,A)') '!-----------------------------------------------------------------------------!'
-      END IF
-
-      ! Reference basis set
-      IF (PRESENT(ref_basis_set)) THEN
-         mao_basis_set = ref_basis_set
-      ELSE
-         mao_basis_set = "ORB"
-      END IF
-
-      CALL get_qs_env(qs_env=qs_env, qs_kind_set=qs_kind_set)
-      nkind = SIZE(qs_kind_set)
-      ALLOCATE (mao_basis_set_list(nkind), orb_basis_set_list(nkind))
-      DO ikind = 1, nkind
-         qs_kind => qs_kind_set(ikind)
-         NULLIFY (mao_basis_set_list(ikind)%gto_basis_set)
-         NULLIFY (orb_basis_set_list(ikind)%gto_basis_set)
-         NULLIFY (basis_set_a, basis_set_b)
-         CALL get_qs_kind(qs_kind=qs_kind, basis_set=basis_set_a, basis_type="ORB")
-         IF (ASSOCIATED(basis_set_a)) orb_basis_set_list(ikind)%gto_basis_set => basis_set_a
-         CALL get_qs_kind(qs_kind=qs_kind, basis_set=basis_set_b, basis_type=mao_basis_set)
-         IF (ASSOCIATED(basis_set_b)) mao_basis_set_list(ikind)%gto_basis_set => basis_set_b
-      END DO
-      IF (iw > 0) THEN
-         DO ikind = 1, nkind
-            IF (.NOT. ASSOCIATED(mao_basis_set_list(ikind)%gto_basis_set)) THEN
-               WRITE (UNIT=iw, FMT="(T2,A,I4)") &
-                  "WARNING: No MAO basis set associated with Kind ", ikind
-            ELSE
-               IF (do_nmao_external) THEN
-                  nmao = nmao_external(ikind)
-               ELSE
-                  CALL get_qs_kind(qs_kind_set(ikind), mao=nmao)
-               END IF
-               nbas = mao_basis_set_list(ikind)%gto_basis_set%nsgf
-               WRITE (UNIT=iw, FMT="(T2,A,I4,T30,A,I2,T56,A,I10)") &
-                  "MAO basis set Kind ", ikind, " MinNum of MAO:", nmao, " Number of BSF:", nbas
-            END IF
-         END DO
-      END IF
-
-      ! neighbor lists
-      NULLIFY (smm_list, smo_list)
-      CALL setup_neighbor_list(smm_list, mao_basis_set_list, molecular=molecule, qs_env=qs_env)
-      CALL setup_neighbor_list(smo_list, mao_basis_set_list, orb_basis_set_list, &
-                               molecular=molecule, qs_env=qs_env)
-
-      ! overlap matrices
-      NULLIFY (matrix_smm, matrix_smo)
-      CALL get_qs_env(qs_env, ks_env=ks_env)
-      CALL build_overlap_matrix_simple(ks_env, matrix_smm, &
-                                       mao_basis_set_list, mao_basis_set_list, smm_list)
-      CALL build_overlap_matrix_simple(ks_env, matrix_smo, &
-                                       mao_basis_set_list, orb_basis_set_list, smo_list)
-
-      ! get reference density matrix and overlap matrix
-      IF (PRESENT(pmat_external)) THEN
-         matrix_p => pmat_external
-      ELSE
-         CALL get_qs_env(qs_env, rho=rho)
-         CALL qs_rho_get(rho, rho_ao_kp=matrix_p)
-      END IF
-      IF (PRESENT(smat_external)) THEN
-         matrix_s => smat_external
-      ELSE
-         CALL get_qs_env(qs_env, matrix_s_kp=matrix_s)
-      END IF
-
-      nspin = SIZE(matrix_p, 1)
-      eps_filter = 0.0_dp
-      ! Q matrix
-      CALL mao_build_q(matrix_q, matrix_p, matrix_s, matrix_smm, matrix_smo, smm_list, electra, eps_filter)
-
-      ! MAO matrices
-      CALL get_qs_env(qs_env=qs_env, natom=natom)
-      CALL get_ks_env(ks_env=ks_env, particle_set=particle_set, dbcsr_dist=dbcsr_dist)
-      NULLIFY (mao_coef)
-      CALL dbcsr_allocate_matrix_set(mao_coef, nspin)
-      ALLOCATE (row_blk_sizes(natom), col_blk_sizes(natom))
-      CALL get_particle_set(particle_set, qs_kind_set, nsgf=row_blk_sizes, &
-                            basis=mao_basis_set_list)
-      IF (do_nmao_external) THEN
-         DO iatom = 1, natom
-            CALL get_atomic_kind(atomic_kind=particle_set(iatom)%atomic_kind, &
-                                 kind_number=ikind)
-            col_blk_sizes(iatom) = nmao_external(ikind)
-         END DO
-      ELSE
-         CALL get_particle_set(particle_set, qs_kind_set, nmao=col_blk_sizes)
-      END IF
-
-      ! check if MAOs have been specified
-      DO iab = 1, natom
-         IF (col_blk_sizes(iab) < 0) &
-            CPABORT("Minimum number of MAOs has to be specified in KIND section for all elements")
-      END DO
-      DO ispin = 1, nspin
-         ! coefficients
-         ALLOCATE (mao_coef(ispin)%matrix)
-         CALL dbcsr_create(matrix=mao_coef(ispin)%matrix, &
-                           name="MAO_COEF", dist=dbcsr_dist, matrix_type=dbcsr_type_no_symmetry, &
-                           row_blk_size=row_blk_sizes, col_blk_size=col_blk_sizes, nze=0)
-         CALL dbcsr_reserve_diag_blocks(matrix=mao_coef(ispin)%matrix)
-      END DO
-      DEALLOCATE (row_blk_sizes, col_blk_sizes)
-
-      ! optimize MAOs
-      CALL mao_optimize(mao_coef, matrix_q, matrix_smm, electra, mao_max_iter, mao_eps_grad, eps1, &
-                        iolev, iw)
-
-      ! Deallocate the neighbor list structure
-      CALL release_neighbor_list_sets(smm_list)
-      CALL release_neighbor_list_sets(smo_list)
-
-      DEALLOCATE (mao_basis_set_list, orb_basis_set_list)
-
-      IF (ASSOCIATED(matrix_smm)) CALL dbcsr_deallocate_matrix_set(matrix_smm)
-      IF (ASSOCIATED(matrix_smo)) CALL dbcsr_deallocate_matrix_set(matrix_smo)
-      IF (ASSOCIATED(matrix_q)) CALL dbcsr_deallocate_matrix_set(matrix_q)
+      iolev = mao_env%iolevel
+      IF (iolev == 0) iw = -1
 
       CALL timestop(handle)
 

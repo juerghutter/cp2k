@@ -93,6 +93,8 @@ MODULE energy_corrections
                                               default_string_length,&
                                               dp
    USE mao_basis,                       ONLY: mao_generate_basis
+   USE mao_types,                       ONLY: mao_type, create_mao_type, release_mao_type
+   USE mao_forces,                      ONLY: mao_lagrangian
    USE mathlib,                         ONLY: det_3x3
    USE message_passing,                 ONLY: mp_sum
    USE molecule_types,                  ONLY: molecule_type
@@ -357,17 +359,19 @@ CONTAINS
          CALL ec_build_neighborlist(qs_env, ec_env)
          !
          CALL ec_build_core_hamiltonian(qs_env, ec_env)
-         CALL ks_ref_potential(qs_env, ec_env%vh_rspace, ec_env%vxc_rspace, ec_env%vtau_rspace, ec_env%vadmm_rspace, &
-                               ec_env%ehartree, exc)
+         CALL ks_ref_potential(qs_env, ec_env%vh_rspace, ec_env%vxc_rspace, ec_env%vtau_rspace, &
+                               ec_env%vadmm_rspace, ec_env%ehartree, exc)
          CALL ec_build_ks_matrix(qs_env, ec_env)
          !
          IF (ec_env%mao) THEN
             ! MAO basis
+            CALL create_mao_type(ec_env%mao_env, molecular=.TRUE., max_iter=ec_env%mao_max_iter, &
+                                 eps_grad=ec_env%mao_eps_grad, eps1_mao=ec_env%mao_eps1, &
+                                 iolevel=ec_env%mao_iolevel)
             IF (ASSOCIATED(ec_env%mao_coef)) CALL dbcsr_deallocate_matrix_set(ec_env%mao_coef)
             NULLIFY (ec_env%mao_coef)
-            CALL mao_generate_basis(qs_env, ec_env%mao_coef, ref_basis_set="HARRIS", molecular=.TRUE., &
-                                    max_iter=ec_env%mao_max_iter, eps_grad=ec_env%mao_eps_grad, &
-                                    eps1_mao=ec_env%mao_eps1, iolevel=ec_env%mao_iolevel, unit_nr=unit_nr)
+            CALL mao_generate_basis(qs_env, ec_env%mao_env, ec_env%mao_coef, ref_basis_set="HARRIS", &
+                                    unit_nr=unit_nr)
          END IF
          !
          CALL ec_ks_solver(qs_env, ec_env)
@@ -384,7 +388,9 @@ CONTAINS
          CALL ec_build_ks_matrix_force(qs_env, ec_env)
          IF (ec_env%mao) THEN
             ! MAO Lagrange multipliers
-!deb        CALL mao_lagrangian(qs_env, ec_env)
+            NULLIFY (ec_env%mao_lagr)
+            CALL mao_lagrangian(qs_env, ec_env%mao_env, ec_env%mao_coef, ec_env%mao_lagr,&
+                                ec_env%matrix_ks, unit_nr=unit_nr)
             ! MAO contribution to RHS of z-vector equation
 !deb        CALL mao_zvector_rhs(qs_env, ec_env)
          END IF
@@ -410,6 +416,9 @@ CONTAINS
 
          CALL ec_properties(qs_env, ec_env)
 
+         IF (ec_env%mao) THEN
+            CALL release_mao_type(ec_env%mao_env)
+         END IF
          ! Deallocate matrices
          ! is this needed here????
          IF (ASSOCIATED(ec_env%matrix_ks)) CALL dbcsr_deallocate_matrix_set(ec_env%matrix_ks)
@@ -1566,7 +1575,7 @@ CONTAINS
          CALL dbcsr_multiply("N", "N", 1.0_dp, ec_env%matrix_s(1, 1)%matrix, mao_coef(ispin)%matrix, &
                              0.0_dp, cgmat)
          CALL dbcsr_multiply("T", "N", 1.0_dp, mao_coef(ispin)%matrix, cgmat, 0.0_dp, smat(ispin, 1)%matrix)
-         CALL dbcsr_multiply("N", "N", 1.0_dp, ec_env%matrix_ks(1, 1)%matrix, mao_coef(ispin)%matrix, &
+         CALL dbcsr_multiply("N", "N", 1.0_dp, ec_env%matrix_ks(ispin, 1)%matrix, mao_coef(ispin)%matrix, &
                              0.0_dp, cgmat)
          CALL dbcsr_multiply("T", "N", 1.0_dp, mao_coef(ispin)%matrix, cgmat, 0.0_dp, ksmat(ispin, 1)%matrix)
       END DO
@@ -1630,10 +1639,10 @@ CONTAINS
       END DO
       CALL dbcsr_release(cgmat)
 
-      CALL dbcsr_deallocate_matrix_set(ksmat)
-      CALL dbcsr_deallocate_matrix_set(smat)
-      CALL dbcsr_deallocate_matrix_set(pmat)
-      CALL dbcsr_deallocate_matrix_set(wmat)
+      ec_env%mao_env%matrix_p => pmat
+      ec_env%mao_env%matrix_s => smat
+      ec_env%mao_env%matrix_ks => ksmat
+      ec_env%mao_env%matrix_w => wmat
 
       CALL timestop(handle)
 
