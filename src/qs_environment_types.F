@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -387,6 +387,9 @@ CONTAINS
 !> \param matrix_ks_aux_fit_im ...
 !> \param matrix_ks_aux_fit_dft ...
 !> \param matrix_ks_aux_fit_hfx ...
+!> \param matrix_ks_aux_fit_kp ...
+!> \param matrix_s_aux_fit_kp ...
+!> \param matrix_s_aux_fit_vs_orb_kp ...
 !> \param matrix_s ...
 !> \param matrix_s_aux_fit ...
 !> \param matrix_s_aux_fit_vs_orb ...
@@ -511,6 +514,7 @@ CONTAINS
                          matrix_h, matrix_ks, matrix_ks_im, matrix_vxc, run_rtp, rtp, &
                          matrix_h_kp, matrix_ks_kp, matrix_vxc_kp, kinetic_kp, matrix_s_kp, matrix_w_kp, matrix_s_RI_aux_kp, &
                          matrix_ks_aux_fit, matrix_ks_aux_fit_im, matrix_ks_aux_fit_dft, matrix_ks_aux_fit_hfx, &
+                         matrix_ks_aux_fit_kp, matrix_s_aux_fit_kp, matrix_s_aux_fit_vs_orb_kp, &
                          matrix_s, matrix_s_aux_fit, matrix_s_aux_fit_vs_orb, matrix_s_RI_aux, matrix_w, &
                          matrix_w_mp2, matrix_p_mp2, rho, rho_aux_fit, rho_aux_fit_buffer, &
                          rho_buffer, rho_xc, pw_env, ewald_env, ewald_pw, active_space, &
@@ -564,10 +568,19 @@ CONTAINS
                                                             matrix_vxc_kp, kinetic_kp, &
                                                             matrix_s_kp, matrix_w_kp, &
                                                             matrix_s_RI_aux_kp
-      TYPE(dbcsr_p_type), DIMENSION(:), OPTIONAL, POINTER :: matrix_ks_aux_fit, &
-         matrix_ks_aux_fit_im, matrix_ks_aux_fit_dft, matrix_ks_aux_fit_hfx, matrix_s, &
-         matrix_s_aux_fit, matrix_s_aux_fit_vs_orb, matrix_s_RI_aux, matrix_w, matrix_w_mp2, &
-         matrix_p_mp2
+      TYPE(dbcsr_p_type), DIMENSION(:), OPTIONAL, &
+         POINTER                                         :: matrix_ks_aux_fit, matrix_ks_aux_fit_im, &
+                                                            matrix_ks_aux_fit_dft, &
+                                                            matrix_ks_aux_fit_hfx
+      TYPE(dbcsr_p_type), DIMENSION(:, :), OPTIONAL, &
+         POINTER                                         :: matrix_ks_aux_fit_kp, &
+                                                            matrix_s_aux_fit_kp, &
+                                                            matrix_s_aux_fit_vs_orb_kp
+      TYPE(dbcsr_p_type), DIMENSION(:), OPTIONAL, &
+         POINTER                                         :: matrix_s, matrix_s_aux_fit, &
+                                                            matrix_s_aux_fit_vs_orb, &
+                                                            matrix_s_RI_aux, matrix_w, &
+                                                            matrix_w_mp2, matrix_p_mp2
       TYPE(qs_rho_type), OPTIONAL, POINTER               :: rho, rho_aux_fit, rho_aux_fit_buffer, &
                                                             rho_buffer, rho_xc
       TYPE(pw_env_type), OPTIONAL, POINTER               :: pw_env
@@ -788,10 +801,13 @@ CONTAINS
                       matrix_ks_aux_fit_im=matrix_ks_aux_fit_im, &
                       matrix_ks_aux_fit_dft=matrix_ks_aux_fit_dft, &
                       matrix_ks_aux_fit_hfx=matrix_ks_aux_fit_hfx, &
+                      matrix_ks_aux_fit_kp=matrix_ks_aux_fit_kp, &
                       kinetic=kinetic, &
                       matrix_s=matrix_s, &
                       matrix_s_aux_fit=matrix_s_aux_fit, &
                       matrix_s_aux_fit_vs_orb=matrix_s_aux_fit_vs_orb, &
+                      matrix_s_aux_fit_kp=matrix_s_aux_fit_kp, &
+                      matrix_s_aux_fit_vs_orb_kp=matrix_s_aux_fit_vs_orb_kp, &
                       matrix_s_RI_aux=matrix_s_RI_aux, &
                       matrix_w=matrix_w, &
                       matrix_w_mp2=matrix_w_mp2, &

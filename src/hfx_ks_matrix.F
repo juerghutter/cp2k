@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -342,7 +342,7 @@ CONTAINS
                                    hf_energy, just_energy, calculate_forces, use_virial)
       END IF ! do_adiabatic_rescaling
 
-      !update the hfx aux_fit matrixIF (dft_control%do_admm) THEN
+      !update the hfx aux_fit matrix
       IF (dft_control%do_admm) THEN
          DO ispin = 1, nspins
             CALL dbcsr_add(matrix_ks_aux_fit_hfx(ispin)%matrix, matrix_ks_aux_fit(ispin)%matrix, &
@@ -384,11 +384,12 @@ CONTAINS
       REAL(dp)                                           :: eh1, ehfx, eold
       REAL(dp), ALLOCATABLE, DIMENSION(:)                :: hf_energy
       TYPE(cp_para_env_type), POINTER                    :: para_env
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks_1d, matrix_ks_aux_fit, &
-                                                            matrix_ks_aux_fit_hfx, &
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks_aux_fit_hfx, &
                                                             matrix_ks_aux_fit_im, matrix_ks_im, &
                                                             rho_ao_resp
-      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_h, matrix_ks_orb, rho_ao_orb
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_h, matrix_ks_1d, &
+                                                            matrix_ks_aux_fit_kp, matrix_ks_orb, &
+                                                            rho_ao_orb
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(hfx_type), DIMENSION(:, :), POINTER           :: x_data
       TYPE(mo_set_p_type), DIMENSION(:), POINTER         :: mo_array
@@ -405,7 +406,7 @@ CONTAINS
 
       NULLIFY (auxbas_pw_pool, dft_control, force, hfx_sections, input, &
                para_env, poisson_env, pw_env, virial, matrix_ks_im, &
-               matrix_ks_orb, rho_ao_orb, matrix_h, matrix_ks_aux_fit, &
+               matrix_ks_orb, rho_ao_orb, matrix_h, matrix_ks_aux_fit_kp, &
                matrix_ks_aux_fit_im, matrix_ks_aux_fit_hfx)
 
       CALL get_qs_env(qs_env=qs_env, &
@@ -416,7 +417,7 @@ CONTAINS
                       pw_env=pw_env, &
                       virial=virial, &
                       matrix_ks_im=matrix_ks_im, &
-                      matrix_ks_aux_fit=matrix_ks_aux_fit, &
+                      matrix_ks_aux_fit_kp=matrix_ks_aux_fit_kp, &
                       matrix_ks_aux_fit_im=matrix_ks_aux_fit_im, &
                       matrix_ks_aux_fit_hfx=matrix_ks_aux_fit_hfx, &
                       s_mstruct_changed=s_mstruct_changed, &
@@ -452,10 +453,11 @@ CONTAINS
 
       ! *** Initialize the auxiliary ks matrix to zero if required
       IF (dft_control%do_admm) THEN
-         CPABORT("ADMM KP")
          DO ispin = 1, nspins
             ! admm matrices need image index
-            CALL dbcsr_set(matrix_ks_aux_fit(ispin)%matrix, 0.0_dp)
+            DO img = 1, nimages
+               CALL dbcsr_set(matrix_ks_aux_fit_kp(ispin, img)%matrix, 0.0_dp)
+            END DO
          END DO
       END IF
       DO ispin = 1, nspins
@@ -486,12 +488,12 @@ CONTAINS
 
          ! fetch the correct matrices for normal HFX or ADMM
          IF (dft_control%do_admm) THEN
-            CPABORT("ADMM KP")
-            ! ADMM matrices need additional index
-            CALL get_qs_env(qs_env=qs_env, matrix_ks_aux_fit=matrix_ks_1d, &
+            CALL get_qs_env(qs_env=qs_env, matrix_ks_aux_fit_kp=matrix_ks_1d, &
                             rho_aux_fit=rho_orb)
-            ns = SIZE(matrix_ks_1d)
-            matrix_ks_orb(1:ns, 1:1) => matrix_ks_1d(1:ns)
+            DO img = 1, nimages
+               ns = SIZE(matrix_ks_1d(:, img))
+               matrix_ks_orb(1:ns, img:img) => matrix_ks_1d(1:ns, img)
+            END DO
          ELSE
             CALL get_qs_env(qs_env=qs_env, matrix_ks_kp=matrix_ks_orb, rho=rho_orb)
          END IF
@@ -511,12 +513,14 @@ CONTAINS
                                   s_mstruct_changed, nspins, &
                                   x_data(irep, 1)%general_parameter%fraction)
             IF (dft_control%do_admm) THEN
-               CPABORT("ADMM KP")
-               !for ADMMS, we need the exchange matrix k(d) for both spins
-               DO ispin = 1, mspin
-                  CALL dbcsr_copy(matrix_ks_aux_fit_hfx(ispin)%matrix, matrix_ks_orb(ispin, 1)%matrix, &
-                                  name="HF exch. part of matrix_ks_aux_fit for ADMMS")
-               ENDDO
+               CPABORT("ADMM KP for HFX RI not yet implemented")
+               DO img = 1, nimages
+                  !for ADMMS, we need the exchange matrix k(d) for both spins
+                  DO ispin = 1, mspin
+                     CALL dbcsr_copy(matrix_ks_aux_fit_hfx(ispin)%matrix, matrix_ks_orb(ispin, img)%matrix, &
+                                     name="HF exch. part of matrix_ks_aux_fit for ADMMS")
+                  ENDDO
+               END DO
             END IF
          ELSE
             DO ispin = 1, mspin
@@ -571,10 +575,10 @@ CONTAINS
       ENDIF
 
       !update the hfx aux_fit matrixIF (dft_control%do_admm) THEN
-      IF (dft_control%do_admm) THEN
-         CPABORT("ADMM KP")
+      IF (dft_control%do_admm .AND. x_data(irep, 1)%do_hfx_ri) THEN
+         CPABORT("ADMM KP for HFX RI not yet implemented")
          DO ispin = 1, nspins
-            CALL dbcsr_add(matrix_ks_aux_fit_hfx(ispin)%matrix, matrix_ks_aux_fit(ispin)%matrix, &
+            CALL dbcsr_add(matrix_ks_aux_fit_hfx(ispin)%matrix, matrix_ks_aux_fit_kp(ispin, 1)%matrix, &
                            0.0_dp, 1.0_dp)
          END DO
       END IF

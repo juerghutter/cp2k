@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -1451,17 +1451,18 @@ CONTAINS
 
       CHARACTER(LEN=default_string_length)               :: headline
       INTEGER                                            :: ic, ispin, nimg
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks_aux_fit, &
-                                                            matrix_ks_aux_fit_dft, &
-                                                            matrix_ks_aux_fit_hfx, matrix_s_aux_fit
-      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_s_kp, matrixkp_ks
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks_aux_fit_dft, &
+                                                            matrix_ks_aux_fit_hfx
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_ks_aux_fit_kp, &
+                                                            matrix_s_aux_fit_kp, matrix_s_kp, &
+                                                            matrixkp_ks
       TYPE(dbcsr_type), POINTER                          :: refmatrix
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(neighbor_list_set_p_type), DIMENSION(:), &
          POINTER                                         :: sab_aux_fit, sab_orb
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
 
-      NULLIFY (dft_control, ks_env, matrix_s_kp, matrix_s_aux_fit, sab_orb, sab_aux_fit, matrixkp_ks)
+      NULLIFY (dft_control, ks_env, matrix_s_kp, sab_orb, sab_aux_fit, matrixkp_ks)
 
       CALL get_qs_env(qs_env, &
                       dft_control=dft_control, &
@@ -1499,28 +1500,30 @@ CONTAINS
       ! Allocate matrix_ks_aux_fit if requested and put it in the QS environment
       ! Also matrix_ks_aux_fit_dft, matrix_ks_aux_fit_hfx for ADMMS
       IF (dft_control%do_admm) THEN
-         NULLIFY (matrix_ks_aux_fit, matrix_ks_aux_fit_dft, matrix_ks_aux_fit_hfx)
+         NULLIFY (matrix_ks_aux_fit_kp, matrix_ks_aux_fit_dft, matrix_ks_aux_fit_hfx, matrix_s_aux_fit_kp)
          CALL get_qs_env(qs_env, &
-                         matrix_ks_aux_fit=matrix_ks_aux_fit, &
+                         matrix_ks_aux_fit_kp=matrix_ks_aux_fit_kp, &
                          matrix_ks_aux_fit_dft=matrix_ks_aux_fit_dft, &
                          matrix_ks_aux_fit_hfx=matrix_ks_aux_fit_hfx, &
-                         matrix_s_aux_fit=matrix_s_aux_fit)
-         IF (.NOT. ASSOCIATED(matrix_ks_aux_fit)) THEN
-            refmatrix => matrix_s_aux_fit(1)%matrix
-            CALL dbcsr_allocate_matrix_set(matrix_ks_aux_fit, dft_control%nspins)
+                         matrix_s_aux_fit_kp=matrix_s_aux_fit_kp)
+         IF (.NOT. ASSOCIATED(matrix_ks_aux_fit_kp)) THEN
+            refmatrix => matrix_s_aux_fit_kp(1, 1)%matrix
+            CALL dbcsr_allocate_matrix_set(matrix_ks_aux_fit_kp, dft_control%nspins, nimg)
             DO ispin = 1, dft_control%nspins
-               ALLOCATE (matrix_ks_aux_fit(ispin)%matrix)
-               CALL dbcsr_create(matrix=matrix_ks_aux_fit(ispin)%matrix, template=refmatrix, &
-                                 name="KOHN-SHAM_MATRIX for ADMM", &
-                                 matrix_type=dbcsr_type_symmetric, nze=0)
-               CALL cp_dbcsr_alloc_block_from_nbl(matrix_ks_aux_fit(ispin)%matrix, sab_aux_fit)
-               CALL dbcsr_set(matrix_ks_aux_fit(ispin)%matrix, 0.0_dp)
-            ENDDO
-            CALL set_ks_env(ks_env, matrix_ks_aux_fit=matrix_ks_aux_fit)
+               DO ic = 1, nimg
+                  ALLOCATE (matrix_ks_aux_fit_kp(ispin, ic)%matrix)
+                  CALL dbcsr_create(matrix=matrix_ks_aux_fit_kp(ispin, ic)%matrix, template=refmatrix, &
+                                    name="KOHN-SHAM_MATRIX for ADMM", &
+                                    matrix_type=dbcsr_type_symmetric, nze=0)
+                  CALL cp_dbcsr_alloc_block_from_nbl(matrix_ks_aux_fit_kp(ispin, ic)%matrix, sab_aux_fit)
+                  CALL dbcsr_set(matrix_ks_aux_fit_kp(ispin, ic)%matrix, 0.0_dp)
+               END DO
+            END DO
+            CALL set_ks_env(ks_env, matrix_ks_aux_fit_kp=matrix_ks_aux_fit_kp)
          END IF
          ! same allocation procedure for matrix_ks_aux_fit_dft
          IF (.NOT. ASSOCIATED(matrix_ks_aux_fit_dft)) THEN
-            refmatrix => matrix_s_aux_fit(1)%matrix
+            refmatrix => matrix_s_aux_fit_kp(1, 1)%matrix
             CALL dbcsr_allocate_matrix_set(matrix_ks_aux_fit_dft, dft_control%nspins)
             DO ispin = 1, dft_control%nspins
                ALLOCATE (matrix_ks_aux_fit_dft(ispin)%matrix)
@@ -1534,7 +1537,7 @@ CONTAINS
          END IF
          ! same allocation procedure for matrix_ks_aux_fit_hfx
          IF (.NOT. ASSOCIATED(matrix_ks_aux_fit_hfx)) THEN
-            refmatrix => matrix_s_aux_fit(1)%matrix
+            refmatrix => matrix_s_aux_fit_kp(1, 1)%matrix
             CALL dbcsr_allocate_matrix_set(matrix_ks_aux_fit_hfx, dft_control%nspins)
             DO ispin = 1, dft_control%nspins
                ALLOCATE (matrix_ks_aux_fit_hfx(ispin)%matrix)

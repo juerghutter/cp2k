@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -107,7 +107,6 @@ CONTAINS
       LOGICAL                                            :: do_kpoints, my_admm, my_rebuild_ao, &
                                                             my_rebuild_grids
       REAL(KIND=dp), DIMENSION(:), POINTER               :: tot_rho_r
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_s_kp, rho_ao_kp
       TYPE(dbcsr_type), POINTER                          :: refmatrix, tmatrix
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -122,7 +121,7 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      NULLIFY (pw_env, auxbas_pw_pool, matrix_s, matrix_s_kp, dft_control)
+      NULLIFY (pw_env, auxbas_pw_pool, matrix_s_kp, dft_control)
       NULLIFY (tot_rho_r, rho_ao_kp, rho_r, rho_g, drho_r, drho_g, tau_r, tau_g)
       NULLIFY (rho_r_sccs)
       NULLIFY (sab_orb)
@@ -144,13 +143,11 @@ CONTAINS
       nimg = dft_control%nimages
 
       IF (my_admm) THEN
-         CPASSERT(.NOT. do_kpoints)
-         CALL get_qs_env(qs_env, matrix_s_aux_fit=matrix_s, sab_aux_fit=sab_orb)
-         refmatrix => matrix_s(1)%matrix
+         CALL get_qs_env(qs_env, matrix_s_aux_fit_kp=matrix_s_kp, sab_aux_fit=sab_orb)
       ELSE
          CALL get_qs_env(qs_env, matrix_s_kp=matrix_s_kp, sab_orb=sab_orb)
-         refmatrix => matrix_s_kp(1, 1)%matrix
       END IF
+      refmatrix => matrix_s_kp(1, 1)%matrix
 
       CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool)
       nspins = dft_control%nspins

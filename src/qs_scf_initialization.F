@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -545,8 +545,8 @@ CONTAINS
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mo_derivs_aux_fit
       TYPE(cp_fm_pool_p_type), DIMENSION(:), POINTER     :: ao_mo_fm_pools, ao_mo_fm_pools_aux_fit
       TYPE(cp_fm_type), POINTER                          :: mo_coeff, mo_coeff_aux_fit, mo_coeff_last
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s_aux_fit, mo_derivs
-      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_s
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mo_derivs
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_s, matrix_s_aux_fit
       TYPE(dbcsr_type), POINTER                          :: mo_coeff_b
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(kpoint_type), POINTER                         :: kpoints
@@ -632,9 +632,9 @@ CONTAINS
             IF (.NOT. ASSOCIATED(mo_coeff_b)) THEN
                CALL cp_fm_get_info(mos_aux_fit(ispin)%mo_set%mo_coeff, ncol_global=nmo)
                CALL dbcsr_init_p(mos_aux_fit(ispin)%mo_set%mo_coeff_b)
-               CALL get_qs_env(qs_env=qs_env, matrix_s_aux_fit=matrix_s_aux_fit)
+               CALL get_qs_env(qs_env=qs_env, matrix_s_aux_fit_kp=matrix_s_aux_fit)
                CALL cp_dbcsr_m_by_n_from_row_template(mos_aux_fit(ispin)%mo_set%mo_coeff_b, &
-                                                      template=matrix_s_aux_fit(1)%matrix, n=nmo, &
+                                                      template=matrix_s_aux_fit(1, 1)%matrix, n=nmo, &
                                                       sym=dbcsr_type_no_symmetry)
             ENDIF
          END DO
