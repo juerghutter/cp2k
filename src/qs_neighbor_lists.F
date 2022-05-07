@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -629,9 +629,11 @@ CONTAINS
       END IF
 
       IF (dokp) THEN
+         CALL pair_radius_setup(orb_present, orb_present, orb_radius, orb_radius, pair_radius)
+
          ! We try to guess an integration radius for K-points
-         ! For non-HFX calculations we use the overlap list
-         ! For HFX we use the interaction radius of kinds (ORB or ADMM basis)
+         ! For non-HFX calculations we use the overlap list (defined above).
+         ! For HFX we use the interaction radius of kinds (MAX over ORB or ADMM basis)
          ! plus a range for the operator (some arbitrary guess, should be revisited!)
          IF (do_hfx) THEN
             roperator = 0.0_dp
@@ -649,14 +651,16 @@ CONTAINS
                                plane_distance(0, 0, 1, cell))*numshells
             END IF
             IF (dft_control%do_admm) THEN
-               CALL pair_radius_setup(aux_fit_present, aux_fit_present, aux_fit_radius, aux_fit_radius, &
-                                      pair_radius)
-            ELSE
-               CALL pair_radius_setup(orb_present, orb_present, orb_radius, orb_radius, pair_radius)
+               BLOCK
+                  REAL(dp), DIMENSION(nkind, nkind) :: aux_pair_radius
+                  CALL pair_radius_setup(aux_fit_present, aux_fit_present, &
+                                         aux_fit_radius, aux_fit_radius, &
+                                         aux_pair_radius)
+                  pair_radius = MAX(pair_radius, aux_pair_radius)
+               END BLOCK
             END IF
+
             pair_radius = pair_radius + roperator
-         ELSE
-            CALL pair_radius_setup(orb_present, orb_present, orb_radius, orb_radius, pair_radius)
          END IF
          CALL build_neighbor_lists(sab_kp, particle_set, atom2d, cell, pair_radius, &
                                    subcells=subcells, nlname="sab_kp")
