@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -29,7 +29,6 @@ MODULE hfx_admm_utils
                                               cp_logger_get_default_io_unit,&
                                               cp_logger_type
    USE cp_para_types,                   ONLY: cp_para_env_type
-   USE dbcsr_api,                       ONLY: dbcsr_p_type
    USE external_potential_types,        ONLY: copy_potential
    USE input_constants,                 ONLY: &
         do_admm_aux_exch_func_bee, do_admm_aux_exch_func_default, do_admm_aux_exch_func_none, &
@@ -59,7 +58,6 @@ MODULE hfx_admm_utils
    USE qs_local_rho_types,              ONLY: local_rho_set_create
    USE qs_mo_types,                     ONLY: mo_set_p_type
    USE qs_rho_atom_methods,             ONLY: init_rho_atom
-   USE qs_rho_types,                    ONLY: qs_rho_type
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -90,12 +88,10 @@ CONTAINS
       TYPE(admm_dm_type), POINTER                        :: admm_dm
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(cp_para_env_type), POINTER                    :: para_env
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s_aux_fit, matrix_s_aux_fit_vs_orb
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(mo_set_p_type), DIMENSION(:), POINTER         :: mos, mos_aux_fit
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
-      TYPE(qs_rho_type), POINTER                         :: rho, rho_aux_fit
       TYPE(section_vals_type), POINTER                   :: hfx_sections, input, xc_section
 
       my_do_mp2_hfx = .FALSE.
@@ -103,21 +99,15 @@ CONTAINS
 
       CALL timeset(routineN, handle)
       NULLIFY (admm_env, admm_dm, hfx_sections, mos, mos_aux_fit, para_env, &
-               particle_set, xc_section, matrix_s_aux_fit, &
-               matrix_s_aux_fit_vs_orb, rho, rho_aux_fit, ks_env, dft_control, &
-               input)
+               particle_set, xc_section, ks_env, dft_control, input)
 
       CALL get_qs_env(qs_env, &
                       mos_aux_fit=mos_aux_fit, &
                       mos=mos, &
                       admm_env=admm_env, &
                       admm_dm=admm_dm, &
-                      matrix_s_aux_fit=matrix_s_aux_fit, &
-                      matrix_s_aux_fit_vs_orb=matrix_s_aux_fit_vs_orb, &
                       para_env=para_env, &
                       s_mstruct_changed=s_mstruct_changed, &
-                      rho=rho, &
-                      rho_aux_fit=rho_aux_fit, &
                       ks_env=ks_env, &
                       dft_control=dft_control, &
                       input=input)
