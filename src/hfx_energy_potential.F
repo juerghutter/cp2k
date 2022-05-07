@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -701,7 +701,6 @@ CONTAINS
 
 !$OMP PARALLEL DEFAULT(NONE) SHARED(qs_env,&
 !$OMP                                  x_data,&
-!$OMP                                  ks_matrix,&
 !$OMP                                  ehfx,&
 !$OMP                                  rho_ao,&
 !$OMP                                  para_env,&
@@ -1035,6 +1034,7 @@ CONTAINS
             tmp_block = atom_block/nblocks
             katom_block = INT(MODULO(tmp_block, nblocks)) + 1
             IF (latom_block < katom_block) CYCLE
+
             tmp_block = tmp_block/nblocks
             jatom_block = INT(MODULO(tmp_block, nblocks)) + 1
             tmp_block = tmp_block/nblocks
