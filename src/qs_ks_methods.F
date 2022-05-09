@@ -23,6 +23,7 @@ MODULE qs_ks_methods
    USE admm_dm_methods,                 ONLY: admm_dm_calc_rho_aux,&
                                               admm_dm_merge_ks_matrix
    USE admm_methods,                    ONLY: admm_mo_calc_rho_aux,&
+                                              admm_mo_calc_rho_aux_kp,&
                                               admm_mo_merge_derivs,&
                                               admm_mo_merge_ks_matrix,&
                                               admm_update_ks_atom
@@ -544,7 +545,11 @@ CONTAINS
             IF (qs_env%run_rtp) THEN
                CALL rtp_admm_calc_rho_aux(qs_env)
             ELSE
-               CALL admm_mo_calc_rho_aux(qs_env)
+               IF (dokp) THEN
+                  CALL admm_mo_calc_rho_aux_kp(qs_env)
+               ELSE
+                  CALL admm_mo_calc_rho_aux(qs_env)
+               END IF
             END IF
          ELSEIF (dft_control%do_admm_dm) THEN
             CALL admm_dm_calc_rho_aux(ks_env)
@@ -1451,9 +1456,9 @@ CONTAINS
 
       CHARACTER(LEN=default_string_length)               :: headline
       INTEGER                                            :: ic, ispin, nimg
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks_aux_fit_dft, &
-                                                            matrix_ks_aux_fit_hfx
-      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_ks_aux_fit_kp, &
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks_aux_fit_dft
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_ks_aux_fit_hfx_kp, &
+                                                            matrix_ks_aux_fit_kp, &
                                                             matrix_s_aux_fit_kp, matrix_s_kp, &
                                                             matrixkp_ks
       TYPE(dbcsr_type), POINTER                          :: refmatrix
@@ -1500,11 +1505,11 @@ CONTAINS
       ! Allocate matrix_ks_aux_fit if requested and put it in the QS environment
       ! Also matrix_ks_aux_fit_dft, matrix_ks_aux_fit_hfx for ADMMS
       IF (dft_control%do_admm) THEN
-         NULLIFY (matrix_ks_aux_fit_kp, matrix_ks_aux_fit_dft, matrix_ks_aux_fit_hfx, matrix_s_aux_fit_kp)
+         NULLIFY (matrix_ks_aux_fit_kp, matrix_ks_aux_fit_dft, matrix_ks_aux_fit_hfx_kp, matrix_s_aux_fit_kp)
          CALL get_qs_env(qs_env, &
                          matrix_ks_aux_fit_kp=matrix_ks_aux_fit_kp, &
                          matrix_ks_aux_fit_dft=matrix_ks_aux_fit_dft, &
-                         matrix_ks_aux_fit_hfx=matrix_ks_aux_fit_hfx, &
+                         matrix_ks_aux_fit_hfx_kp=matrix_ks_aux_fit_hfx_kp, &
                          matrix_s_aux_fit_kp=matrix_s_aux_fit_kp)
          IF (.NOT. ASSOCIATED(matrix_ks_aux_fit_kp)) THEN
             refmatrix => matrix_s_aux_fit_kp(1, 1)%matrix
@@ -1536,18 +1541,20 @@ CONTAINS
             CALL set_ks_env(ks_env, matrix_ks_aux_fit_dft=matrix_ks_aux_fit_dft)
          END IF
          ! same allocation procedure for matrix_ks_aux_fit_hfx
-         IF (.NOT. ASSOCIATED(matrix_ks_aux_fit_hfx)) THEN
+         IF (.NOT. ASSOCIATED(matrix_ks_aux_fit_hfx_kp)) THEN
             refmatrix => matrix_s_aux_fit_kp(1, 1)%matrix
-            CALL dbcsr_allocate_matrix_set(matrix_ks_aux_fit_hfx, dft_control%nspins)
+            CALL dbcsr_allocate_matrix_set(matrix_ks_aux_fit_hfx_kp, dft_control%nspins, nimg)
             DO ispin = 1, dft_control%nspins
-               ALLOCATE (matrix_ks_aux_fit_hfx(ispin)%matrix)
-               CALL dbcsr_create(matrix=matrix_ks_aux_fit_hfx(ispin)%matrix, template=refmatrix, &
-                                 name="AUX. KOHN-SHAM MATRIX FOR ADMM ONLY HF EXCHANGE", &
-                                 matrix_type=dbcsr_type_symmetric, nze=0)
-               CALL cp_dbcsr_alloc_block_from_nbl(matrix_ks_aux_fit_hfx(ispin)%matrix, sab_aux_fit)
-               CALL dbcsr_set(matrix_ks_aux_fit_hfx(ispin)%matrix, 0.0_dp)
-            ENDDO
-            CALL set_ks_env(ks_env, matrix_ks_aux_fit_hfx=matrix_ks_aux_fit_hfx)
+               DO ic = 1, nimg
+                  ALLOCATE (matrix_ks_aux_fit_hfx_kp(ispin, ic)%matrix)
+                  CALL dbcsr_create(matrix=matrix_ks_aux_fit_hfx_kp(ispin, ic)%matrix, template=refmatrix, &
+                                    name="AUX. KOHN-SHAM MATRIX FOR ADMM ONLY HF EXCHANGE", &
+                                    matrix_type=dbcsr_type_symmetric, nze=0)
+                  CALL cp_dbcsr_alloc_block_from_nbl(matrix_ks_aux_fit_hfx_kp(ispin, ic)%matrix, sab_aux_fit)
+                  CALL dbcsr_set(matrix_ks_aux_fit_hfx_kp(ispin, ic)%matrix, 0.0_dp)
+               END DO
+            END DO
+            CALL set_ks_env(ks_env, matrix_ks_aux_fit_hfx_kp=matrix_ks_aux_fit_hfx_kp)
          END IF
 
       END IF

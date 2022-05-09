@@ -204,7 +204,7 @@ CONTAINS
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_libint_t)                                  :: private_lib
       TYPE(cp_logger_type), POINTER                      :: logger
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks_aux_fit_hfx
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_ks_aux_fit_hfx_kp
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(hfx_basis_type), DIMENSION(:), POINTER        :: basis_parameter
       TYPE(hfx_cache_type), DIMENSION(:), POINTER        :: integral_caches, integral_caches_disk
@@ -271,7 +271,7 @@ CONTAINS
       CALL get_qs_env(qs_env=qs_env, &
                       atomic_kind_set=atomic_kind_set, &
                       cell=cell, &
-                      matrix_ks_aux_fit_hfx=matrix_ks_aux_fit_hfx, &
+                      matrix_ks_aux_fit_hfx_kp=matrix_ks_aux_fit_hfx_kp, &
                       do_kpoints=do_kpoints, &
                       dft_control=dft_control, &
                       particle_set=particle_set)
@@ -1805,9 +1805,10 @@ CONTAINS
          END DO
          !for ADMMS, we need the exchange matrix k(d) for both spins
          IF (dft_control%do_admm) THEN
-            CPASSERT(nkimages == 1)
-            CALL dbcsr_copy(matrix_ks_aux_fit_hfx(ispin)%matrix, ks_matrix(ispin, 1)%matrix, &
-                            name="HF exch. part of matrix_ks_aux_fit for ADMMS")
+            DO img = 1, nkimages
+               CALL dbcsr_copy(matrix_ks_aux_fit_hfx_kp(ispin, img)%matrix, ks_matrix(ispin, img)%matrix, &
+                               name="HF exch. part of matrix_ks_aux_fit for ADMMS")
+            END DO
          END IF
 
          IF (is_unrestricted .AND. .NOT. treat_lsd_in_core) THEN
@@ -1818,9 +1819,10 @@ CONTAINS
             END DO
             !for ADMMS, we need the exchange matrix k(d) for both spins
             IF (dft_control%do_admm) THEN
-               CPASSERT(nkimages == 1)
-               CALL dbcsr_copy(matrix_ks_aux_fit_hfx(2)%matrix, ks_matrix(2, 1)%matrix, &
-                               name="HF exch. part of matrix_ks_aux_fit for ADMMS")
+               DO img = 1, nkimages
+                  CALL dbcsr_copy(matrix_ks_aux_fit_hfx_kp(2, img)%matrix, ks_matrix(2, img)%matrix, &
+                                  name="HF exch. part of matrix_ks_aux_fit for ADMMS")
+               END DO
             END IF
          END IF
 

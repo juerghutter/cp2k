@@ -384,10 +384,10 @@ CONTAINS
       REAL(dp)                                           :: eh1, ehfx, eold
       REAL(dp), ALLOCATABLE, DIMENSION(:)                :: hf_energy
       TYPE(cp_para_env_type), POINTER                    :: para_env
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks_aux_fit_hfx, &
-                                                            matrix_ks_aux_fit_im, matrix_ks_im, &
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks_aux_fit_im, matrix_ks_im, &
                                                             rho_ao_resp
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_h, matrix_ks_1d, &
+                                                            matrix_ks_aux_fit_hfx_kp, &
                                                             matrix_ks_aux_fit_kp, matrix_ks_orb, &
                                                             rho_ao_orb
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -407,7 +407,7 @@ CONTAINS
       NULLIFY (auxbas_pw_pool, dft_control, force, hfx_sections, input, &
                para_env, poisson_env, pw_env, virial, matrix_ks_im, &
                matrix_ks_orb, rho_ao_orb, matrix_h, matrix_ks_aux_fit_kp, &
-               matrix_ks_aux_fit_im, matrix_ks_aux_fit_hfx)
+               matrix_ks_aux_fit_im, matrix_ks_aux_fit_hfx_kp)
 
       CALL get_qs_env(qs_env=qs_env, &
                       dft_control=dft_control, &
@@ -419,7 +419,7 @@ CONTAINS
                       matrix_ks_im=matrix_ks_im, &
                       matrix_ks_aux_fit_kp=matrix_ks_aux_fit_kp, &
                       matrix_ks_aux_fit_im=matrix_ks_aux_fit_im, &
-                      matrix_ks_aux_fit_hfx=matrix_ks_aux_fit_hfx, &
+                      matrix_ks_aux_fit_hfx_kp=matrix_ks_aux_fit_hfx_kp, &
                       s_mstruct_changed=s_mstruct_changed, &
                       x_data=x_data)
 
@@ -513,11 +513,10 @@ CONTAINS
                                   s_mstruct_changed, nspins, &
                                   x_data(irep, 1)%general_parameter%fraction)
             IF (dft_control%do_admm) THEN
-               CPABORT("ADMM KP for HFX RI not yet implemented")
                DO img = 1, nimages
                   !for ADMMS, we need the exchange matrix k(d) for both spins
                   DO ispin = 1, mspin
-                     CALL dbcsr_copy(matrix_ks_aux_fit_hfx(ispin)%matrix, matrix_ks_orb(ispin, img)%matrix, &
+                     CALL dbcsr_copy(matrix_ks_aux_fit_hfx_kp(ispin, img)%matrix, matrix_ks_orb(ispin, img)%matrix, &
                                      name="HF exch. part of matrix_ks_aux_fit for ADMMS")
                   ENDDO
                END DO
@@ -576,10 +575,11 @@ CONTAINS
 
       !update the hfx aux_fit matrixIF (dft_control%do_admm) THEN
       IF (dft_control%do_admm .AND. x_data(irep, 1)%do_hfx_ri) THEN
-         CPABORT("ADMM KP for HFX RI not yet implemented")
          DO ispin = 1, nspins
-            CALL dbcsr_add(matrix_ks_aux_fit_hfx(ispin)%matrix, matrix_ks_aux_fit_kp(ispin, 1)%matrix, &
-                           0.0_dp, 1.0_dp)
+            DO img = 1, nimages
+               CALL dbcsr_add(matrix_ks_aux_fit_hfx_kp(ispin, img)%matrix, matrix_ks_aux_fit_kp(ispin, img)%matrix, &
+                              0.0_dp, 1.0_dp)
+            END DO
          END DO
       END IF
 

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -168,9 +168,12 @@ MODULE kpoint_types
       ! environment
       TYPE(kpoint_env_p_type), DIMENSION(:), &
          POINTER                              :: kp_env => Null()
+      TYPE(kpoint_env_p_type), DIMENSION(:), &
+         POINTER                              :: kp_aux_env => Null()
       TYPE(kpoint_sym_p_type), DIMENSION(:), &
          POINTER                              :: kp_sym => Null()
       TYPE(qs_matrix_pools_type), POINTER     :: mpools => Null()
+      TYPE(qs_matrix_pools_type), POINTER     :: mpools_aux_fit => Null()
    END TYPE kpoint_type
 
 ! **************************************************************************************************
@@ -247,6 +250,8 @@ CONTAINS
          ENDIF
 
          CALL mpools_release(kpoint%mpools)
+         CALL mpools_release(kpoint%mpools_aux_fit)
+
          CALL cp_blacs_env_release(kpoint%blacs_env)
          CALL cp_blacs_env_release(kpoint%blacs_env_all)
 
@@ -264,6 +269,13 @@ CONTAINS
                CALL kpoint_env_release(kpoint%kp_env(ik)%kpoint_env)
             END DO
             DEALLOCATE (kpoint%kp_env)
+         END IF
+
+         IF (ASSOCIATED(kpoint%kp_aux_env)) THEN
+            DO ik = 1, SIZE(kpoint%kp_aux_env)
+               CALL kpoint_env_release(kpoint%kp_aux_env(ik)%kpoint_env)
+            END DO
+            DEALLOCATE (kpoint%kp_aux_env)
          END IF
 
          IF (ASSOCIATED(kpoint%kp_sym)) THEN
@@ -305,6 +317,7 @@ CONTAINS
 !> \param para_env_inter_kp   parallel environment between kpoints
 !> \param blacs_env     BLACS env for the kpoint group
 !> \param kp_env        Information for each kpoint
+!> \param kp_aux_env ...
 !> \param mpools        FM matrix pools for kpoint groups
 !> \param iogrp         this kpoint group has the IO processor
 !> \param nkp_groups    number of kpoint groups
@@ -316,7 +329,7 @@ CONTAINS
    SUBROUTINE get_kpoint_info(kpoint, kp_scheme, nkp_grid, kp_shift, symmetry, verbose, &
                               full_grid, use_real_wfn, eps_geo, parallel_group_size, kp_range, nkp, xkp, wkp, &
                               para_env, blacs_env_all, cart, para_env_full, para_env_kp, para_env_inter_kp, blacs_env, &
-                              kp_env, mpools, iogrp, nkp_groups, kp_dist, cell_to_index, sab_nl)
+                              kp_env, kp_aux_env, mpools, iogrp, nkp_groups, kp_dist, cell_to_index, sab_nl)
       TYPE(kpoint_type), INTENT(IN)                      :: kpoint
       CHARACTER(LEN=*), OPTIONAL                         :: kp_scheme
       INTEGER, DIMENSION(3), OPTIONAL                    :: nkp_grid
@@ -336,7 +349,7 @@ CONTAINS
                                                             para_env_inter_kp
       TYPE(cp_blacs_env_type), OPTIONAL, POINTER         :: blacs_env
       TYPE(kpoint_env_p_type), DIMENSION(:), OPTIONAL, &
-         POINTER                                         :: kp_env
+         POINTER                                         :: kp_env, kp_aux_env
       TYPE(qs_matrix_pools_type), OPTIONAL, POINTER      :: mpools
       LOGICAL, OPTIONAL                                  :: iogrp
       INTEGER, OPTIONAL                                  :: nkp_groups
@@ -373,6 +386,7 @@ CONTAINS
       IF (PRESENT(kp_dist)) kp_dist => kpoint%kp_dist
 
       IF (PRESENT(kp_env)) kp_env => kpoint%kp_env
+      IF (PRESENT(kp_aux_env)) kp_aux_env => kpoint%kp_aux_env
       IF (PRESENT(mpools)) mpools => kpoint%mpools
 
       IF (PRESENT(cell_to_index)) cell_to_index => kpoint%cell_to_index
@@ -406,6 +420,7 @@ CONTAINS
 !> \param para_env_inter_kp   parallel environment between kpoints
 !> \param blacs_env     BLACS env for the kpoint group
 !> \param kp_env        Information for each kpoint
+!> \param kp_aux_env ...
 !> \param mpools        FM matrix pools for kpoint groups
 !> \param iogrp         this kpoint group has the IO processor
 !> \param nkp_groups    number of kpoint groups
@@ -417,7 +432,7 @@ CONTAINS
    SUBROUTINE set_kpoint_info(kpoint, kp_scheme, nkp_grid, kp_shift, symmetry, verbose, &
                               full_grid, use_real_wfn, eps_geo, parallel_group_size, kp_range, nkp, xkp, wkp, &
                               para_env, blacs_env_all, cart, para_env_full, para_env_kp, para_env_inter_kp, blacs_env, &
-                              kp_env, mpools, iogrp, nkp_groups, kp_dist, cell_to_index, sab_nl)
+                              kp_env, kp_aux_env, mpools, iogrp, nkp_groups, kp_dist, cell_to_index, sab_nl)
       TYPE(kpoint_type), INTENT(INOUT)                   :: kpoint
       CHARACTER(LEN=*), OPTIONAL                         :: kp_scheme
       INTEGER, DIMENSION(3), OPTIONAL                    :: nkp_grid
@@ -437,7 +452,7 @@ CONTAINS
                                                             para_env_inter_kp
       TYPE(cp_blacs_env_type), OPTIONAL, POINTER         :: blacs_env
       TYPE(kpoint_env_p_type), DIMENSION(:), OPTIONAL, &
-         POINTER                                         :: kp_env
+         POINTER                                         :: kp_env, kp_aux_env
       TYPE(qs_matrix_pools_type), OPTIONAL, POINTER      :: mpools
       LOGICAL, OPTIONAL                                  :: iogrp
       INTEGER, OPTIONAL                                  :: nkp_groups
@@ -474,6 +489,7 @@ CONTAINS
       IF (PRESENT(kp_dist)) kpoint%kp_dist => kp_dist
 
       IF (PRESENT(kp_env)) kpoint%kp_env => kp_env
+      IF (PRESENT(kp_env)) kpoint%kp_aux_env => kp_aux_env
       IF (PRESENT(mpools)) kpoint%mpools => mpools
       IF (PRESENT(sab_nl)) kpoint%sab_nl => sab_nl
 
