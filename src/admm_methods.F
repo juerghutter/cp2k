@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -536,9 +536,9 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      CALL fit_mo_coeffs(admm_env, matrix_s_aux_fit, matrix_s_mixed, &
-                         mos, geometry_did_change, &
-                         blocked=admm_env%block_fit)
+      IF (geometry_did_change) THEN
+         CALL fit_mo_coeffs(admm_env, matrix_s_aux_fit, matrix_s_mixed)
+      END IF
 
       SELECT CASE (admm_env%purification_method)
       CASE (do_admm_purify_mo_no_diag, do_admm_purify_cauchy_subspace)
@@ -560,21 +560,15 @@ CONTAINS
 !> \param admm_env ...
 !> \param matrix_s_aux_fit ...
 !> \param matrix_s_mixed ...
-!> \param mos ...
-!> \param geometry_did_change ...
-!> \param blocked ...
 ! **************************************************************************************************
-   SUBROUTINE fit_mo_coeffs(admm_env, matrix_s_aux_fit, matrix_s_mixed, &
-                            mos, geometry_did_change, blocked)
+   SUBROUTINE fit_mo_coeffs(admm_env, matrix_s_aux_fit, matrix_s_mixed)
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s_aux_fit, matrix_s_mixed
-      TYPE(mo_set_p_type), DIMENSION(:), POINTER         :: mos
-      LOGICAL, INTENT(IN)                                :: geometry_did_change, blocked
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'fit_mo_coeffs'
 
       INTEGER                                            :: blk, handle, iatom, jatom, nao_aux_fit, &
-                                                            nao_orb, nspins
+                                                            nao_orb
       REAL(dp), DIMENSION(:, :), POINTER                 :: sparse_block
       TYPE(dbcsr_iterator_type)                          :: iter
       TYPE(dbcsr_type), POINTER                          :: matrix_s_tilde
@@ -583,59 +577,56 @@ CONTAINS
 
       nao_aux_fit = admm_env%nao_aux_fit
       nao_orb = admm_env%nao_orb
-      nspins = SIZE(mos)
 
       ! *** This part only depends on overlap matrices ==> needs only to be calculated if the geometry changed
 
-      IF (geometry_did_change) THEN
-         IF (.NOT. blocked) THEN
-            CALL copy_dbcsr_to_fm(matrix_s_aux_fit(1)%matrix, admm_env%S_inv)
-         ELSE
-            NULLIFY (matrix_s_tilde)
-            ALLOCATE (matrix_s_tilde)
-            CALL dbcsr_create(matrix_s_tilde, template=matrix_s_aux_fit(1)%matrix, &
-                              name='MATRIX s_tilde', &
-                              matrix_type=dbcsr_type_symmetric)
+      IF (.NOT. admm_env%block_fit) THEN
+         CALL copy_dbcsr_to_fm(matrix_s_aux_fit(1)%matrix, admm_env%S_inv)
+      ELSE
+         NULLIFY (matrix_s_tilde)
+         ALLOCATE (matrix_s_tilde)
+         CALL dbcsr_create(matrix_s_tilde, template=matrix_s_aux_fit(1)%matrix, &
+                           name='MATRIX s_tilde', &
+                           matrix_type=dbcsr_type_symmetric)
 
-            CALL dbcsr_copy(matrix_s_tilde, matrix_s_aux_fit(1)%matrix)
+         CALL dbcsr_copy(matrix_s_tilde, matrix_s_aux_fit(1)%matrix)
 
-            CALL dbcsr_iterator_start(iter, matrix_s_tilde)
-            DO WHILE (dbcsr_iterator_blocks_left(iter))
-               CALL dbcsr_iterator_next_block(iter, iatom, jatom, sparse_block, blk)
-               IF (admm_env%block_map(iatom, jatom) == 0) THEN
-                  sparse_block = 0.0_dp
-               END IF
-            END DO
-            CALL dbcsr_iterator_stop(iter)
-            CALL copy_dbcsr_to_fm(matrix_s_tilde, admm_env%S_inv)
-            CALL dbcsr_deallocate_matrix(matrix_s_tilde)
-         ENDIF
+         CALL dbcsr_iterator_start(iter, matrix_s_tilde)
+         DO WHILE (dbcsr_iterator_blocks_left(iter))
+            CALL dbcsr_iterator_next_block(iter, iatom, jatom, sparse_block, blk)
+            IF (admm_env%block_map(iatom, jatom) == 0) THEN
+               sparse_block = 0.0_dp
+            END IF
+         END DO
+         CALL dbcsr_iterator_stop(iter)
+         CALL copy_dbcsr_to_fm(matrix_s_tilde, admm_env%S_inv)
+         CALL dbcsr_deallocate_matrix(matrix_s_tilde)
+      END IF
 
-         CALL cp_fm_upper_to_full(admm_env%S_inv, admm_env%work_aux_aux)
-         CALL cp_fm_to_fm(admm_env%S_inv, admm_env%S)
+      CALL cp_fm_upper_to_full(admm_env%S_inv, admm_env%work_aux_aux)
+      CALL cp_fm_to_fm(admm_env%S_inv, admm_env%S)
 
-         CALL copy_dbcsr_to_fm(matrix_s_mixed(1)%matrix, admm_env%Q)
+      CALL copy_dbcsr_to_fm(matrix_s_mixed(1)%matrix, admm_env%Q)
 
-         !! Calculate S'_inverse
-         CALL cp_fm_cholesky_decompose(admm_env%S_inv)
-         CALL cp_fm_cholesky_invert(admm_env%S_inv)
-         !! Symmetrize the guy
-         CALL cp_fm_upper_to_full(admm_env%S_inv, admm_env%work_aux_aux)
+      !! Calculate S'_inverse
+      CALL cp_fm_cholesky_decompose(admm_env%S_inv)
+      CALL cp_fm_cholesky_invert(admm_env%S_inv)
+      !! Symmetrize the guy
+      CALL cp_fm_upper_to_full(admm_env%S_inv, admm_env%work_aux_aux)
 
-         !! Calculate A=S'^(-1)*Q
-         IF (blocked) THEN
-            CALL cp_fm_set_all(admm_env%A, 0.0_dp, 1.0_dp)
-         ELSE
-            CALL cp_gemm('N', 'N', nao_aux_fit, nao_orb, nao_aux_fit, &
-                         1.0_dp, admm_env%S_inv, admm_env%Q, 0.0_dp, &
-                         admm_env%A)
+      !! Calculate A=S'^(-1)*Q
+      IF (admm_env%block_fit) THEN
+         CALL cp_fm_set_all(admm_env%A, 0.0_dp, 1.0_dp)
+      ELSE
+         CALL cp_gemm('N', 'N', nao_aux_fit, nao_orb, nao_aux_fit, &
+                      1.0_dp, admm_env%S_inv, admm_env%Q, 0.0_dp, &
+                      admm_env%A)
 
-            ! this multiplication is apparent not need for purify_none
-            !! B=Q^(T)*A
-            CALL cp_gemm('T', 'N', nao_orb, nao_orb, nao_aux_fit, &
-                         1.0_dp, admm_env%Q, admm_env%A, 0.0_dp, &
-                         admm_env%B)
-         ENDIF
+         ! this multiplication is apparent not need for purify_none
+         !! B=Q^(T)*A
+         CALL cp_gemm('T', 'N', nao_orb, nao_orb, nao_aux_fit, &
+                      1.0_dp, admm_env%Q, admm_env%A, 0.0_dp, &
+                      admm_env%B)
       END IF
 
       CALL timestop(handle)
