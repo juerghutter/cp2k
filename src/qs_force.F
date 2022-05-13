@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -142,8 +142,9 @@ CONTAINS
       TYPE(cp_fm_type), POINTER                          :: mo_coeff, mo_coeff_aux_fit
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(cp_para_env_type), POINTER                    :: para_env
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER :: matrix_ks_aux_fit, matrix_p_mp2, matrix_s, &
-         matrix_s_aux_fit, matrix_s_aux_fit_vs_orb, matrix_w, matrix_w_mp2, rho_ao
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks_aux_fit, matrix_p_mp2, &
+                                                            matrix_s, matrix_w, matrix_w_mp2, &
+                                                            rho_ao
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_w_kp
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(lri_environment_type), POINTER                :: lri_env
@@ -359,11 +360,8 @@ CONTAINS
          CPABORT("Forces with ADMM DM methods not implemented")
       END IF
       IF (dft_control%do_admm_mo .AND. .NOT. qs_env%run_rtp) THEN
-         NULLIFY (matrix_s_aux_fit, matrix_s_aux_fit_vs_orb, matrix_ks_aux_fit, &
-                  mos_aux_fit, mos, admm_env)
+         NULLIFY (matrix_ks_aux_fit, mos_aux_fit, mos, admm_env)
          CALL get_qs_env(qs_env=qs_env, &
-                         matrix_s_aux_fit=matrix_s_aux_fit, &
-                         matrix_s_aux_fit_vs_orb=matrix_s_aux_fit_vs_orb, &
                          matrix_ks_aux_fit=matrix_ks_aux_fit, &
                          mos_aux_fit=mos_aux_fit, &
                          mos=mos, &
