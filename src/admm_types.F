@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -186,7 +186,7 @@ CONTAINS
       INTEGER                                            :: i, iatom, iblock, ispin, j, jatom, &
                                                             nao_aux_fit, nao_orb, nmo, nspins
       TYPE(cp_fm_struct_type), POINTER :: fm_struct_aux_aux, fm_struct_aux_nmo, fm_struct_aux_orb, &
-         fm_struct_nmo_nmo, fm_struct_orb_aux, fm_struct_orb_nmo, fm_struct_orb_orb
+         fm_struct_nmo_nmo, fm_struct_orb_nmo, fm_struct_orb_orb
       TYPE(cp_fm_type), POINTER                          :: mo_coeff
 
       CALL cite_reference(Guidon2010)
@@ -208,11 +208,6 @@ CONTAINS
                                context=mo_coeff%matrix_struct%context, &
                                nrow_global=nao_aux_fit, &
                                ncol_global=nao_orb, &
-                               para_env=para_env)
-      CALL cp_fm_struct_create(fm_struct_orb_aux, &
-                               context=mo_coeff%matrix_struct%context, &
-                               nrow_global=nao_orb, &
-                               ncol_global=nao_aux_fit, &
                                para_env=para_env)
       CALL cp_fm_struct_create(fm_struct_orb_orb, &
                                context=mo_coeff%matrix_struct%context, &
@@ -319,7 +314,6 @@ CONTAINS
 
       CALL cp_fm_struct_release(fm_struct_aux_aux)
       CALL cp_fm_struct_release(fm_struct_aux_orb)
-      CALL cp_fm_struct_release(fm_struct_orb_aux)
       CALL cp_fm_struct_release(fm_struct_orb_orb)
 
       ! copy settings from admm_control
