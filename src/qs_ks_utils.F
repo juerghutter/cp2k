@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -1252,8 +1252,6 @@ CONTAINS
       CALL get_qs_env(qs_env, &
                       dft_control=dft_control, &
                       pw_env=pw_env, &
-                      matrix_ks_aux_fit=matrix_ks_aux_fit, &
-                      matrix_ks_aux_fit_dft=matrix_ks_aux_fit_dft, &
                       v_hartree_rspace=v_rspace%pw, &
                       rho_aux_fit=rho_aux_fit, &
                       vee=vee)
@@ -1565,8 +1563,11 @@ CONTAINS
 
       ! Add contributions from ADMM if requested
       IF (dft_control%do_admm) THEN
-         CALL get_qs_env(qs_env, admm_env=admm_env)
          IF (ASSOCIATED(v_rspace_new_aux_fit)) THEN
+            CALL get_qs_env(qs_env, &
+                            admm_env=admm_env, &
+                            matrix_ks_aux_fit=matrix_ks_aux_fit, &
+                            matrix_ks_aux_fit_dft=matrix_ks_aux_fit_dft)
             DO ispin = 1, nspins
                ! Calculate the xc potential
                v_rspace_new_aux_fit(ispin)%pw%cr3d = &
