@@ -388,6 +388,7 @@ CONTAINS
 !> \param matrix_ks_aux_fit_dft ...
 !> \param matrix_ks_aux_fit_hfx ...
 !> \param matrix_ks_aux_fit_kp ...
+!> \param matrix_ks_aux_fit_dft_kp ...
 !> \param matrix_ks_aux_fit_hfx_kp ...
 !> \param matrix_s_aux_fit_kp ...
 !> \param matrix_s_aux_fit_vs_orb_kp ...
@@ -515,7 +516,8 @@ CONTAINS
                          matrix_h, matrix_ks, matrix_ks_im, matrix_vxc, run_rtp, rtp, &
                          matrix_h_kp, matrix_ks_kp, matrix_vxc_kp, kinetic_kp, matrix_s_kp, matrix_w_kp, matrix_s_RI_aux_kp, &
                          matrix_ks_aux_fit, matrix_ks_aux_fit_im, matrix_ks_aux_fit_dft, matrix_ks_aux_fit_hfx, &
-                         matrix_ks_aux_fit_kp, matrix_ks_aux_fit_hfx_kp, matrix_s_aux_fit_kp, matrix_s_aux_fit_vs_orb_kp, &
+                         matrix_ks_aux_fit_kp, matrix_ks_aux_fit_dft_kp, matrix_ks_aux_fit_hfx_kp, matrix_s_aux_fit_kp, &
+                         matrix_s_aux_fit_vs_orb_kp, &
                          matrix_s, matrix_s_aux_fit, matrix_s_aux_fit_vs_orb, matrix_s_RI_aux, matrix_w, &
                          matrix_w_mp2, matrix_p_mp2, rho, rho_aux_fit, rho_aux_fit_buffer, &
                          rho_buffer, rho_xc, pw_env, ewald_env, ewald_pw, active_space, &
@@ -573,11 +575,9 @@ CONTAINS
          POINTER                                         :: matrix_ks_aux_fit, matrix_ks_aux_fit_im, &
                                                             matrix_ks_aux_fit_dft, &
                                                             matrix_ks_aux_fit_hfx
-      TYPE(dbcsr_p_type), DIMENSION(:, :), OPTIONAL, &
-         POINTER                                         :: matrix_ks_aux_fit_kp, &
-                                                            matrix_ks_aux_fit_hfx_kp, &
-                                                            matrix_s_aux_fit_kp, &
-                                                            matrix_s_aux_fit_vs_orb_kp
+      TYPE(dbcsr_p_type), DIMENSION(:, :), OPTIONAL, POINTER :: matrix_ks_aux_fit_kp, &
+         matrix_ks_aux_fit_dft_kp, matrix_ks_aux_fit_hfx_kp, matrix_s_aux_fit_kp, &
+         matrix_s_aux_fit_vs_orb_kp
       TYPE(dbcsr_p_type), DIMENSION(:), OPTIONAL, &
          POINTER                                         :: matrix_s, matrix_s_aux_fit, &
                                                             matrix_s_aux_fit_vs_orb, &
@@ -805,6 +805,7 @@ CONTAINS
                       matrix_ks_aux_fit_hfx=matrix_ks_aux_fit_hfx, &
                       matrix_ks_aux_fit_kp=matrix_ks_aux_fit_kp, &
                       matrix_ks_aux_fit_hfx_kp=matrix_ks_aux_fit_hfx_kp, &
+                      matrix_ks_aux_fit_dft_kp=matrix_ks_aux_fit_dft_kp, &
                       kinetic=kinetic, &
                       matrix_s=matrix_s, &
                       matrix_s_aux_fit=matrix_s_aux_fit, &

@@ -162,13 +162,13 @@ MODULE qs_ks_types
                                                                matrix_vxc, &
                                                                matrix_ks_aux_fit, &
                                                                matrix_s_RI_aux, &
-                                                               matrix_ks_aux_fit_hfx
+                                                               matrix_ks_aux_fit_hfx, &
+                                                               matrix_ks_aux_fit_dft
 
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks_im => Null(), &
                                                             matrix_w_mp2 => Null(), &
                                                             matrix_p_mp2 => Null(), &
-                                                            matrix_ks_aux_fit_im => Null(), &
-                                                            matrix_ks_aux_fit_dft => Null()
+                                                            matrix_ks_aux_fit_im => Null()
 
       TYPE(qs_rho_type), POINTER                            :: rho => Null(), &
                                                                rho_buffer => Null(), &
@@ -270,6 +270,7 @@ CONTAINS
 !> \param matrix_s_aux_fit ...
 !> \param matrix_s_aux_fit_vs_orb ...
 !> \param matrix_ks_aux_fit_kp ...
+!> \param matrix_ks_aux_fit_dft_kp ...
 !> \param matrix_ks_aux_fit_hfx_kp ...
 !> \param matrix_s_aux_fit_kp ...
 !> \param matrix_s_aux_fit_vs_orb_kp ...
@@ -355,8 +356,8 @@ CONTAINS
                          matrix_h, matrix_ks, matrix_ks_im, matrix_vxc, matrix_ks_aux_fit, &
                          matrix_ks_aux_fit_im, matrix_ks_aux_fit_dft, matrix_ks_aux_fit_hfx, &
                          kinetic, matrix_s, matrix_s_aux_fit, matrix_s_aux_fit_vs_orb, &
-                         matrix_ks_aux_fit_kp, matrix_ks_aux_fit_hfx_kp, matrix_s_aux_fit_kp, &
-                         matrix_s_aux_fit_vs_orb_kp, &
+                         matrix_ks_aux_fit_kp, matrix_ks_aux_fit_dft_kp, matrix_ks_aux_fit_hfx_kp, &
+                         matrix_s_aux_fit_kp, matrix_s_aux_fit_vs_orb_kp, &
                          matrix_s_RI_aux, matrix_w, matrix_w_mp2, matrix_p_mp2, &
                          matrix_h_kp, matrix_ks_kp, matrix_vxc_kp, kinetic_kp, matrix_s_kp, matrix_w_kp, &
                          matrix_s_RI_aux_kp, &
@@ -382,11 +383,9 @@ CONTAINS
       TYPE(dbcsr_p_type), DIMENSION(:), OPTIONAL, POINTER :: matrix_h, matrix_ks, matrix_ks_im, &
          matrix_vxc, matrix_ks_aux_fit, matrix_ks_aux_fit_im, matrix_ks_aux_fit_dft, &
          matrix_ks_aux_fit_hfx, kinetic, matrix_s, matrix_s_aux_fit, matrix_s_aux_fit_vs_orb
-      TYPE(dbcsr_p_type), DIMENSION(:, :), OPTIONAL, &
-         POINTER                                         :: matrix_ks_aux_fit_kp, &
-                                                            matrix_ks_aux_fit_hfx_kp, &
-                                                            matrix_s_aux_fit_kp, &
-                                                            matrix_s_aux_fit_vs_orb_kp
+      TYPE(dbcsr_p_type), DIMENSION(:, :), OPTIONAL, POINTER :: matrix_ks_aux_fit_kp, &
+         matrix_ks_aux_fit_dft_kp, matrix_ks_aux_fit_hfx_kp, matrix_s_aux_fit_kp, &
+         matrix_s_aux_fit_vs_orb_kp
       TYPE(dbcsr_p_type), DIMENSION(:), OPTIONAL, &
          POINTER                                         :: matrix_s_RI_aux, matrix_w, matrix_w_mp2, &
                                                             matrix_p_mp2
@@ -468,7 +467,8 @@ CONTAINS
       IF (PRESENT(matrix_ks_aux_fit)) matrix_ks_aux_fit => get_1d_pointer(ks_env%matrix_ks_aux_fit)
       IF (PRESENT(matrix_ks_aux_fit_kp)) matrix_ks_aux_fit_kp => get_2d_pointer(ks_env%matrix_ks_aux_fit)
       IF (PRESENT(matrix_ks_aux_fit_im)) matrix_ks_aux_fit_im => ks_env%matrix_ks_aux_fit_im
-      IF (PRESENT(matrix_ks_aux_fit_dft)) matrix_ks_aux_fit_dft => ks_env%matrix_ks_aux_fit_dft
+      IF (PRESENT(matrix_ks_aux_fit_dft)) matrix_ks_aux_fit_dft => get_1d_pointer(ks_env%matrix_ks_aux_fit_dft)
+      IF (PRESENT(matrix_ks_aux_fit_dft_kp)) matrix_ks_aux_fit_dft_kp => get_2d_pointer(ks_env%matrix_ks_aux_fit_dft)
       IF (PRESENT(matrix_ks_aux_fit_hfx)) matrix_ks_aux_fit_hfx => get_1d_pointer(ks_env%matrix_ks_aux_fit_hfx)
       IF (PRESENT(matrix_ks_aux_fit_hfx_kp)) matrix_ks_aux_fit_hfx_kp => get_2d_pointer(ks_env%matrix_ks_aux_fit_hfx)
       IF (PRESENT(matrix_s_aux_fit)) matrix_s_aux_fit => get_1d_pointer(ks_env%matrix_s_aux_fit)
@@ -566,6 +566,7 @@ CONTAINS
 !> \param matrix_ks_aux_fit ...
 !> \param matrix_ks_aux_fit_im ...
 !> \param matrix_ks_aux_fit_dft ...
+!> \param matrix_ks_aux_fit_dft_kp ...
 !> \param matrix_ks_aux_fit_hfx ...
 !> \param matrix_ks_aux_fit_hfx_kp ...
 !> \param kinetic ...
@@ -629,7 +630,8 @@ CONTAINS
                          s_mstruct_changed, rho_changed, &
                          potential_changed, forces_up_to_date, &
                          matrix_h, matrix_ks, matrix_ks_im, matrix_vxc, matrix_ks_aux_fit, matrix_ks_aux_fit_im, &
-                         matrix_ks_aux_fit_dft, matrix_ks_aux_fit_hfx, matrix_ks_aux_fit_hfx_kp, &
+                         matrix_ks_aux_fit_dft, matrix_ks_aux_fit_dft_kp, &
+                         matrix_ks_aux_fit_hfx, matrix_ks_aux_fit_hfx_kp, &
                          kinetic, matrix_s, matrix_s_aux_fit, &
                          matrix_s_aux_fit_vs_orb, matrix_s_RI_aux, matrix_w, matrix_w_mp2, matrix_p_mp2, &
                          matrix_ks_aux_fit_kp, matrix_s_aux_fit_kp, matrix_s_aux_fit_vs_orb_kp, &
@@ -650,8 +652,11 @@ CONTAINS
       LOGICAL, OPTIONAL                                  :: s_mstruct_changed, rho_changed, &
                                                             potential_changed, forces_up_to_date
       TYPE(dbcsr_p_type), DIMENSION(:), OPTIONAL, POINTER :: matrix_h, matrix_ks, matrix_ks_im, &
-         matrix_vxc, matrix_ks_aux_fit, matrix_ks_aux_fit_im, matrix_ks_aux_fit_dft, &
-         matrix_ks_aux_fit_hfx
+         matrix_vxc, matrix_ks_aux_fit, matrix_ks_aux_fit_im, matrix_ks_aux_fit_dft
+      TYPE(dbcsr_p_type), DIMENSION(:, :), OPTIONAL, &
+         POINTER                                         :: matrix_ks_aux_fit_dft_kp
+      TYPE(dbcsr_p_type), DIMENSION(:), OPTIONAL, &
+         POINTER                                         :: matrix_ks_aux_fit_hfx
       TYPE(dbcsr_p_type), DIMENSION(:, :), OPTIONAL, &
          POINTER                                         :: matrix_ks_aux_fit_hfx_kp
       TYPE(dbcsr_p_type), DIMENSION(:), OPTIONAL, POINTER :: kinetic, matrix_s, matrix_s_aux_fit, &
@@ -718,7 +723,8 @@ CONTAINS
 
       IF (PRESENT(matrix_ks_im)) ks_env%matrix_ks_im => matrix_ks_im
       IF (PRESENT(matrix_ks_aux_fit_im)) ks_env%matrix_ks_aux_fit_im => matrix_ks_aux_fit_im
-      IF (PRESENT(matrix_ks_aux_fit_dft)) ks_env%matrix_ks_aux_fit_dft => matrix_ks_aux_fit_dft
+      IF (PRESENT(matrix_ks_aux_fit_dft)) CALL set_1d_pointer(ks_env%matrix_ks_aux_fit_dft, matrix_ks_aux_fit_dft)
+      IF (PRESENT(matrix_ks_aux_fit_dft_kp)) CALL set_2d_pointer(ks_env%matrix_ks_aux_fit_dft, matrix_ks_aux_fit_dft_kp)
       IF (PRESENT(matrix_ks_aux_fit_hfx)) CALL set_1d_pointer(ks_env%matrix_ks_aux_fit_hfx, matrix_ks_aux_fit_hfx)
       IF (PRESENT(matrix_ks_aux_fit_hfx_kp)) CALL set_2d_pointer(ks_env%matrix_ks_aux_fit_hfx, matrix_ks_aux_fit_hfx_kp)
 
@@ -825,14 +831,13 @@ CONTAINS
             CALL kpoint_transitional_release(ks_env%kinetic)
             CALL kpoint_transitional_release(ks_env%matrix_s_RI_aux)
             CALL kpoint_transitional_release(ks_env%matrix_ks_aux_fit)
+            CALL kpoint_transitional_release(ks_env%matrix_ks_aux_fit_dft)
             CALL kpoint_transitional_release(ks_env%matrix_ks_aux_fit_hfx)
             CALL kpoint_transitional_release(ks_env%matrix_s_aux_fit)
             CALL kpoint_transitional_release(ks_env%matrix_s_aux_fit_vs_orb)
 
             IF (ASSOCIATED(ks_env%matrix_ks_aux_fit_im)) &
                CALL dbcsr_deallocate_matrix_set(ks_env%matrix_ks_aux_fit_im)
-            IF (ASSOCIATED(ks_env%matrix_ks_aux_fit_dft)) &
-               CALL dbcsr_deallocate_matrix_set(ks_env%matrix_ks_aux_fit_dft)
             IF (ASSOCIATED(ks_env%matrix_w_mp2)) &
                CALL dbcsr_deallocate_matrix_set(ks_env%matrix_w_mp2)
             IF (ASSOCIATED(ks_env%matrix_p_mp2)) &
