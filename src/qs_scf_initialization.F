@@ -410,8 +410,8 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'qs_scf_ensure_work_matrices'
 
-      INTEGER                                            :: handle, is, nao, nrow_block, nw
-      LOGICAL                                            :: do_kpoints
+      INTEGER                                            :: handle, is, nao, nrow_block, nwork1
+      LOGICAL                                            :: do_alloc_work1, do_kpoints
       TYPE(cp_fm_pool_p_type), DIMENSION(:), POINTER     :: ao_mo_fm_pools
       TYPE(cp_fm_struct_type), POINTER                   :: ao_ao_fmstruct, ao_mo_fmstruct
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_s
@@ -432,6 +432,9 @@ CONTAINS
                       do_kpoints=do_kpoints)
       CALL mpools_get(qs_env%mpools, ao_mo_fm_pools=ao_mo_fm_pools)
 
+      do_alloc_work1 = .FALSE.
+      nwork1 = dft_control%nspins
+
       ! create an ao_ao parallel matrix structure
       ao_mo_fmstruct => fm_pool_get_el_struct(ao_mo_fm_pools(1)%pool)
       CALL cp_fm_struct_get(ao_mo_fmstruct, nrow_block=nrow_block)
@@ -445,18 +448,9 @@ CONTAINS
 
       IF ((scf_env%method /= ot_method_nr) .AND. &
           (scf_env%method /= block_davidson_diag_method_nr)) THEN
-         IF (.NOT. ASSOCIATED(scf_env%scf_work1)) THEN
-            nw = dft_control%nspins
-            IF (do_kpoints) nw = 4
-            ALLOCATE (scf_env%scf_work1(nw))
-            DO is = 1, SIZE(scf_env%scf_work1)
-               NULLIFY (scf_env%scf_work1(is)%matrix)
-               CALL cp_fm_create(scf_env%scf_work1(is)%matrix, &
-                                 matrix_struct=ao_ao_fmstruct, &
-                                 name="SCF"//TRIM(ADJUSTL(cp_to_string(scf_env%id_nr)))// &
-                                 "WORK_MATRIX-1-"//TRIM(ADJUSTL(cp_to_string(is))))
-            END DO
-         END IF
+
+         do_alloc_work1 = .TRUE.
+
          IF ((.NOT. ASSOCIATED(scf_env%ortho)) .AND. &
              (scf_env%method /= ot_diag_method_nr) .AND. &
              (scf_env%method /= special_diag_method_nr)) THEN
@@ -511,17 +505,19 @@ CONTAINS
       END IF
 
       IF (do_kpoints) THEN
-         IF (.NOT. ASSOCIATED(scf_env%scf_work1)) THEN
-            nw = 4
-            ALLOCATE (scf_env%scf_work1(nw))
-            DO is = 1, SIZE(scf_env%scf_work1)
-               NULLIFY (scf_env%scf_work1(is)%matrix)
-               CALL cp_fm_create(scf_env%scf_work1(is)%matrix, &
-                                 matrix_struct=ao_ao_fmstruct, &
-                                 name="SCF"//TRIM(ADJUSTL(cp_to_string(scf_env%id_nr)))// &
-                                 "WORK_MATRIX-1-"//TRIM(ADJUSTL(cp_to_string(is))))
-            END DO
-         END IF
+         nwork1 = MAX(nwork1, 4)
+         do_alloc_work1 = .TRUE.
+      END IF
+
+      IF (do_alloc_work1 .AND. (.NOT. ASSOCIATED(scf_env%scf_work1))) THEN
+         ALLOCATE (scf_env%scf_work1(nwork1))
+         DO is = 1, nwork1
+            NULLIFY (scf_env%scf_work1(is)%matrix)
+            CALL cp_fm_create(scf_env%scf_work1(is)%matrix, &
+                              matrix_struct=ao_ao_fmstruct, &
+                              name="SCF"//TRIM(ADJUSTL(cp_to_string(scf_env%id_nr)))// &
+                              "WORK_MATRIX-1-"//TRIM(ADJUSTL(cp_to_string(is))))
+         END DO
       END IF
 
       CALL cp_fm_struct_release(ao_ao_fmstruct)
@@ -529,8 +525,8 @@ CONTAINS
       IF (do_kpoints .AND. dft_control%do_admm .AND. (.NOT. ASSOCIATED(scf_env%scf_work_aux_fit))) THEN
          NULLIFY (ao_mo_fm_pools, ao_mo_fmstruct, mos)
 
-         nw = 4
-         ALLOCATE (scf_env%scf_work_aux_fit(nw))
+         nwork1 = 4
+         ALLOCATE (scf_env%scf_work_aux_fit(nwork1))
 
          CALL get_qs_env(qs_env, mos_aux_fit=mos)
          CALL mpools_get(qs_env%mpools_aux_fit, ao_mo_fm_pools=ao_mo_fm_pools)
@@ -546,7 +542,7 @@ CONTAINS
                                   ncol_global=nao, &
                                   template_fmstruct=ao_mo_fmstruct)
 
-         DO is = 1, nw
+         DO is = 1, nwork1
             NULLIFY (scf_env%scf_work_aux_fit(is)%matrix)
             CALL cp_fm_create(scf_env%scf_work_aux_fit(is)%matrix, &
                               matrix_struct=ao_ao_fmstruct, &
