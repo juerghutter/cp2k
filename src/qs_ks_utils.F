@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -1216,18 +1216,18 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER :: routineN = 'sum_up_and_integrate'
 
       CHARACTER(LEN=default_string_length)               :: basis_type
-      INTEGER                                            :: handle, igroup, ikind, ispin, nkind, &
-                                                            nspins
+      INTEGER                                            :: handle, igroup, ikind, img, ispin, &
+                                                            nkind, nspins
       INTEGER, DIMENSION(:, :, :), POINTER               :: cell_to_index
       LOGICAL                                            :: do_ppl, gapw, gapw_xc, lrigpw, rigpw
       REAL(dp)                                           :: dvol, sign
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cp_para_env_type), POINTER                    :: para_env
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: ksmat, matrix_ks_aux_fit, &
-                                                            matrix_ks_aux_fit_dft, rho_ao, &
-                                                            rho_ao_aux, rho_ao_nokp, smat
-      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: rho_ao_kp
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: ksmat, rho_ao, rho_ao_nokp, smat
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_ks_aux_fit, &
+                                                            matrix_ks_aux_fit_dft, rho_ao_aux, &
+                                                            rho_ao_kp
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(kpoint_type), POINTER                         :: kpoints
       TYPE(lri_density_type), POINTER                    :: lri_density
@@ -1252,14 +1252,12 @@ CONTAINS
       CALL get_qs_env(qs_env, &
                       dft_control=dft_control, &
                       pw_env=pw_env, &
-                      matrix_ks_aux_fit=matrix_ks_aux_fit, &
-                      matrix_ks_aux_fit_dft=matrix_ks_aux_fit_dft, &
                       v_hartree_rspace=v_rspace%pw, &
                       rho_aux_fit=rho_aux_fit, &
                       vee=vee)
 
       CALL qs_rho_get(rho, rho_ao_kp=rho_ao_kp)
-      CALL qs_rho_get(rho_aux_fit, rho_ao=rho_ao_aux)
+      CALL qs_rho_get(rho_aux_fit, rho_ao_kp=rho_ao_aux)
       CALL pw_env_get(pw_env, poisson_env=poisson_env, auxbas_pw_pool=auxbas_pw_pool)
       gapw = dft_control%qs_control%gapw
       gapw_xc = dft_control%qs_control%gapw_xc
@@ -1565,8 +1563,11 @@ CONTAINS
 
       ! Add contributions from ADMM if requested
       IF (dft_control%do_admm) THEN
-         CALL get_qs_env(qs_env, admm_env=admm_env)
          IF (ASSOCIATED(v_rspace_new_aux_fit)) THEN
+            CALL get_qs_env(qs_env, &
+                            admm_env=admm_env, &
+                            matrix_ks_aux_fit_kp=matrix_ks_aux_fit, &
+                            matrix_ks_aux_fit_dft_kp=matrix_ks_aux_fit_dft)
             DO ispin = 1, nspins
                ! Calculate the xc potential
                v_rspace_new_aux_fit(ispin)%pw%cr3d = &
@@ -1574,8 +1575,10 @@ CONTAINS
                   v_rspace_new_aux_fit(ispin)%pw%cr3d
 
                ! set matrix_ks_aux_fit_dft = matrix_ks_aux_fit(k_HF)
-               CALL dbcsr_copy(matrix_ks_aux_fit_dft(ispin)%matrix, matrix_ks_aux_fit(ispin)%matrix, &
-                               name="DFT exch. part of matrix_ks_aux_fit")
+               DO img = 1, dft_control%nimages
+                  CALL dbcsr_copy(matrix_ks_aux_fit_dft(ispin, img)%matrix, matrix_ks_aux_fit(ispin, img)%matrix, &
+                                  name="DFT exch. part of matrix_ks_aux_fit")
+               END DO
 
                ! Add potential to ks_matrix aux_fit, skip integration if no DFT correction
 
@@ -1589,9 +1592,12 @@ CONTAINS
                      basis_type = "AUX_FIT_SOFT"
                   END IF
 
+                  rho_ao => rho_ao_aux(ispin, :)
+                  ksmat => matrix_ks_aux_fit(ispin, :)
+
                   CALL integrate_v_rspace(v_rspace=v_rspace_new_aux_fit(ispin), &
-                                          pmat=rho_ao_aux(ispin), &
-                                          hmat=matrix_ks_aux_fit(ispin), &
+                                          pmat_kp=rho_ao, &
+                                          hmat_kp=ksmat, &
                                           qs_env=qs_env, &
                                           calculate_forces=calculate_forces, &
                                           force_adm=.TRUE., &
@@ -1602,8 +1608,10 @@ CONTAINS
                END IF
 
                ! matrix_ks_aux_fit_dft(x_DFT)=matrix_ks_aux_fit_dft(old,k_HF)-matrix_ks_aux_fit(k_HF-x_DFT)
-               CALL dbcsr_add(matrix_ks_aux_fit_dft(ispin)%matrix, &
-                              matrix_ks_aux_fit(ispin)%matrix, 1.0_dp, -1.0_dp)
+               DO img = 1, dft_control%nimages
+                  CALL dbcsr_add(matrix_ks_aux_fit_dft(ispin, img)%matrix, &
+                                 matrix_ks_aux_fit(ispin, img)%matrix, 1.0_dp, -1.0_dp)
+               END DO
 
                CALL pw_pool_give_back_pw(auxbas_pw_pool, v_rspace_new_aux_fit(ispin)%pw)
             END DO

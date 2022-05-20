@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -169,8 +169,9 @@ CONTAINS
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_distribution_type), POINTER             :: dbcsr_dist
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s_aux_fit, matrix_s_aux_fit_vs_orb
-      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_h, matrix_p, matrix_s, matrix_t, &
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_h, matrix_p, matrix_s, &
+                                                            matrix_s_aux_fit, &
+                                                            matrix_s_aux_fit_vs_orb, matrix_t, &
                                                             matrix_w
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(kg_environment_type), POINTER                 :: kg_env
@@ -321,22 +322,22 @@ CONTAINS
          IF (dft_control%do_admm) THEN
             NULLIFY (matrix_s_aux_fit, matrix_s_aux_fit_vs_orb, &
                      sab_aux_fit, sab_aux_fit_vs_orb)
-            CALL get_qs_env(qs_env=qs_env, matrix_s_aux_fit=matrix_s_aux_fit, &
+            CALL get_qs_env(qs_env=qs_env, matrix_s_aux_fit_kp=matrix_s_aux_fit, &
                             sab_aux_fit=sab_aux_fit)
-            CALL build_overlap_matrix(ks_env, matrix_s=matrix_s_aux_fit, &
+            CALL build_overlap_matrix(ks_env, matrixkp_s=matrix_s_aux_fit, &
                                       matrix_name="AUX_FIT_OVERLAP", &
                                       basis_type_a="AUX_FIT", &
                                       basis_type_b="AUX_FIT", &
                                       sab_nl=sab_aux_fit)
-            CALL set_ks_env(ks_env, matrix_s_aux_fit=matrix_s_aux_fit)
-            CALL get_qs_env(qs_env=qs_env, matrix_s_aux_fit_vs_orb=matrix_s_aux_fit_vs_orb, &
+            CALL set_ks_env(ks_env, matrix_s_aux_fit_kp=matrix_s_aux_fit)
+            CALL get_qs_env(qs_env=qs_env, matrix_s_aux_fit_vs_orb_kp=matrix_s_aux_fit_vs_orb, &
                             sab_aux_fit_vs_orb=sab_aux_fit_vs_orb)
-            CALL build_overlap_matrix(ks_env, matrix_s=matrix_s_aux_fit_vs_orb, &
+            CALL build_overlap_matrix(ks_env, matrixkp_s=matrix_s_aux_fit_vs_orb, &
                                       matrix_name="MIXED_OVERLAP", &
                                       basis_type_a="AUX_FIT", &
                                       basis_type_b="ORB", &
                                       sab_nl=sab_aux_fit_vs_orb)
-            CALL set_ks_env(ks_env, matrix_s_aux_fit_vs_orb=matrix_s_aux_fit_vs_orb)
+            CALL set_ks_env(ks_env, matrix_s_aux_fit_vs_orb_kp=matrix_s_aux_fit_vs_orb)
          END IF
       END IF
 

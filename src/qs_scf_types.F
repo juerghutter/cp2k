@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -105,7 +105,7 @@ MODULE qs_scf_types
       COMPLEX(KIND=dp), DIMENSION(:, :, :), POINTER :: cc_buffer
       LOGICAL :: print_iter_line, skip_mixing, skip_diis, needs_ortho
       TYPE(mixing_storage_type), POINTER :: mixing_store
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER :: scf_work1
+      TYPE(cp_fm_p_type), DIMENSION(:), POINTER :: scf_work1, scf_work_aux_fit
       TYPE(cp_fm_type), POINTER  :: scf_work2, ortho, ortho_m1, s_half, s_minus_one
       TYPE(krylov_space_type), POINTER :: krylov_space
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER :: p_delta, p_mix_new
@@ -170,6 +170,7 @@ CONTAINS
       scf_env%outer_scf%deallocate_jacobian = .TRUE.
       NULLIFY (scf_env%scf_work1)
       NULLIFY (scf_env%scf_work2)
+      NULLIFY (scf_env%scf_work_aux_fit)
       NULLIFY (scf_env%ortho)
       NULLIFY (scf_env%ortho_dbcsr)
       NULLIFY (scf_env%ortho_m1)
@@ -280,6 +281,7 @@ CONTAINS
          scf_env%ref_count = scf_env%ref_count - 1
          IF (scf_env%ref_count < 1) THEN
             CALL cp_fm_vect_dealloc(scf_env%scf_work1)
+            CALL cp_fm_vect_dealloc(scf_env%scf_work_aux_fit)
             CALL cp_fm_release(scf_env%scf_work2)
             CALL cp_fm_release(scf_env%ortho)
             CALL cp_fm_release(scf_env%ortho_m1)

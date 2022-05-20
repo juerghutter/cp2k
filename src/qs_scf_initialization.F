@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -410,8 +410,8 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'qs_scf_ensure_work_matrices'
 
-      INTEGER                                            :: handle, is, nao, nrow_block, nw
-      LOGICAL                                            :: do_kpoints
+      INTEGER                                            :: handle, is, nao, nrow_block, nwork1
+      LOGICAL                                            :: do_alloc_work1, do_kpoints
       TYPE(cp_fm_pool_p_type), DIMENSION(:), POINTER     :: ao_mo_fm_pools
       TYPE(cp_fm_struct_type), POINTER                   :: ao_ao_fmstruct, ao_mo_fmstruct
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_s
@@ -432,6 +432,9 @@ CONTAINS
                       do_kpoints=do_kpoints)
       CALL mpools_get(qs_env%mpools, ao_mo_fm_pools=ao_mo_fm_pools)
 
+      do_alloc_work1 = .FALSE.
+      nwork1 = dft_control%nspins
+
       ! create an ao_ao parallel matrix structure
       ao_mo_fmstruct => fm_pool_get_el_struct(ao_mo_fm_pools(1)%pool)
       CALL cp_fm_struct_get(ao_mo_fmstruct, nrow_block=nrow_block)
@@ -445,18 +448,9 @@ CONTAINS
 
       IF ((scf_env%method /= ot_method_nr) .AND. &
           (scf_env%method /= block_davidson_diag_method_nr)) THEN
-         IF (.NOT. ASSOCIATED(scf_env%scf_work1)) THEN
-            nw = dft_control%nspins
-            IF (do_kpoints) nw = 4
-            ALLOCATE (scf_env%scf_work1(nw))
-            DO is = 1, SIZE(scf_env%scf_work1)
-               NULLIFY (scf_env%scf_work1(is)%matrix)
-               CALL cp_fm_create(scf_env%scf_work1(is)%matrix, &
-                                 matrix_struct=ao_ao_fmstruct, &
-                                 name="SCF"//TRIM(ADJUSTL(cp_to_string(scf_env%id_nr)))// &
-                                 "WORK_MATRIX-1-"//TRIM(ADJUSTL(cp_to_string(is))))
-            END DO
-         END IF
+
+         do_alloc_work1 = .TRUE.
+
          IF ((.NOT. ASSOCIATED(scf_env%ortho)) .AND. &
              (scf_env%method /= ot_diag_method_nr) .AND. &
              (scf_env%method /= special_diag_method_nr)) THEN
@@ -511,20 +505,52 @@ CONTAINS
       END IF
 
       IF (do_kpoints) THEN
-         IF (.NOT. ASSOCIATED(scf_env%scf_work1)) THEN
-            nw = 4
-            ALLOCATE (scf_env%scf_work1(nw))
-            DO is = 1, SIZE(scf_env%scf_work1)
-               NULLIFY (scf_env%scf_work1(is)%matrix)
-               CALL cp_fm_create(scf_env%scf_work1(is)%matrix, &
-                                 matrix_struct=ao_ao_fmstruct, &
-                                 name="SCF"//TRIM(ADJUSTL(cp_to_string(scf_env%id_nr)))// &
-                                 "WORK_MATRIX-1-"//TRIM(ADJUSTL(cp_to_string(is))))
-            END DO
-         END IF
+         nwork1 = MAX(nwork1, 4)
+         do_alloc_work1 = .TRUE.
+      END IF
+
+      IF (do_alloc_work1 .AND. (.NOT. ASSOCIATED(scf_env%scf_work1))) THEN
+         ALLOCATE (scf_env%scf_work1(nwork1))
+         DO is = 1, nwork1
+            NULLIFY (scf_env%scf_work1(is)%matrix)
+            CALL cp_fm_create(scf_env%scf_work1(is)%matrix, &
+                              matrix_struct=ao_ao_fmstruct, &
+                              name="SCF"//TRIM(ADJUSTL(cp_to_string(scf_env%id_nr)))// &
+                              "WORK_MATRIX-1-"//TRIM(ADJUSTL(cp_to_string(is))))
+         END DO
       END IF
 
       CALL cp_fm_struct_release(ao_ao_fmstruct)
+
+      IF (do_kpoints .AND. dft_control%do_admm .AND. (.NOT. ASSOCIATED(scf_env%scf_work_aux_fit))) THEN
+         NULLIFY (ao_mo_fm_pools, ao_mo_fmstruct, mos)
+
+         nwork1 = 4
+         ALLOCATE (scf_env%scf_work_aux_fit(nwork1))
+
+         CALL get_qs_env(qs_env, mos_aux_fit=mos)
+         CALL mpools_get(qs_env%mpools_aux_fit, ao_mo_fm_pools=ao_mo_fm_pools)
+
+         ! create an ao_ao parallel matrix structure
+         ao_mo_fmstruct => fm_pool_get_el_struct(ao_mo_fm_pools(1)%pool)
+         CALL cp_fm_struct_get(ao_mo_fmstruct, nrow_block=nrow_block)
+         CALL get_mo_set(mos(1)%mo_set, nao=nao)
+         CALL cp_fm_struct_create(fmstruct=ao_ao_fmstruct, &
+                                  nrow_block=nrow_block, &
+                                  ncol_block=nrow_block, &
+                                  nrow_global=nao, &
+                                  ncol_global=nao, &
+                                  template_fmstruct=ao_mo_fmstruct)
+
+         DO is = 1, nwork1
+            NULLIFY (scf_env%scf_work_aux_fit(is)%matrix)
+            CALL cp_fm_create(scf_env%scf_work_aux_fit(is)%matrix, &
+                              matrix_struct=ao_ao_fmstruct, &
+                              name="SCF"//TRIM(ADJUSTL(cp_to_string(scf_env%id_nr)))// &
+                              "WORK_MATRIX-AUX-"//TRIM(ADJUSTL(cp_to_string(is))))
+         END DO
+         CALL cp_fm_struct_release(ao_ao_fmstruct)
+      END IF
 
       CALL timestop(handle)
 
@@ -545,13 +571,13 @@ CONTAINS
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mo_derivs_aux_fit
       TYPE(cp_fm_pool_p_type), DIMENSION(:), POINTER     :: ao_mo_fm_pools, ao_mo_fm_pools_aux_fit
       TYPE(cp_fm_type), POINTER                          :: mo_coeff, mo_coeff_aux_fit, mo_coeff_last
-      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s_aux_fit, mo_derivs
-      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_s
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mo_derivs
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_s, matrix_s_aux_fit
       TYPE(dbcsr_type), POINTER                          :: mo_coeff_b
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(kpoint_type), POINTER                         :: kpoints
       TYPE(mo_set_p_type), DIMENSION(:), POINTER         :: mos, mos_aux_fit, mos_last_converged
-      TYPE(mo_set_p_type), DIMENSION(:, :), POINTER      :: mos_k
+      TYPE(mo_set_p_type), DIMENSION(:, :), POINTER      :: mos_aux_fit_k, mos_k
       TYPE(xas_environment_type), POINTER                :: xas_env
 
       CALL timeset(routineN, handle)
@@ -632,9 +658,9 @@ CONTAINS
             IF (.NOT. ASSOCIATED(mo_coeff_b)) THEN
                CALL cp_fm_get_info(mos_aux_fit(ispin)%mo_set%mo_coeff, ncol_global=nmo)
                CALL dbcsr_init_p(mos_aux_fit(ispin)%mo_set%mo_coeff_b)
-               CALL get_qs_env(qs_env=qs_env, matrix_s_aux_fit=matrix_s_aux_fit)
+               CALL get_qs_env(qs_env=qs_env, matrix_s_aux_fit_kp=matrix_s_aux_fit)
                CALL cp_dbcsr_m_by_n_from_row_template(mos_aux_fit(ispin)%mo_set%mo_coeff_b, &
-                                                      template=matrix_s_aux_fit(1)%matrix, n=nmo, &
+                                                      template=matrix_s_aux_fit(1, 1)%matrix, n=nmo, &
                                                       sym=dbcsr_type_no_symmetry)
             ENDIF
          END DO
@@ -676,12 +702,32 @@ CONTAINS
             ! possible for OT gamma point calculations
             qs_env%requires_mo_derivs = .FALSE.
          END IF
-         IF (dft_control%do_admm) &
-            CPABORT("No ADMM implemented with kpoints")
+         IF (dft_control%do_admm) THEN
+            IF (qs_env%requires_mo_derivs) &
+               CPABORT("No ADMM derivatives implemented with kpoints")
+            CALL mpools_get(kpoints%mpools_aux_fit, ao_mo_fm_pools=ao_mo_fm_pools_aux_fit)
+            DO ik = 1, SIZE(kpoints%kp_aux_env)
+               mos_aux_fit_k => kpoints%kp_aux_env(ik)%kpoint_env%mos
+               ikk = kpoints%kp_range(1) + ik - 1
+               DO ispin = 1, SIZE(mos_aux_fit_k, 2)
+                  DO ic = 1, SIZE(mos_aux_fit_k, 1)
+                     CALL get_mo_set(mos_aux_fit_k(ic, ispin)%mo_set, mo_coeff=mo_coeff_aux_fit, mo_coeff_b=mo_coeff_b)
+                     IF (.NOT. ASSOCIATED(mo_coeff_aux_fit)) THEN
+                        CALL init_mo_set(mos_aux_fit_k(ic, ispin)%mo_set, &
+                                         fm_pool=ao_mo_fm_pools_aux_fit(ispin)%pool, &
+                                         name="kpoints_"//TRIM(ADJUSTL(cp_to_string(ikk)))// &
+                                         "%mo_aux_fit"//TRIM(ADJUSTL(cp_to_string(ispin))))
+                     END IF
+                     ! no sparse matrix representation of kpoint MO vectors
+                     CPASSERT(.NOT. ASSOCIATED(mo_coeff_b))
+                  END DO
+               END DO
+            END DO
+         END IF
          IF (dft_control%do_xas_calculation) &
             CPABORT("No XAS implemented with kpoints")
+         CALL mpools_get(kpoints%mpools, ao_mo_fm_pools=ao_mo_fm_pools)
          DO ik = 1, SIZE(kpoints%kp_env)
-            CALL mpools_get(kpoints%mpools, ao_mo_fm_pools=ao_mo_fm_pools)
             mos_k => kpoints%kp_env(ik)%kpoint_env%mos
             ikk = kpoints%kp_range(1) + ik - 1
             CPASSERT(ASSOCIATED(mos_k))

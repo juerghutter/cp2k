@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -396,10 +396,14 @@ CONTAINS
       CALL cp_blacs_env_retain(blacs_env)
       CALL get_qs_env(qs_env=qs_env, do_kpoints=do_kpoints)
       IF (do_kpoints) THEN
-         CALL kpoint_env_initialize(kpoints)
+         CALL kpoint_env_initialize(kpoints, with_aux_fit=dft_control%do_admm)
          CALL kpoint_initialize_mos(kpoints, qs_env%mos)
          CALL get_qs_env(qs_env=qs_env, wf_history=wf_history)
          CALL wfi_create_for_kp(wf_history)
+
+         IF (dft_control%do_admm) THEN
+            CALL kpoint_initialize_mos(kpoints, qs_env%mos_aux_fit, for_aux_fit=.TRUE.)
+         END IF
       END IF
 
       do_hfx = .FALSE.

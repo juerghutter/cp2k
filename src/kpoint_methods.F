@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -265,10 +265,12 @@ CONTAINS
 ! **************************************************************************************************
 !> \brief Initialize the kpoint environment
 !> \param kpoint       Kpoint environment
+!> \param with_aux_fit ...
 ! **************************************************************************************************
-   SUBROUTINE kpoint_env_initialize(kpoint)
+   SUBROUTINE kpoint_env_initialize(kpoint, with_aux_fit)
 
       TYPE(kpoint_type), POINTER                         :: kpoint
+      LOGICAL, OPTIONAL                                  :: with_aux_fit
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'kpoint_env_initialize'
 
@@ -276,21 +278,32 @@ CONTAINS
                                                             handle, igr, ik, ikk, ngr, niogrp, &
                                                             nkp, nkp_grp, nkp_loc, npe, unit_nr
       INTEGER, DIMENSION(2)                              :: dims, pos
+      LOGICAL                                            :: aux_fit
       LOGICAL, DIMENSION(2)                              :: rdim
       TYPE(cp_para_cart_type), POINTER                   :: cart
       TYPE(cp_para_env_type), POINTER                    :: para_env, para_env_full, &
                                                             para_env_inter_kp, para_env_kp
-      TYPE(kpoint_env_p_type), DIMENSION(:), POINTER     :: kp_env
+      TYPE(kpoint_env_p_type), DIMENSION(:), POINTER     :: kp_aux_env, kp_env
       TYPE(kpoint_env_type), POINTER                     :: kp
 
       CALL timeset(routineN, handle)
 
+      IF (PRESENT(with_aux_fit)) THEN
+         aux_fit = with_aux_fit
+      ELSE
+         aux_fit = .FALSE.
+      END IF
+
       CPASSERT(ASSOCIATED(kpoint))
       para_env => kpoint%para_env
       CPASSERT(ASSOCIATED(para_env))
-      CPASSERT(.NOT. ASSOCIATED(kpoint%kp_env))
 
-      NULLIFY (kp_env)
+      CPASSERT(.NOT. ASSOCIATED(kpoint%kp_env))
+      IF (aux_fit) THEN
+         CPASSERT(.NOT. ASSOCIATED(kpoint%kp_aux_env))
+      END IF
+
+      NULLIFY (kp_env, kp_aux_env)
       nkp = kpoint%nkp
       npe = para_env%num_pe
       IF (npe == 1) THEN
@@ -305,12 +318,29 @@ CONTAINS
             kp%xkp(1:3) = kpoint%xkp(1:3, ik)
             kp%is_local = .TRUE.
          END DO
+         kpoint%kp_env => kp_env
+
+         IF (aux_fit) THEN
+            ALLOCATE (kp_aux_env(nkp))
+            DO ik = 1, nkp
+               NULLIFY (kp_aux_env(ik)%kpoint_env)
+               CALL kpoint_env_create(kp_aux_env(ik)%kpoint_env)
+               kp => kp_aux_env(ik)%kpoint_env
+               kp%nkpoint = ik
+               kp%wkp = kpoint%wkp(ik)
+               kp%xkp(1:3) = kpoint%xkp(1:3, ik)
+               kp%is_local = .TRUE.
+            END DO
+
+            kpoint%kp_aux_env => kp_aux_env
+         END IF
+
          ALLOCATE (kpoint%kp_dist(2, 1))
          kpoint%kp_dist(1, 1) = 1
          kpoint%kp_dist(2, 1) = nkp
          kpoint%kp_range(1) = 1
          kpoint%kp_range(2) = nkp
-         kpoint%kp_env => kp_env
+
          ! parallel environments
          kpoint%para_env_full => para_env
          CALL cp_para_env_retain(para_env)
@@ -384,6 +414,7 @@ CONTAINS
          END DO
          ! local kpoints
          kpoint%kp_range(1:2) = kpoint%kp_dist(1:2, para_env_inter_kp%mepos + 1)
+
          ALLOCATE (kp_env(nkp_loc))
          DO ik = 1, nkp_loc
             NULLIFY (kp_env(ik)%kpoint_env)
@@ -395,8 +426,22 @@ CONTAINS
             kp%xkp(1:3) = kpoint%xkp(1:3, ikk)
             kp%is_local = (ngr == 1)
          END DO
-
          kpoint%kp_env => kp_env
+
+         IF (aux_fit) THEN
+            ALLOCATE (kp_aux_env(nkp_loc))
+            DO ik = 1, nkp_loc
+               NULLIFY (kp_aux_env(ik)%kpoint_env)
+               ikk = kpoint%kp_range(1) + ik - 1
+               CALL kpoint_env_create(kp_aux_env(ik)%kpoint_env)
+               kp => kp_aux_env(ik)%kpoint_env
+               kp%nkpoint = ikk
+               kp%wkp = kpoint%wkp(ikk)
+               kp%xkp(1:3) = kpoint%xkp(1:3, ikk)
+               kp%is_local = (ngr == 1)
+            END DO
+            kpoint%kp_aux_env => kp_aux_env
+         END IF
 
          unit_nr = cp_logger_get_default_io_unit()
          IF (unit_nr > 0) THEN
@@ -418,18 +463,21 @@ CONTAINS
 !> \param kpoint  Kpoint environment
 !> \param mos     Reference MOs (global)
 !> \param added_mos ...
+!> \param for_aux_fit ...
 ! **************************************************************************************************
-   SUBROUTINE kpoint_initialize_mos(kpoint, mos, added_mos)
+   SUBROUTINE kpoint_initialize_mos(kpoint, mos, added_mos, for_aux_fit)
 
       TYPE(kpoint_type), POINTER                         :: kpoint
       TYPE(mo_set_p_type), DIMENSION(:), POINTER         :: mos
       INTEGER, INTENT(IN), OPTIONAL                      :: added_mos
+      LOGICAL, OPTIONAL                                  :: for_aux_fit
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'kpoint_initialize_mos'
 
       INTEGER                                            :: handle, ic, ik, is, nadd, nao, nc, &
                                                             nelectron, nkp_loc, nmo, nmorig(2), &
                                                             nspin
+      LOGICAL                                            :: aux_fit
       REAL(KIND=dp)                                      :: flexible_electron_count, maxocc, n_el_f
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_pool_p_type), DIMENSION(:), POINTER     :: ao_ao_fm_pools
@@ -440,9 +488,18 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
+      IF (PRESENT(for_aux_fit)) THEN
+         aux_fit = for_aux_fit
+      ELSE
+         aux_fit = .FALSE.
+      END IF
+
       CPASSERT(ASSOCIATED(kpoint))
 
       IF (ASSOCIATED(mos)) THEN
+         IF (aux_fit) THEN
+            CPASSERT(ASSOCIATED(kpoint%kp_aux_env))
+         END IF
 
          IF (PRESENT(added_mos)) THEN
             nadd = added_mos
@@ -458,10 +515,18 @@ CONTAINS
          nspin = SIZE(mos, 1)
          nkp_loc = kpoint%kp_range(2) - kpoint%kp_range(1) + 1
          IF (nkp_loc > 0) THEN
-            CPASSERT(SIZE(kpoint%kp_env) == nkp_loc)
+            IF (aux_fit) THEN
+               CPASSERT(SIZE(kpoint%kp_aux_env) == nkp_loc)
+            ELSE
+               CPASSERT(SIZE(kpoint%kp_env) == nkp_loc)
+            END IF
             ! allocate the mo sets, correct number of kpoints (local), real/complex, spin
             DO ik = 1, nkp_loc
-               kp => kpoint%kp_env(ik)%kpoint_env
+               IF (aux_fit) THEN
+                  kp => kpoint%kp_aux_env(ik)%kpoint_env
+               ELSE
+                  kp => kpoint%kp_env(ik)%kpoint_env
+               END IF
                ALLOCATE (kp%mos(nc, nspin))
                DO is = 1, nspin
                   CALL get_mo_set(mos(is)%mo_set, nao=nao, nmo=nmo, nelectron=nelectron, &
@@ -480,8 +545,12 @@ CONTAINS
             ! we assume here that the group para_env_inter_kp will connect
             ! equivalent parts of fm matrices, i.e. no reshuffeling of processors
             NULLIFY (blacs_env)
-            CALL cp_blacs_env_create(blacs_env=blacs_env, para_env=kpoint%para_env_kp)
-            kpoint%blacs_env => blacs_env
+            IF (ASSOCIATED(kpoint%blacs_env)) THEN
+               blacs_env => kpoint%blacs_env
+            ELSE
+               CALL cp_blacs_env_create(blacs_env=blacs_env, para_env=kpoint%para_env_kp)
+               kpoint%blacs_env => blacs_env
+            END IF
 
             ! set possible new number of MOs
             DO is = 1, nspin
@@ -495,7 +564,13 @@ CONTAINS
             CALL mpools_create(mpools=mpools)
             CALL mpools_rebuild_fm_pools(mpools=mpools, mos=mos, &
                                          blacs_env=blacs_env, para_env=kpoint%para_env_kp)
-            kpoint%mpools => mpools
+
+            IF (aux_fit) THEN
+               kpoint%mpools_aux_fit => mpools
+            ELSE
+               kpoint%mpools => mpools
+            END IF
+
             ! reset old number of MOs
             DO is = 1, nspin
                CALL set_mo_set(mos(is)%mo_set, nmo=nmorig(is))
@@ -506,7 +581,11 @@ CONTAINS
             CALL fm_pool_create_fm(ao_ao_fm_pools(1)%pool, fmlocal)
             CALL cp_fm_get_info(fmlocal, matrix_struct=matrix_struct)
             DO ik = 1, nkp_loc
-               kp => kpoint%kp_env(ik)%kpoint_env
+               IF (aux_fit) THEN
+                  kp => kpoint%kp_aux_env(ik)%kpoint_env
+               ELSE
+                  kp => kpoint%kp_env(ik)%kpoint_env
+               END IF
                ! density matrix
                IF (ASSOCIATED(kp%pmat)) THEN
                   DO is = 1, SIZE(kp%pmat, 2)
@@ -890,18 +969,19 @@ CONTAINS
 !> \brief Calculate kpoint density matrices (rho(k), owned by kpoint groups)
 !> \param kpoint    kpoint environment
 !> \param energy_weighted  calculate energy weighted density matrix
+!> \param for_aux_fit ...
 ! **************************************************************************************************
-   SUBROUTINE kpoint_density_matrices(kpoint, energy_weighted)
+   SUBROUTINE kpoint_density_matrices(kpoint, energy_weighted, for_aux_fit)
 
       TYPE(kpoint_type), POINTER                         :: kpoint
-      LOGICAL, OPTIONAL                                  :: energy_weighted
+      LOGICAL, OPTIONAL                                  :: energy_weighted, for_aux_fit
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'kpoint_density_matrices'
 
       INTEGER                                            :: handle, ikpgr, ispin, kplocal, nao, nmo, &
                                                             nspin
       INTEGER, DIMENSION(2)                              :: kp_range
-      LOGICAL                                            :: wtype
+      LOGICAL                                            :: aux_fit, wtype
       REAL(KIND=dp), DIMENSION(:), POINTER               :: eigenvalues, occupation
       TYPE(cp_fm_struct_type), POINTER                   :: matrix_struct
       TYPE(cp_fm_type), POINTER                          :: cpmat, fwork, pmat, rpmat
@@ -917,8 +997,22 @@ CONTAINS
          wtype = .FALSE.
       END IF
 
+      IF (PRESENT(for_aux_fit)) THEN
+         aux_fit = for_aux_fit
+      ELSE
+         aux_fit = .FALSE.
+      END IF
+
+      IF (aux_fit) THEN
+         CPASSERT(ASSOCIATED(kpoint%kp_aux_env))
+      END IF
+
       ! work matrix
-      mo_set => kpoint%kp_env(1)%kpoint_env%mos(1, 1)%mo_set
+      IF (aux_fit) THEN
+         mo_set => kpoint%kp_aux_env(1)%kpoint_env%mos(1, 1)%mo_set
+      ELSE
+         mo_set => kpoint%kp_env(1)%kpoint_env%mos(1, 1)%mo_set
+      END IF
       CALL get_mo_set(mo_set, nao=nao, nmo=nmo)
       CALL cp_fm_get_info(mo_set%mo_coeff, matrix_struct=matrix_struct)
       CALL cp_fm_create(fwork, matrix_struct)
@@ -926,7 +1020,11 @@ CONTAINS
       CALL get_kpoint_info(kpoint, kp_range=kp_range)
       kplocal = kp_range(2) - kp_range(1) + 1
       DO ikpgr = 1, kplocal
-         kp => kpoint%kp_env(ikpgr)%kpoint_env
+         IF (aux_fit) THEN
+            kp => kpoint%kp_aux_env(ikpgr)%kpoint_env
+         ELSE
+            kp => kpoint%kp_env(ikpgr)%kpoint_env
+         END IF
          nspin = SIZE(kp%mos, 2)
          DO ispin = 1, nspin
             mo_set => kp%mos(1, ispin)%mo_set
@@ -993,8 +1091,9 @@ CONTAINS
 !> \param tempmat DBCSR matrix to be used as template
 !> \param sab_nl ...
 !> \param fmwork  FM work matrices (kpoint group)
+!> \param for_aux_fit ...
 ! **************************************************************************************************
-   SUBROUTINE kpoint_density_transform(kpoint, denmat, wtype, tempmat, sab_nl, fmwork)
+   SUBROUTINE kpoint_density_transform(kpoint, denmat, wtype, tempmat, sab_nl, fmwork, for_aux_fit)
 
       TYPE(kpoint_type), POINTER                         :: kpoint
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: denmat
@@ -1003,13 +1102,14 @@ CONTAINS
       TYPE(neighbor_list_set_p_type), DIMENSION(:), &
          POINTER                                         :: sab_nl
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: fmwork
+      LOGICAL, OPTIONAL                                  :: for_aux_fit
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'kpoint_density_transform'
 
       INTEGER                                            :: handle, ic, ik, ikk, indx, is, ispin, &
                                                             nc, nimg, nkp, nspin
       INTEGER, DIMENSION(:, :, :), POINTER               :: cell_to_index
-      LOGICAL                                            :: my_kpgrp, real_only
+      LOGICAL                                            :: aux_fit, my_kpgrp, real_only
       REAL(KIND=dp)                                      :: wkpx
       REAL(KIND=dp), DIMENSION(:), POINTER               :: wkp
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: xkp
@@ -1021,6 +1121,16 @@ CONTAINS
       TYPE(kpoint_sym_type), POINTER                     :: kpsym
 
       CALL timeset(routineN, handle)
+
+      IF (PRESENT(for_aux_fit)) THEN
+         aux_fit = for_aux_fit
+      ELSE
+         aux_fit = .FALSE.
+      END IF
+
+      IF (aux_fit) THEN
+         CPASSERT(ASSOCIATED(kpoint%kp_aux_env))
+      END IF
 
       ! work storage
       ALLOCATE (rpmat)
@@ -1041,7 +1151,11 @@ CONTAINS
       CALL get_kpoint_info(kpoint, nkp=nkp, xkp=xkp, wkp=wkp, &
                            sab_nl=sab_nl, cell_to_index=cell_to_index)
       ! initialize real space density matrices
-      kp => kpoint%kp_env(1)%kpoint_env
+      IF (aux_fit) THEN
+         kp => kpoint%kp_aux_env(1)%kpoint_env
+      ELSE
+         kp => kpoint%kp_env(1)%kpoint_env
+      END IF
       nspin = SIZE(kp%mos, 2)
       nc = SIZE(kp%mos, 1)
       nimg = SIZE(denmat, 2)
@@ -1062,7 +1176,11 @@ CONTAINS
             my_kpgrp = (ik >= kpoint%kp_range(1) .AND. ik <= kpoint%kp_range(2))
             IF (my_kpgrp) THEN
                ikk = ik - kpoint%kp_range(1) + 1
-               kp => kpoint%kp_env(ikk)%kpoint_env
+               IF (aux_fit) THEN
+                  kp => kpoint%kp_aux_env(ikk)%kpoint_env
+               ELSE
+                  kp => kpoint%kp_env(ikk)%kpoint_env
+               END IF
             ELSE
                NULLIFY (kp)
             END IF
@@ -1136,7 +1254,11 @@ CONTAINS
             my_kpgrp = (ik >= kpoint%kp_range(1) .AND. ik <= kpoint%kp_range(2))
             IF (my_kpgrp) THEN
                ikk = ik - kpoint%kp_range(1) + 1
-               kp => kpoint%kp_env(ikk)%kpoint_env
+               IF (aux_fit) THEN
+                  kp => kpoint%kp_aux_env(ikk)%kpoint_env
+               ELSE
+                  kp => kpoint%kp_env(ikk)%kpoint_env
+               END IF
 
                DO ic = 1, nc
                   indx = indx + 1

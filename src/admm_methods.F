@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -13,7 +13,9 @@
 !> \author Manuel Guidon
 ! **************************************************************************************************
 MODULE admm_methods
-   USE admm_types,                      ONLY: admm_gapw_type,&
+   USE admm_types,                      ONLY: admm_env_create,&
+                                              admm_env_release,&
+                                              admm_gapw_type,&
                                               admm_type
    USE atomic_kind_types,               ONLY: atomic_kind_type
    USE basis_set_types,                 ONLY: get_gto_basis_set,&
@@ -25,7 +27,9 @@ MODULE admm_methods
    USE cp_dbcsr_cp2k_link,              ONLY: cp_dbcsr_alloc_block_from_nbl
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               copy_fm_to_dbcsr,&
-                                              cp_dbcsr_plus_fm_fm_t
+                                              cp_dbcsr_plus_fm_fm_t,&
+                                              dbcsr_allocate_matrix_set,&
+                                              dbcsr_deallocate_matrix_set
    USE cp_dbcsr_output,                 ONLY: cp_dbcsr_write_sparse_matrix
    USE cp_fm_basic_linalg,              ONLY: cp_fm_column_scale,&
                                               cp_fm_scale,&
@@ -37,14 +41,13 @@ MODULE admm_methods
                                               cp_fm_cholesky_reduce,&
                                               cp_fm_cholesky_restore
    USE cp_fm_diag,                      ONLY: cp_fm_syevd
-   USE cp_fm_types,                     ONLY: cp_fm_p_type,&
-                                              cp_fm_set_all,&
-                                              cp_fm_set_element,&
-                                              cp_fm_to_fm,&
-                                              cp_fm_type
+   USE cp_fm_types,                     ONLY: &
+        copy_info_type, cp_fm_cleanup_copy_general, cp_fm_finish_copy_general, cp_fm_p_type, &
+        cp_fm_set_all, cp_fm_set_element, cp_fm_start_copy_general, cp_fm_to_fm, cp_fm_type
    USE cp_gemm_interface,               ONLY: cp_gemm
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
-                                              cp_logger_type
+                                              cp_logger_type,&
+                                              cp_to_string
    USE cp_output_handling,              ONLY: cp_p_file,&
                                               cp_print_key_finished_output,&
                                               cp_print_key_should_output,&
@@ -68,6 +71,12 @@ MODULE admm_methods
                                               section_vals_val_get
    USE kinds,                           ONLY: default_string_length,&
                                               dp
+   USE kpoint_methods,                  ONLY: kpoint_density_matrices,&
+                                              kpoint_density_transform,&
+                                              rskp_transform
+   USE kpoint_types,                    ONLY: get_kpoint_env,&
+                                              get_kpoint_info,&
+                                              kpoint_type
    USE molecule_types,                  ONLY: molecule_type
    USE particle_types,                  ONLY: particle_type
    USE paw_proj_set_types,              ONLY: get_paw_proj_set,&
@@ -107,6 +116,7 @@ MODULE admm_methods
    USE qs_rho_types,                    ONLY: qs_rho_get,&
                                               qs_rho_set,&
                                               qs_rho_type
+   USE qs_scf_types,                    ONLY: qs_scf_env_type
    USE qs_vxc,                          ONLY: qs_vxc_create
    USE qs_vxc_atom,                     ONLY: calculate_vxc_atom
    USE task_list_methods,               ONLY: generate_qs_task_list
@@ -119,6 +129,7 @@ MODULE admm_methods
    PRIVATE
 
    PUBLIC :: admm_mo_calc_rho_aux, &
+             admm_mo_calc_rho_aux_kp, &
              admm_mo_merge_ks_matrix, &
              admm_mo_merge_derivs, &
              calc_mixed_overlap_force, &
@@ -273,6 +284,282 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE admm_mo_calc_rho_aux
+
+! **************************************************************************************************
+!> \brief ...
+!> \param qs_env ...
+! **************************************************************************************************
+   SUBROUTINE admm_mo_calc_rho_aux_kp(qs_env)
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'admm_mo_calc_rho_aux_kp'
+
+      CHARACTER(LEN=default_string_length)               :: basis_type
+      INTEGER                                            :: handle, igroup, ik, ikp, indx, ispin, &
+                                                            kplocal, nao_aux_fit, nao_orb, natom, &
+                                                            nkp, nkp_groups, nmo, nmo_mos, nspins
+      INTEGER, DIMENSION(2)                              :: kp_range
+      INTEGER, DIMENSION(:, :), POINTER                  :: kp_dist
+      INTEGER, DIMENSION(:, :, :), POINTER               :: cell_to_index
+      LOGICAL                                            :: my_kpgrp, use_real_wfn
+      REAL(KIND=dp), DIMENSION(:), POINTER               :: occ_num, occ_num_aux, tot_rho_r_aux
+      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: xkp
+      TYPE(admm_type), POINTER                           :: admm_env, admm_env_global
+      TYPE(copy_info_type), ALLOCATABLE, DIMENSION(:, :) :: info
+      TYPE(cp_fm_type), POINTER                          :: fmdummy, mo_coeff, mo_coeff_aux_fit
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: rho_ao
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_s_aux_fit, &
+                                                            matrix_s_aux_fit_vs_orb, rho_ao_aux
+      TYPE(dbcsr_type), POINTER                          :: qmatrix, smatrix, tmpmatrix, &
+                                                            tmpmatrix_vs_orb
+      TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(kpoint_type), POINTER                         :: kpoints
+      TYPE(mo_set_p_type), DIMENSION(:), POINTER         :: mos, mos_aux_fit
+      TYPE(mo_set_p_type), DIMENSION(:, :), POINTER      :: mos_aux_fit_kp, mos_kp
+      TYPE(neighbor_list_set_p_type), DIMENSION(:), &
+         POINTER                                         :: sab_aux_fit, sab_aux_fit_vs_orb
+      TYPE(pw_p_type), DIMENSION(:), POINTER             :: rho_g_aux, rho_r_aux
+      TYPE(qs_ks_env_type), POINTER                      :: ks_env
+      TYPE(qs_rho_type), POINTER                         :: rho_aux_fit
+      TYPE(qs_scf_env_type), POINTER                     :: scf_env
+      TYPE(task_list_type), POINTER                      :: task_list
+
+      CALL timeset(routineN, handle)
+
+      NULLIFY (ks_env, admm_env, admm_env_global, mos, mos_aux_fit, &
+               matrix_s_aux_fit, matrix_s_aux_fit_vs_orb, rho_aux_fit, &
+               para_env, rho_g_aux, rho_r_aux, rho_ao_aux, tot_rho_r_aux, &
+               kpoints, fmdummy, sab_aux_fit, sab_aux_fit_vs_orb)
+
+      CALL get_qs_env(qs_env, &
+                      ks_env=ks_env, &
+                      admm_env=admm_env_global, &
+                      dft_control=dft_control, &
+                      matrix_s_aux_fit_kp=matrix_s_aux_fit, &
+                      matrix_s_aux_fit_vs_orb_kp=matrix_s_aux_fit_vs_orb, &
+                      rho_aux_fit=rho_aux_fit, &
+                      kpoints=kpoints, &
+                      natom=natom, &
+                      scf_env=scf_env, &
+                      sab_aux_fit=sab_aux_fit, &
+                      sab_aux_fit_vs_orb=sab_aux_fit_vs_orb)
+
+      CALL qs_rho_get(rho_aux_fit, &
+                      rho_ao_kp=rho_ao_aux, &
+                      rho_g=rho_g_aux, &
+                      rho_r=rho_r_aux, &
+                      tot_rho_r=tot_rho_r_aux)
+
+      CALL get_kpoint_info(kpoints, nkp=nkp, xkp=xkp, use_real_wfn=use_real_wfn, kp_range=kp_range, &
+                           nkp_groups=nkp_groups, kp_dist=kp_dist, &
+                           cell_to_index=cell_to_index)
+
+      CPASSERT(use_real_wfn)
+      CPASSERT(.NOT. admm_env_global%do_gapw)
+      CPASSERT(.NOT. admm_env_global%block_dm)  ! this likely needs a separate KP distribution
+      CPASSERT(admm_env_global%purification_method == do_admm_purify_none)
+
+      ! the temporary DBCSR matrices for the rskp_transform we have to manually allocate
+      ALLOCATE (smatrix, qmatrix, tmpmatrix, tmpmatrix_vs_orb)
+      CALL dbcsr_create(smatrix, template=matrix_s_aux_fit(1, 1)%matrix, &
+                        matrix_type=dbcsr_type_symmetric)
+      CALL dbcsr_create(qmatrix, template=matrix_s_aux_fit_vs_orb(1, 1)%matrix, &
+                        matrix_type=dbcsr_type_no_symmetry)
+      CALL dbcsr_create(tmpmatrix, template=matrix_s_aux_fit(1, 1)%matrix, &
+                        matrix_type=dbcsr_type_no_symmetry)
+      CALL dbcsr_create(tmpmatrix_vs_orb, template=matrix_s_aux_fit_vs_orb(1, 1)%matrix, &
+                        matrix_type=dbcsr_type_no_symmetry)
+      CALL cp_dbcsr_alloc_block_from_nbl(smatrix, sab_aux_fit)
+      CALL cp_dbcsr_alloc_block_from_nbl(qmatrix, sab_aux_fit_vs_orb)
+      CALL cp_dbcsr_alloc_block_from_nbl(tmpmatrix, sab_aux_fit)
+      CALL cp_dbcsr_alloc_block_from_nbl(tmpmatrix_vs_orb, sab_aux_fit_vs_orb)
+
+      nao_aux_fit = admm_env_global%nao_aux_fit
+      nao_orb = admm_env_global%nao_orb
+      nspins = dft_control%nspins
+
+      kplocal = kp_range(2) - kp_range(1) + 1
+      para_env => kpoints%blacs_env_all%para_env
+      ALLOCATE (info(kplocal*nspins*nkp_groups, 4))
+
+      ! create temporary admm env (analogue to the single fmlocal or rsmat in general_diag_kp)
+      ! admm_env_create uses mos and mos_aux_fit to
+      !  a) pull the required sizes for nao, nmo, etc. which should remain the same across KPs
+      !  b) get the same blacs context for the matrices as for the mos, which has to be the one matching para_env_kp
+      CALL get_kpoint_env(kpoints%kp_env(1)%kpoint_env, mos=mos_kp)
+      CALL get_kpoint_env(kpoints%kp_aux_env(1)%kpoint_env, mos=mos_aux_fit_kp)
+
+      mos => mos_kp(1, :)
+      mos_aux_fit => mos_aux_fit_kp(1, :)
+      CALL admm_env_create(admm_env, dft_control%admm_control, mos, mos_aux_fit, kpoints%para_env_kp, natom)
+
+      ! *** This part only depends on overlap matrices ==> needs only to be calculated if the geometry changed
+      indx = 0
+      DO ikp = 1, kplocal
+         DO ispin = 1, nspins
+            DO igroup = 1, nkp_groups
+               ! number of current kpoint
+               ik = kp_dist(1, igroup) + ikp - 1
+               my_kpgrp = (ik >= kpoints%kp_range(1) .AND. ik <= kpoints%kp_range(2))
+               indx = indx + 1
+
+               ! FT of matrices S and Q, then transfer to FM type
+               CALL dbcsr_set(smatrix, 0.0_dp)
+               CALL rskp_transform(rmatrix=smatrix, rsmat=matrix_s_aux_fit, ispin=ispin, &
+                                   xkp=xkp(1:3, ik), cell_to_index=cell_to_index, sab_nl=sab_aux_fit)
+               CALL dbcsr_desymmetrize(smatrix, tmpmatrix)
+               CALL copy_dbcsr_to_fm(tmpmatrix, admm_env_global%S_inv)  ! 'abusing' the addm_env matrices as intermediate work storage
+
+               CALL dbcsr_set(qmatrix, 0.0_dp)
+               CALL rskp_transform(rmatrix=qmatrix, rsmat=matrix_s_aux_fit_vs_orb, ispin=ispin, &
+                                   xkp=xkp(1:3, ik), cell_to_index=cell_to_index, sab_nl=sab_aux_fit_vs_orb)
+               CALL dbcsr_desymmetrize(qmatrix, tmpmatrix_vs_orb)
+               CALL copy_dbcsr_to_fm(tmpmatrix_vs_orb, admm_env_global%Q)
+
+               IF (my_kpgrp) THEN
+                  CALL cp_fm_start_copy_general(admm_env_global%S_inv, admm_env%S_inv, para_env, info(indx, 1))
+                  CALL cp_fm_start_copy_general(admm_env_global%Q, admm_env%Q, para_env, info(indx, 2))
+               ELSE
+                  CALL cp_fm_start_copy_general(admm_env_global%S_inv, fmdummy, para_env, info(indx, 1))
+                  CALL cp_fm_start_copy_general(admm_env_global%Q, fmdummy, para_env, info(indx, 2))
+               END IF
+            END DO
+         END DO
+      END DO
+
+      indx = 0
+      DO ikp = 1, kplocal
+         DO ispin = 1, nspins
+            DO igroup = 1, nkp_groups
+               ! number of current kpoint
+               ik = kp_dist(1, igroup) + ikp - 1
+               my_kpgrp = (ik >= kpoints%kp_range(1) .AND. ik <= kpoints%kp_range(2))
+               indx = indx + 1
+               IF (my_kpgrp) THEN
+                  CALL cp_fm_finish_copy_general(admm_env%S_inv, info(indx, 1))
+                  CALL cp_fm_finish_copy_general(admm_env%Q, info(indx, 2))
+               END IF
+            END DO
+
+            ! START: fit_mo_coeffs
+            CALL cp_fm_upper_to_full(admm_env%S_inv, admm_env%work_aux_aux)
+            CALL cp_fm_to_fm(admm_env%S_inv, admm_env%S)
+
+            !! Calculate S'_inverse
+            CALL cp_fm_cholesky_decompose(admm_env%S_inv)
+            CALL cp_fm_cholesky_invert(admm_env%S_inv)
+            !! Symmetrize the guy
+            CALL cp_fm_upper_to_full(admm_env%S_inv, admm_env%work_aux_aux)
+
+            CALL cp_gemm('N', 'N', nao_aux_fit, nao_orb, nao_aux_fit, &
+                         1.0_dp, admm_env%S_inv, admm_env%Q, 0.0_dp, &
+                         admm_env%A)
+
+            ! END: fit_mo_coeffs
+
+            ! START: purify_mo_none
+            nmo = admm_env%nmo(ispin)
+            !! Each kpoint group has now information on a kpoint for which to calculate the MOS_aux
+            CALL get_kpoint_env(kpoints%kp_env(ikp)%kpoint_env, mos=mos_kp)
+            CALL get_kpoint_env(kpoints%kp_aux_env(ikp)%kpoint_env, mos=mos_aux_fit_kp)
+            mos => mos_kp(1, :)
+            mos_aux_fit => mos_aux_fit_kp(1, :)
+
+            CALL get_mo_set(mos(ispin)%mo_set, mo_coeff=mo_coeff, occupation_numbers=occ_num, nmo=nmo_mos)
+            CALL get_mo_set(mos_aux_fit(ispin)%mo_set, mo_coeff=mo_coeff_aux_fit, &
+                            occupation_numbers=occ_num_aux)
+
+            CALL cp_gemm('N', 'N', nao_aux_fit, nmo, nao_orb, &
+                         1.0_dp, admm_env%A, mo_coeff, 0.0_dp, &
+                         mo_coeff_aux_fit)
+            !CALL cp_fm_to_fm(mo_coeff_aux_fit, admm_env%C_hat(ispin)%matrix)
+
+            occ_num_aux(1:nmo) = occ_num(1:nmo)
+            ! XXXX should only be done first time XXXX
+            !CALL cp_fm_set_all(admm_env%lambda(ispin)%matrix, 0.0_dp, 1.0_dp)
+            !CALL cp_fm_set_all(admm_env%lambda_inv(ispin)%matrix, 0.0_dp, 1.0_dp)
+            !CALL cp_fm_set_all(admm_env%lambda_inv_sqrt(ispin)%matrix, 0.0_dp, 1.0_dp)
+
+            ! END: purify_mo_none
+            ! START: calculate_dm_mo_no_diag
+
+            ! Here, the auxiliary DM gets calculated and is written into rho_aux_fit%...
+            !CALL cp_fm_to_fm(admm_env%C_hat(ispin)%matrix, admm_env%work_aux_nmo(ispin)%matrix)
+            !CALL cp_fm_column_scale(admm_env%work_aux_nmo(ispin)%matrix, &
+            !                        mos(ispin)%mo_set%occupation_numbers(1:mos(ispin)%mo_set%homo))
+
+            !CALL cp_gemm('N', 'N', nao_aux_fit, nmo, nmo, &
+            !             1.0_dp, admm_env%work_aux_nmo(ispin)%matrix, admm_env%lambda_inv(ispin)%matrix, 0.0_dp, &
+            !             admm_env%work_aux_nmo2(ispin)%matrix)
+
+            ! for the kpoint case we have to first get \hat{P}^\mu\nu(k) and then go to \hat{P}^\mu\nu(ic),
+            ! reuse kpoint_density_matrices and kpoint_density_transform below to do just that.
+
+            ! CALL dbcsr_set(rho_ao_aux(ispin)%matrix, 0.0_dp)
+            ! CALL cp_dbcsr_plus_fm_fm_t(sparse_matrix=rho_ao_aux(ispin)%matrix, &
+            !                            matrix_v=admm_env%C_hat(ispin)%matrix, &
+            !                            matrix_g=admm_env%work_aux_nmo2(ispin)%matrix, &
+            !                            ncol=mos(ispin)%mo_set%homo)
+
+            ! END: calculate_dm_mo_no_diag
+
+         END DO
+      END DO
+
+      indx = 0
+      DO ikp = 1, kplocal
+         DO ispin = 1, nspins
+            DO igroup = 1, nkp_groups
+               ! number of current kpoint
+               ik = kp_dist(1, igroup) + ikp - 1
+               my_kpgrp = (ik >= kpoints%kp_range(1) .AND. ik <= kpoints%kp_range(2))
+               indx = indx + 1
+               CALL cp_fm_cleanup_copy_general(admm_env_global%S_inv, info(indx, 1))
+               CALL cp_fm_cleanup_copy_general(admm_env_global%Q, info(indx, 2))
+            END DO
+         END DO
+      END DO
+
+      DEALLOCATE (info)
+      CALL dbcsr_deallocate_matrix(smatrix)
+      CALL dbcsr_deallocate_matrix(qmatrix)
+      CALL dbcsr_deallocate_matrix(tmpmatrix)
+      CALL dbcsr_deallocate_matrix(tmpmatrix_vs_orb)
+
+      CALL admm_env_release(admm_env)
+
+      CALL kpoint_density_matrices(kpoints, for_aux_fit=.TRUE.)
+      CALL kpoint_density_transform(kpoints, rho_ao_aux, .FALSE., &
+                                    matrix_s_aux_fit(1, 1)%matrix, sab_aux_fit, &
+                                    scf_env%scf_work_aux_fit, for_aux_fit=.TRUE.)
+
+      basis_type = "AUX_FIT"
+      CALL get_ks_env(ks_env, task_list_aux_fit=task_list)
+
+      DO ispin = 1, nspins
+         rho_ao => rho_ao_aux(ispin, :)
+         CALL calculate_rho_elec(ks_env=ks_env, &
+                                 matrix_p_kp=rho_ao, &
+                                 rho=rho_r_aux(ispin), &
+                                 rho_gspace=rho_g_aux(ispin), &
+                                 total_rho=tot_rho_r_aux(ispin), &
+                                 soft_valid=.FALSE., &
+                                 basis_type=basis_type, &
+                                 task_list_external=task_list)
+      END DO
+
+      IF (dft_control%nspins == 1) THEN
+         admm_env_global%gsi(3) = admm_env_global%gsi(1)
+      ELSE
+         admm_env_global%gsi(3) = (admm_env_global%gsi(1) + admm_env_global%gsi(2))/2.0_dp
+      END IF
+
+      CALL qs_rho_set(rho_aux_fit, rho_r_valid=.TRUE., rho_g_valid=.TRUE.)
+
+      CALL timestop(handle)
+
+   END SUBROUTINE admm_mo_calc_rho_aux_kp
 
 ! **************************************************************************************************
 !> \brief Adds the GAPW exchange contribution to the aux_fit ks matrices
@@ -443,11 +730,12 @@ CONTAINS
 
       INTEGER                                            :: handle
       TYPE(admm_type), POINTER                           :: admm_env
+      TYPE(dft_control_type), POINTER                    :: dft_control
 
       CALL timeset(routineN, handle)
       NULLIFY (admm_env)
 
-      CALL get_qs_env(qs_env, admm_env=admm_env)
+      CALL get_qs_env(qs_env, admm_env=admm_env, dft_control=dft_control)
 
       SELECT CASE (admm_env%purification_method)
       CASE (do_admm_purify_cauchy)
@@ -457,7 +745,11 @@ CONTAINS
          CALL merge_ks_matrix_cauchy_subspace(qs_env)
 
       CASE (do_admm_purify_none)
-         CALL merge_ks_matrix_none(qs_env)
+         IF (dft_control%nimages > 1) THEN
+            CALL merge_ks_matrix_none_kp(qs_env)
+         ELSE
+            CALL merge_ks_matrix_none(qs_env)
+         END IF
 
       CASE (do_admm_purify_mo_diag, do_admm_purify_mo_no_diag)
          !do nothing
@@ -536,9 +828,9 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      CALL fit_mo_coeffs(admm_env, matrix_s_aux_fit, matrix_s_mixed, &
-                         mos, geometry_did_change, &
-                         blocked=admm_env%block_fit)
+      IF (geometry_did_change) THEN
+         CALL fit_mo_coeffs(admm_env, matrix_s_aux_fit, matrix_s_mixed)
+      END IF
 
       SELECT CASE (admm_env%purification_method)
       CASE (do_admm_purify_mo_no_diag, do_admm_purify_cauchy_subspace)
@@ -556,25 +848,19 @@ CONTAINS
    END SUBROUTINE admm_fit_mo_coeffs
 
 ! **************************************************************************************************
-!> \brief ...
+!> \brief Calculate S^-1, Q, B full-matrices given sparse S_tilde and Q
 !> \param admm_env ...
 !> \param matrix_s_aux_fit ...
 !> \param matrix_s_mixed ...
-!> \param mos ...
-!> \param geometry_did_change ...
-!> \param blocked ...
 ! **************************************************************************************************
-   SUBROUTINE fit_mo_coeffs(admm_env, matrix_s_aux_fit, matrix_s_mixed, &
-                            mos, geometry_did_change, blocked)
+   SUBROUTINE fit_mo_coeffs(admm_env, matrix_s_aux_fit, matrix_s_mixed)
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s_aux_fit, matrix_s_mixed
-      TYPE(mo_set_p_type), DIMENSION(:), POINTER         :: mos
-      LOGICAL, INTENT(IN)                                :: geometry_did_change, blocked
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'fit_mo_coeffs'
 
       INTEGER                                            :: blk, handle, iatom, jatom, nao_aux_fit, &
-                                                            nao_orb, nspins
+                                                            nao_orb
       REAL(dp), DIMENSION(:, :), POINTER                 :: sparse_block
       TYPE(dbcsr_iterator_type)                          :: iter
       TYPE(dbcsr_type), POINTER                          :: matrix_s_tilde
@@ -583,59 +869,56 @@ CONTAINS
 
       nao_aux_fit = admm_env%nao_aux_fit
       nao_orb = admm_env%nao_orb
-      nspins = SIZE(mos)
 
       ! *** This part only depends on overlap matrices ==> needs only to be calculated if the geometry changed
 
-      IF (geometry_did_change) THEN
-         IF (.NOT. blocked) THEN
-            CALL copy_dbcsr_to_fm(matrix_s_aux_fit(1)%matrix, admm_env%S_inv)
-         ELSE
-            NULLIFY (matrix_s_tilde)
-            ALLOCATE (matrix_s_tilde)
-            CALL dbcsr_create(matrix_s_tilde, template=matrix_s_aux_fit(1)%matrix, &
-                              name='MATRIX s_tilde', &
-                              matrix_type=dbcsr_type_symmetric)
+      IF (.NOT. admm_env%block_fit) THEN
+         CALL copy_dbcsr_to_fm(matrix_s_aux_fit(1)%matrix, admm_env%S_inv)
+      ELSE
+         NULLIFY (matrix_s_tilde)
+         ALLOCATE (matrix_s_tilde)
+         CALL dbcsr_create(matrix_s_tilde, template=matrix_s_aux_fit(1)%matrix, &
+                           name='MATRIX s_tilde', &
+                           matrix_type=dbcsr_type_symmetric)
 
-            CALL dbcsr_copy(matrix_s_tilde, matrix_s_aux_fit(1)%matrix)
+         CALL dbcsr_copy(matrix_s_tilde, matrix_s_aux_fit(1)%matrix)
 
-            CALL dbcsr_iterator_start(iter, matrix_s_tilde)
-            DO WHILE (dbcsr_iterator_blocks_left(iter))
-               CALL dbcsr_iterator_next_block(iter, iatom, jatom, sparse_block, blk)
-               IF (admm_env%block_map(iatom, jatom) == 0) THEN
-                  sparse_block = 0.0_dp
-               END IF
-            END DO
-            CALL dbcsr_iterator_stop(iter)
-            CALL copy_dbcsr_to_fm(matrix_s_tilde, admm_env%S_inv)
-            CALL dbcsr_deallocate_matrix(matrix_s_tilde)
-         ENDIF
+         CALL dbcsr_iterator_start(iter, matrix_s_tilde)
+         DO WHILE (dbcsr_iterator_blocks_left(iter))
+            CALL dbcsr_iterator_next_block(iter, iatom, jatom, sparse_block, blk)
+            IF (admm_env%block_map(iatom, jatom) == 0) THEN
+               sparse_block = 0.0_dp
+            END IF
+         END DO
+         CALL dbcsr_iterator_stop(iter)
+         CALL copy_dbcsr_to_fm(matrix_s_tilde, admm_env%S_inv)
+         CALL dbcsr_deallocate_matrix(matrix_s_tilde)
+      END IF
 
-         CALL cp_fm_upper_to_full(admm_env%S_inv, admm_env%work_aux_aux)
-         CALL cp_fm_to_fm(admm_env%S_inv, admm_env%S)
+      CALL cp_fm_upper_to_full(admm_env%S_inv, admm_env%work_aux_aux)
+      CALL cp_fm_to_fm(admm_env%S_inv, admm_env%S)
 
-         CALL copy_dbcsr_to_fm(matrix_s_mixed(1)%matrix, admm_env%Q)
+      CALL copy_dbcsr_to_fm(matrix_s_mixed(1)%matrix, admm_env%Q)
 
-         !! Calculate S'_inverse
-         CALL cp_fm_cholesky_decompose(admm_env%S_inv)
-         CALL cp_fm_cholesky_invert(admm_env%S_inv)
-         !! Symmetrize the guy
-         CALL cp_fm_upper_to_full(admm_env%S_inv, admm_env%work_aux_aux)
+      !! Calculate S'_inverse
+      CALL cp_fm_cholesky_decompose(admm_env%S_inv)
+      CALL cp_fm_cholesky_invert(admm_env%S_inv)
+      !! Symmetrize the guy
+      CALL cp_fm_upper_to_full(admm_env%S_inv, admm_env%work_aux_aux)
 
-         !! Calculate A=S'^(-1)*Q
-         IF (blocked) THEN
-            CALL cp_fm_set_all(admm_env%A, 0.0_dp, 1.0_dp)
-         ELSE
-            CALL cp_gemm('N', 'N', nao_aux_fit, nao_orb, nao_aux_fit, &
-                         1.0_dp, admm_env%S_inv, admm_env%Q, 0.0_dp, &
-                         admm_env%A)
+      !! Calculate A=S'^(-1)*Q
+      IF (admm_env%block_fit) THEN
+         CALL cp_fm_set_all(admm_env%A, 0.0_dp, 1.0_dp)
+      ELSE
+         CALL cp_gemm('N', 'N', nao_aux_fit, nao_orb, nao_aux_fit, &
+                      1.0_dp, admm_env%S_inv, admm_env%Q, 0.0_dp, &
+                      admm_env%A)
 
-            ! this multiplication is apparent not need for purify_none
-            !! B=Q^(T)*A
-            CALL cp_gemm('T', 'N', nao_orb, nao_orb, nao_aux_fit, &
-                         1.0_dp, admm_env%Q, admm_env%A, 0.0_dp, &
-                         admm_env%B)
-         ENDIF
+         ! this multiplication is apparent not need for purify_none
+         !! B=Q^(T)*A
+         CALL cp_gemm('T', 'N', nao_orb, nao_orb, nao_aux_fit, &
+                      1.0_dp, admm_env%Q, admm_env%A, 0.0_dp, &
+                      admm_env%B)
       END IF
 
       CALL timestop(handle)
@@ -1399,8 +1682,6 @@ CONTAINS
                       matrix_ks_aux_fit=matrix_ks_aux_fit, &
                       matrix_ks_aux_fit_dft=matrix_ks_aux_fit_dft, &
                       matrix_ks_aux_fit_hfx=matrix_ks_aux_fit_hfx, &
-                      !mos=mos,&
-                      !mos_aux_fit=mos_aux_fit,&
                       rho=rho, &
                       rho_aux_fit=rho_aux_fit, &
                       matrix_s=matrix_s, &
@@ -1616,6 +1897,251 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE merge_ks_matrix_none
+
+! **************************************************************************************************
+!> \brief ...
+!> \param qs_env ...
+! **************************************************************************************************
+   SUBROUTINE merge_ks_matrix_none_kp(qs_env)
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'merge_ks_matrix_none_kp'
+
+      INTEGER                                            :: handle, igroup, ik, ikp, img, indx, &
+                                                            ispin, kplocal, nao_aux_fit, nao_orb, &
+                                                            natom, nkp, nkp_groups, nspins
+      INTEGER, DIMENSION(2)                              :: kp_range
+      INTEGER, DIMENSION(:, :), POINTER                  :: kp_dist
+      INTEGER, DIMENSION(:, :, :), POINTER               :: cell_to_index
+      LOGICAL                                            :: my_kpgrp, use_real_wfn
+      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: xkp
+      TYPE(admm_type), POINTER                           :: admm_env, admm_env_global
+      TYPE(copy_info_type), ALLOCATABLE, DIMENSION(:, :) :: info
+      TYPE(cp_fm_type), POINTER                          :: fmdummy
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_k_tilde, matrix_ks, &
+                                                            matrix_ks_aux_fit, matrix_s, &
+                                                            matrix_s_aux_fit, &
+                                                            matrix_s_aux_fit_vs_orb
+      TYPE(dbcsr_type), POINTER                          :: ksmatrix, qmatrix, smatrix, tmpmatrix, &
+                                                            tmpmatrix_ks, tmpmatrix_vs_orb
+      TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(kpoint_type), POINTER                         :: kpoints
+      TYPE(mo_set_p_type), DIMENSION(:), POINTER         :: mos, mos_aux_fit
+      TYPE(mo_set_p_type), DIMENSION(:, :), POINTER      :: mos_aux_fit_kp, mos_kp
+      TYPE(neighbor_list_set_p_type), DIMENSION(:), &
+         POINTER                                         :: sab_aux_fit, sab_aux_fit_vs_orb, sab_orb
+      TYPE(qs_scf_env_type), POINTER                     :: scf_env
+
+      CALL timeset(routineN, handle)
+      NULLIFY (admm_env, admm_env_global, mos, mos_aux_fit, &
+               matrix_s_aux_fit, matrix_s_aux_fit_vs_orb, &
+               para_env, kpoints, fmdummy, sab_aux_fit, sab_aux_fit_vs_orb, &
+               matrix_k_tilde, matrix_ks, matrix_ks_aux_fit, scf_env)
+
+      CALL get_qs_env(qs_env, &
+                      admm_env=admm_env_global, &
+                      dft_control=dft_control, &
+                      matrix_ks_kp=matrix_ks, &
+                      matrix_ks_aux_fit_kp=matrix_ks_aux_fit, &
+                      matrix_s_kp=matrix_s, &
+                      matrix_s_aux_fit_kp=matrix_s_aux_fit, &
+                      matrix_s_aux_fit_vs_orb_kp=matrix_s_aux_fit_vs_orb, &
+                      para_env=para_env, &
+                      scf_env=scf_env, &
+                      natom=natom, &
+                      kpoints=kpoints, &
+                      sab_orb=sab_orb, &
+                      sab_aux_fit=sab_aux_fit, &
+                      sab_aux_fit_vs_orb=sab_aux_fit_vs_orb)
+
+      CALL get_kpoint_info(kpoints, nkp=nkp, xkp=xkp, use_real_wfn=use_real_wfn, kp_range=kp_range, &
+                           nkp_groups=nkp_groups, kp_dist=kp_dist, &
+                           cell_to_index=cell_to_index)
+
+      CPASSERT(.NOT. admm_env_global%block_dm)
+      CPASSERT(.NOT. admm_env_global%charge_constrain)
+      CPASSERT(admm_env_global%scaling_model /= do_admm_exch_scaling_merlot)
+      CPASSERT(use_real_wfn)
+
+      ! the temporary DBCSR matrices for the rskp_transform we have to manually allocate
+      ALLOCATE (smatrix, qmatrix, tmpmatrix, tmpmatrix_vs_orb, ksmatrix, tmpmatrix_ks)
+      CALL dbcsr_create(smatrix, template=matrix_s_aux_fit(1, 1)%matrix, &
+                        matrix_type=dbcsr_type_symmetric)
+      CALL dbcsr_create(tmpmatrix, template=matrix_s_aux_fit(1, 1)%matrix, &
+                        matrix_type=dbcsr_type_no_symmetry)
+      CALL dbcsr_create(qmatrix, template=matrix_s_aux_fit_vs_orb(1, 1)%matrix, &
+                        matrix_type=dbcsr_type_no_symmetry)
+      CALL dbcsr_create(tmpmatrix_vs_orb, template=matrix_s_aux_fit_vs_orb(1, 1)%matrix, &
+                        matrix_type=dbcsr_type_no_symmetry)
+      CALL dbcsr_create(ksmatrix, template=matrix_ks_aux_fit(1, 1)%matrix, &
+                        matrix_type=dbcsr_type_symmetric)
+      CALL dbcsr_create(tmpmatrix_ks, template=matrix_ks_aux_fit(1, 1)%matrix, &
+                        matrix_type=dbcsr_type_symmetric)
+      CALL cp_dbcsr_alloc_block_from_nbl(smatrix, sab_aux_fit)
+      CALL cp_dbcsr_alloc_block_from_nbl(tmpmatrix, sab_aux_fit)
+      CALL cp_dbcsr_alloc_block_from_nbl(qmatrix, sab_aux_fit_vs_orb)
+      CALL cp_dbcsr_alloc_block_from_nbl(tmpmatrix_vs_orb, sab_aux_fit_vs_orb)
+      CALL cp_dbcsr_alloc_block_from_nbl(ksmatrix, sab_aux_fit)
+      CALL cp_dbcsr_alloc_block_from_nbl(tmpmatrix_ks, sab_aux_fit)
+
+      nao_aux_fit = admm_env_global%nao_aux_fit
+      nao_orb = admm_env_global%nao_orb
+      nspins = dft_control%nspins
+
+      kplocal = kp_range(2) - kp_range(1) + 1
+      para_env => kpoints%blacs_env_all%para_env
+
+      ALLOCATE (info(kplocal*nspins*nkp_groups, 3))
+      CALL get_kpoint_env(kpoints%kp_env(1)%kpoint_env, mos=mos_kp)
+      CALL get_kpoint_env(kpoints%kp_aux_env(1)%kpoint_env, mos=mos_aux_fit_kp)
+
+      mos => mos_kp(1, :)
+      mos_aux_fit => mos_aux_fit_kp(1, :)
+      CALL admm_env_create(admm_env, dft_control%admm_control, mos, mos_aux_fit, kpoints%para_env_kp, natom)
+
+      ! *** This part only depends on overlap matrices ==> needs only to be calculated if the geometry changed
+      indx = 0
+      DO ikp = 1, kplocal
+         DO ispin = 1, nspins
+            DO igroup = 1, nkp_groups
+               ! number of current kpoint
+               ik = kp_dist(1, igroup) + ikp - 1
+               my_kpgrp = (ik >= kpoints%kp_range(1) .AND. ik <= kpoints%kp_range(2))
+               indx = indx + 1
+
+               ! FT of matrices S and Q, then transfer to FM type
+               CALL dbcsr_set(smatrix, 0.0_dp)
+               CALL rskp_transform(rmatrix=smatrix, rsmat=matrix_s_aux_fit, ispin=ispin, &
+                                   xkp=xkp(1:3, ik), cell_to_index=cell_to_index, sab_nl=sab_aux_fit)
+               CALL dbcsr_desymmetrize(smatrix, tmpmatrix)
+               CALL copy_dbcsr_to_fm(tmpmatrix, admm_env_global%S_inv)  ! 'abusing' the addm_env matrices as intermediate work storage
+
+               CALL dbcsr_set(ksmatrix, 0.0_dp)
+               CALL rskp_transform(rmatrix=ksmatrix, rsmat=matrix_ks_aux_fit, ispin=ispin, &
+                                   xkp=xkp(1:3, ik), cell_to_index=cell_to_index, sab_nl=sab_aux_fit)
+               CALL dbcsr_desymmetrize(ksmatrix, tmpmatrix_ks)
+               CALL copy_dbcsr_to_fm(tmpmatrix_ks, admm_env_global%K(ispin)%matrix)
+
+               CALL dbcsr_set(qmatrix, 0.0_dp)
+               CALL rskp_transform(rmatrix=qmatrix, rsmat=matrix_s_aux_fit_vs_orb, ispin=ispin, &
+                                   xkp=xkp(1:3, ik), cell_to_index=cell_to_index, sab_nl=sab_aux_fit_vs_orb)
+               CALL dbcsr_desymmetrize(qmatrix, tmpmatrix_vs_orb)
+               CALL copy_dbcsr_to_fm(tmpmatrix_vs_orb, admm_env_global%Q)
+
+               IF (my_kpgrp) THEN
+                  CALL cp_fm_start_copy_general(admm_env_global%S_inv, admm_env%S_inv, para_env, info(indx, 1))
+                  CALL cp_fm_start_copy_general(admm_env_global%Q, admm_env%Q, para_env, info(indx, 2))
+                  CALL cp_fm_start_copy_general(admm_env_global%K(ispin)%matrix, admm_env%K(ispin)%matrix, para_env, info(indx, 3))
+               ELSE
+                  CALL cp_fm_start_copy_general(admm_env_global%S_inv, fmdummy, para_env, info(indx, 1))
+                  CALL cp_fm_start_copy_general(admm_env_global%Q, fmdummy, para_env, info(indx, 2))
+                  CALL cp_fm_start_copy_general(admm_env_global%K(ispin)%matrix, fmdummy, para_env, info(indx, 3))
+               END IF
+            END DO
+         END DO
+      END DO
+
+      indx = 0
+      DO ikp = 1, kplocal
+         DO ispin = 1, nspins
+            DO igroup = 1, nkp_groups
+               ! number of current kpoint
+               ik = kp_dist(1, igroup) + ikp - 1
+               my_kpgrp = (ik >= kpoints%kp_range(1) .AND. ik <= kpoints%kp_range(2))
+               indx = indx + 1
+               IF (my_kpgrp) THEN
+                  CALL cp_fm_finish_copy_general(admm_env%S_inv, info(indx, 1))
+                  CALL cp_fm_finish_copy_general(admm_env%Q, info(indx, 2))
+                  CALL cp_fm_finish_copy_general(admm_env%K(ispin)%matrix, info(indx, 3))
+               END IF
+            END DO
+
+            CALL cp_fm_upper_to_full(admm_env%K(ispin)%matrix, admm_env%work_aux_aux)
+
+            ! START: fit_mo_coeffs
+            CALL cp_fm_upper_to_full(admm_env%S_inv, admm_env%work_aux_aux)
+
+            !! Calculate S'_inverse
+            CALL cp_fm_cholesky_decompose(admm_env%S_inv)
+            CALL cp_fm_cholesky_invert(admm_env%S_inv)
+            !! Symmetrize the guy
+            CALL cp_fm_upper_to_full(admm_env%S_inv, admm_env%work_aux_aux)
+
+            CALL cp_gemm('N', 'N', nao_aux_fit, nao_orb, nao_aux_fit, &
+                         1.0_dp, admm_env%S_inv, admm_env%Q, 0.0_dp, &
+                         admm_env%A)
+
+            !! K*A
+            CALL cp_gemm('N', 'N', nao_aux_fit, nao_orb, nao_aux_fit, &
+                         1.0_dp, admm_env%K(ispin)%matrix, admm_env%A, 0.0_dp, &
+                         admm_env%work_aux_orb)
+            !! A^T*K*A
+            ! write to the (temporary) pmatrices of the respective kpoint,
+            ! from which kpoint_density_transform is going to pull them for the FT.
+            ! needs to go into the regular kp_env as this is now in PBS basis
+            CALL cp_gemm('T', 'N', nao_orb, nao_orb, nao_aux_fit, &
+                         1.0_dp, admm_env%A, admm_env%work_aux_orb, 0.0_dp, &
+                         kpoints%kp_env(ikp)%kpoint_env%pmat(1, ispin)%matrix)
+
+         END DO
+      END DO
+
+      indx = 0
+      DO ikp = 1, kplocal
+         DO ispin = 1, nspins
+            DO igroup = 1, nkp_groups
+               ! number of current kpoint
+               ik = kp_dist(1, igroup) + ikp - 1
+               my_kpgrp = (ik >= kpoints%kp_range(1) .AND. ik <= kpoints%kp_range(2))
+               indx = indx + 1
+               CALL cp_fm_cleanup_copy_general(admm_env_global%S_inv, info(indx, 1))
+               CALL cp_fm_cleanup_copy_general(admm_env_global%Q, info(indx, 2))
+               CALL cp_fm_cleanup_copy_general(admm_env_global%K(ispin)%matrix, info(indx, 3))
+            END DO
+         END DO
+      END DO
+
+      DEALLOCATE (info)
+      CALL dbcsr_deallocate_matrix(smatrix)
+      CALL dbcsr_deallocate_matrix(tmpmatrix)
+      CALL dbcsr_deallocate_matrix(qmatrix)
+      CALL dbcsr_deallocate_matrix(tmpmatrix_vs_orb)
+      CALL dbcsr_deallocate_matrix(ksmatrix)
+      CALL dbcsr_deallocate_matrix(tmpmatrix_ks)
+
+      CALL admm_env_release(admm_env)
+
+      NULLIFY (matrix_k_tilde)
+
+      CALL dbcsr_allocate_matrix_set(matrix_k_tilde, dft_control%nspins, dft_control%nimages)
+      DO ispin = 1, nspins
+         DO img = 1, dft_control%nimages
+            ALLOCATE (matrix_k_tilde(ispin, img)%matrix)
+            CALL dbcsr_create(matrix=matrix_k_tilde(ispin, img)%matrix, template=matrix_ks(1, 1)%matrix, &
+                              name='MATRIX K_tilde '//TRIM(ADJUSTL(cp_to_string(ispin)))//'_'//TRIM(ADJUSTL(cp_to_string(img))), &
+                              matrix_type=dbcsr_type_symmetric, nze=0)
+            CALL cp_dbcsr_alloc_block_from_nbl(matrix_k_tilde(ispin, img)%matrix, sab_orb)
+            CALL dbcsr_set(matrix_k_tilde(ispin, img)%matrix, 0.0_dp)
+         END DO
+      END DO
+
+      ! reuse the density transform to FT the KS matrix
+      CALL kpoint_density_transform(kpoints, matrix_k_tilde, .FALSE., &
+                                    matrix_k_tilde(1, 1)%matrix, sab_orb, &
+                                    scf_env%scf_work1, for_aux_fit=.FALSE.)
+
+      DO ispin = 1, nspins
+         DO img = 1, dft_control%nimages
+            CALL dbcsr_add(matrix_ks(ispin, img)%matrix, matrix_k_tilde(ispin, img)%matrix, 1.0_dp, 1.0_dp)
+         END DO
+      END DO
+
+      CALL dbcsr_deallocate_matrix_set(matrix_k_tilde)
+
+      CALL timestop(handle)
+
+   END SUBROUTINE merge_ks_matrix_none_kp
 
 ! **************************************************************************************************
 !> \brief Calculate exchange correction energy (Merlot2014 Eqs. 32, 33) for every spin
