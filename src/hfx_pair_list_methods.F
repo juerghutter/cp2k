@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -62,10 +62,13 @@ CONTAINS
 !> \param potential_parameter potential/metric to be used
 !> \param m_max ...
 !> \param do_periodic ...
+!> \param tcell ...
+!> \param qcell ...
 ! **************************************************************************************************
    SUBROUTINE build_pgf_product_list(list1, list2, product_list, nproducts, &
                                      log10_pmax, log10_eps_schwarz, neighbor_cells, &
-                                     cell, potential_parameter, m_max, do_periodic)
+                                     cell, potential_parameter, m_max, do_periodic, &
+                                     tcell, qcell)
 
       TYPE(hfx_pgf_list), INTENT(IN)                     :: list1, list2
       TYPE(hfx_pgf_product_list), ALLOCATABLE, &
@@ -78,6 +81,7 @@ CONTAINS
       TYPE(hfx_potential_type), INTENT(IN)               :: potential_parameter
       INTEGER, INTENT(IN)                                :: m_max
       LOGICAL, INTENT(IN)                                :: do_periodic
+      INTEGER, INTENT(IN), OPTIONAL                      :: tcell(3), qcell(3)
 
       INTEGER                                            :: i, j, k, l, nimages1, nimages2, tmp_i4
       LOGICAL                                            :: use_gamma
@@ -104,7 +108,11 @@ CONTAINS
          pgf_max_1 = list1%image_list(i)%pgf_max
          ra = list1%image_list(i)%ra
          rb = list1%image_list(i)%rb
+
          DO j = 1, nimages2
+            IF (PRESENT(qcell)) THEN
+               IF (ANY(list2%image_list(j)%bcell /= (list1%image_list(i)%bcell + qcell - tcell))) CYCLE
+            END IF
             pgf_max_2 = list2%image_list(j)%pgf_max
             IF (pgf_max_1 + pgf_max_2 + log10_pmax < log10_eps_schwarz) CYCLE
             Q = list2%image_list(j)%P
@@ -128,6 +136,12 @@ CONTAINS
             END IF
 
             DO k = 1, SIZE(neighbor_cells)
+               IF (PRESENT(tcell)) THEN
+                  ! also here we only need the image for the given Fock matrix
+                  IF (ANY(neighbor_cells(k)%cell /= tcell)) &
+                     CYCLE
+               END IF
+
                IF (do_periodic) THEN
                   im_rc = rc + shift + neighbor_cells(k)%cell_r(:)
                   im_rd = rd + shift + neighbor_cells(k)%cell_r(:)
@@ -360,7 +374,6 @@ CONTAINS
       ! ** inner loop may never be reached
       nelements = npgfa*npgfb
       list(1:nelements)%nimages = 0
-
       DO i = 1, SIZE(neighbor_cells)
          IF (do_periodic) THEN
             im_B = rb + neighbor_cells(i)%cell_r(:)
@@ -403,6 +416,7 @@ CONTAINS
                   pair%ra = ra
                   pair%rb = im_B
                   pair%rab2 = rab2
+                  pair%bcell = neighbor_cells(i)%cell ! remember the coords of the neighbor_cell for this pair
 
                   pair%S1234 = (-Zeta_A*Zeta_B*ZetaInv*rab2)
                   pair%P = (Zeta_A*ra + Zeta_B*im_B)*ZetaInv
