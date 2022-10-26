@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2021 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -628,7 +628,7 @@ CONTAINS
                                 zetc(1:npgfc(kset), kset), zetd(1:npgfd(lset), lset), &
                                 primitive_integrals, &
                                 mp2_potential_parameter, &
-                                actual_x_data%neighbor_cells, screen_coeffs_set(1, 1, 1, 1)%x, &
+                                screen_coeffs_set(1, 1, 1, 1)%x, &
                                 screen_coeffs_set(1, 1, 1, 1)%x, eps_schwarz, &
                                 max_contraction_val, cartesian_estimate, cell, neris_tmp, &
                                 log10_pmax, log10_eps_schwarz, &
@@ -641,7 +641,7 @@ CONTAINS
                                 sphi_c_ext_set, &
                                 sphi_d_ext_set, &
                                 ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp, &
-                                do_periodic)
+                                do_periodic, actual_x_data%neighbor_cells)
 
                   primitive_counter = 0
                   DO llB = 1, nsgfd(lset)
@@ -856,7 +856,7 @@ CONTAINS
                                 zetc(1:npgfc(kset), kset), zetd(1:npgfd(lset), lset), &
                                 primitive_integrals, &
                                 mp2_potential_parameter, &
-                                actual_x_data%neighbor_cells, screen_coeffs_set(kset, kset, kkind, kkind)%x, &
+                                screen_coeffs_set(kset, kset, kkind, kkind)%x, &
                                 screen_coeffs_set(kset, kset, kkind, kkind)%x, eps_schwarz, &
                                 max_contraction_val, cartesian_estimate, cell, neris_tmp, &
                                 log10_pmax, log10_eps_schwarz, &
@@ -869,7 +869,7 @@ CONTAINS
                                 sphi_c_ext_set, &
                                 sphi_d_ext_set, &
                                 ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp, &
-                                do_periodic)
+                                do_periodic, actual_x_data%neighbor_cells)
 
                   nints = nsgfa(iset)*nsgfb(jset)*nsgfc(kset)*nsgfd(lset)
                   neris_total = neris_total + nints

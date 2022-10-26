@@ -62,26 +62,21 @@ CONTAINS
 !> \param potential_parameter potential/metric to be used
 !> \param m_max ...
 !> \param do_periodic ...
-!> \param tcell ...
-!> \param qcell ...
 ! **************************************************************************************************
    SUBROUTINE build_pgf_product_list(list1, list2, product_list, nproducts, &
                                      log10_pmax, log10_eps_schwarz, neighbor_cells, &
-                                     cell, potential_parameter, m_max, do_periodic, &
-                                     tcell, qcell)
+                                     cell, potential_parameter, m_max, do_periodic)
 
       TYPE(hfx_pgf_list), INTENT(IN)                     :: list1, list2
       TYPE(hfx_pgf_product_list), ALLOCATABLE, &
          DIMENSION(:), INTENT(INOUT)                     :: product_list
       INTEGER, INTENT(OUT)                               :: nproducts
       REAL(dp), INTENT(IN)                               :: log10_pmax, log10_eps_schwarz
-      TYPE(hfx_cell_type), DIMENSION(:), INTENT(IN), &
-         POINTER                                         :: neighbor_cells
+      TYPE(hfx_cell_type), DIMENSION(:), INTENT(IN)      :: neighbor_cells
       TYPE(cell_type), INTENT(IN), POINTER               :: cell
       TYPE(hfx_potential_type), INTENT(IN)               :: potential_parameter
       INTEGER, INTENT(IN)                                :: m_max
       LOGICAL, INTENT(IN)                                :: do_periodic
-      INTEGER, INTENT(IN), OPTIONAL                      :: tcell(3), qcell(3)
 
       INTEGER                                            :: i, j, k, l, nimages1, nimages2, tmp_i4
       LOGICAL                                            :: use_gamma
@@ -110,9 +105,6 @@ CONTAINS
          rb = list1%image_list(i)%rb
 
          DO j = 1, nimages2
-            IF (PRESENT(qcell)) THEN
-               IF (ANY(list2%image_list(j)%bcell /= (list1%image_list(i)%bcell + qcell - tcell))) CYCLE
-            END IF
             pgf_max_2 = list2%image_list(j)%pgf_max
             IF (pgf_max_1 + pgf_max_2 + log10_pmax < log10_eps_schwarz) CYCLE
             Q = list2%image_list(j)%P
@@ -136,12 +128,6 @@ CONTAINS
             END IF
 
             DO k = 1, SIZE(neighbor_cells)
-               IF (PRESENT(tcell)) THEN
-                  ! also here we only need the image for the given Fock matrix
-                  IF (ANY(neighbor_cells(k)%cell /= tcell)) &
-                     CYCLE
-               END IF
-
                IF (do_periodic) THEN
                   im_rc = rc + shift + neighbor_cells(k)%cell_r(:)
                   im_rd = rd + shift + neighbor_cells(k)%cell_r(:)
@@ -363,8 +349,7 @@ CONTAINS
       REAL(dp), INTENT(IN)                               :: log10_pmax, log10_eps_schwarz, ra(3), &
                                                             rb(3)
       INTEGER, INTENT(OUT)                               :: nelements
-      TYPE(hfx_cell_type), DIMENSION(:), INTENT(IN), &
-         POINTER                                         :: neighbor_cells
+      TYPE(hfx_cell_type), DIMENSION(:), INTENT(IN)      :: neighbor_cells
       LOGICAL, INTENT(IN)                                :: do_periodic
 
       INTEGER                                            :: element_counter, i, ipgf, j, jpgf
@@ -416,7 +401,7 @@ CONTAINS
                   pair%ra = ra
                   pair%rb = im_B
                   pair%rab2 = rab2
-                  pair%bcell = neighbor_cells(i)%cell ! remember the coords of the neighbor_cell for this pair
+                  pair%S = i ! remember the neighbor_cell for this pair
 
                   pair%S1234 = (-Zeta_A*Zeta_B*ZetaInv*rab2)
                   pair%P = (Zeta_A*ra + Zeta_B*im_B)*ZetaInv
@@ -466,10 +451,11 @@ CONTAINS
 !> \param cell ...
 !> \param pmax_blocks ...
 !> \param atomic_pair_list ...
+!> \param do_all_combinations ...
 ! **************************************************************************************************
    SUBROUTINE build_pair_list(list, set_list, i_start, i_end, j_start, j_end, kind_of, basis_parameter, particle_set, &
                               do_periodic, coeffs_set, coeffs_kind, coeffs_kind_max0, log10_eps_schwarz, cell, &
-                              pmax_blocks, atomic_pair_list)
+                              pmax_blocks, atomic_pair_list, do_all_combinations)
 
       TYPE(pair_list_type), INTENT(OUT)                  :: list
       TYPE(pair_set_list_type), DIMENSION(:), &
@@ -487,17 +473,23 @@ CONTAINS
       TYPE(cell_type), INTENT(IN)                        :: cell
       REAL(dp), INTENT(IN)                               :: pmax_blocks
       LOGICAL, DIMENSION(:, :), INTENT(IN)               :: atomic_pair_list
+      LOGICAL, INTENT(IN), OPTIONAL                      :: do_all_combinations
 
       INTEGER                                            :: iatom, ikind, iset, jatom, jkind, jset, &
                                                             n_element, nset_ij, nseta, nsetb
+      LOGICAL                                            :: my_do_all_combinations
       REAL(KIND=dp)                                      :: rab2
       REAL(KIND=dp), DIMENSION(3)                        :: ra, rb
 
       n_element = 0
       nset_ij = 0
 
+      my_do_all_combinations = .FALSE.
+      IF (PRESENT(do_all_combinations)) &
+         my_do_all_combinations = do_all_combinations
+
       DO iatom = i_start, i_end
-         DO jatom = MAX(iatom, j_start), j_end
+         DO jatom = MERGE(j_start, MAX(iatom, j_start), my_do_all_combinations), j_end
             IF (.NOT. atomic_pair_list(jatom, iatom)) CYCLE
 
             ikind = kind_of(iatom)
@@ -514,8 +506,11 @@ CONTAINS
 
             rab2 = SUM((ra - rb)**2)
 
-            IF ((coeffs_kind(jkind, ikind)%x(1)*rab2 + &
-                 coeffs_kind(jkind, ikind)%x(2)) + coeffs_kind_max0 + pmax_blocks < log10_eps_schwarz) CYCLE
+            IF ((coeffs_kind(jkind, ikind)%x(1)*rab2 &
+                 + coeffs_kind(jkind, ikind)%x(2)) &
+                + coeffs_kind_max0 &
+                + pmax_blocks &
+                < log10_eps_schwarz) CYCLE
 
             n_element = n_element + 1
             list%elements(n_element)%pair = [iatom, jatom]
@@ -527,8 +522,11 @@ CONTAINS
             list%elements(n_element)%set_bounds(1) = nset_ij + 1
             DO iset = 1, nseta
                DO jset = 1, nsetb
-                  IF (coeffs_set(jset, iset, jkind, ikind)%x(1)*rab2 + coeffs_set(jset, iset, jkind, ikind)%x(2) + &
-                      coeffs_kind_max0 + pmax_blocks < log10_eps_schwarz) CYCLE
+                  IF (coeffs_set(jset, iset, jkind, ikind)%x(1)*rab2 &
+                      + coeffs_set(jset, iset, jkind, ikind)%x(2) &
+                      + coeffs_kind_max0 &
+                      + pmax_blocks &
+                      < log10_eps_schwarz) CYCLE
                   nset_ij = nset_ij + 1
                   set_list(nset_ij)%pair = [iset, jset]
                END DO

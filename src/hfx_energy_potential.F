@@ -18,6 +18,7 @@ MODULE hfx_energy_potential
                                               guidon2008,&
                                               guidon2009
    USE cell_types,                      ONLY: cell_type,&
+                                              get_cell,&
                                               pbc
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_files,                        ONLY: close_file,&
@@ -72,7 +73,8 @@ MODULE hfx_energy_potential
    USE kinds,                           ONLY: default_string_length,&
                                               dp,&
                                               int_8
-   USE kpoint_types,                    ONLY: kpoint_type
+   USE kpoint_types,                    ONLY: kpoint_cell_to_index,&
+                                              kpoint_type
    USE libint_wrapper,                  ONLY: cp_libint_t
    USE machine,                         ONLY: m_flush,&
                                               m_memory,&
@@ -98,7 +100,7 @@ MODULE hfx_energy_potential
    IMPLICIT NONE
    PRIVATE
 
-   PUBLIC ::  integrate_four_center, coulomb4
+   PUBLIC ::  integrate_four_center, integrate_four_center_kp, coulomb4
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'hfx_energy_potential'
 
@@ -308,8 +310,7 @@ CONTAINS
          END IF
       END IF
 
-      n_threads = 1
-!$    n_threads = omp_get_max_threads()
+      n_threads = omp_get_max_threads()
 
       shm_neris_total = 0
       shm_nprim_ints = 0
@@ -330,6 +331,7 @@ CONTAINS
 
       ! Number of image matrices in k-point calculations (nkimages==1 -> no kpoints)
       nkimages = dft_control%nimages
+      CPASSERT(nkimages == 1)
 
       ncpu = para_env%num_pe
       n_processes = ncpu*n_threads
@@ -361,7 +363,7 @@ CONTAINS
       do_disk_storage = shm_master_x_data%memory_parameter%do_disk_storage
 
       ! KP support messes up the performance model, do round-robin instead
-      do_dynamic_load_balancing = (n_threads > 1) .AND. (.NOT. do_disk_storage) .AND. (nkimages == 1)
+      do_dynamic_load_balancing = (n_threads > 1) .AND. (.NOT. do_disk_storage)
 
       ! If we have a hybrid functional, we may need only a fraction of exact exchange
       ! Initialize a prefactor depending on the fraction and the number of spins
@@ -720,7 +722,6 @@ CONTAINS
 !$OMP                                  full_density_beta,&
 !$OMP                                  shm_initial_p,&
 !$OMP                                  shm_is_assoc_atomic_block,&
-!$OMP                                  shm_number_of_p_entries,&
 !$OMP                                  cell,&
 !$OMP                                  screen_coeffs_set,&
 !$OMP                                  screen_coeffs_kind,&
@@ -1028,6 +1029,7 @@ CONTAINS
          my_istart = distribution_energy%istart
          my_quartet_counter = 0
 
+         ! skip the following loop if there are no atom_quartets to calculate or istart is invalid
          IF (distribution_energy%number_of_atom_quartets == 0 .OR. my_istart == -1_int_8) &
             my_istart = nblocks**4
 
@@ -1153,18 +1155,11 @@ CONTAINS
                              shm_is_assoc_atomic_block(latom, jatom) >= 1)) CYCLE
 
                   !! calculate symmetry_factor according to degeneracy of atomic quartet
-                  symm_fac = 0.5_dp
-                  IF (iatom == jatom) symm_fac = symm_fac*2.0_dp
-                  IF (katom == latom) symm_fac = symm_fac*2.0_dp
-
-                  IF (nkimages == 1) THEN
-                     IF (iatom == katom .AND. jatom == latom .AND. iatom /= jatom .AND. katom /= latom) symm_fac = symm_fac*2.0_dp
-                     IF (iatom == katom .AND. iatom == jatom .AND. katom == latom) symm_fac = symm_fac*2.0_dp
-                  ELSE
-                     IF (iatom + jatom == katom + latom) symm_fac = symm_fac*2.0_dp
-                  END IF
-
-                  symm_fac = 1.0_dp/symm_fac
+                  symm_fac = 2.0_dp
+                  IF (iatom == jatom) symm_fac = symm_fac/2.0_dp
+                  IF (katom == latom) symm_fac = symm_fac/2.0_dp
+                  IF (iatom == katom .AND. jatom == latom .AND. iatom /= jatom .AND. katom /= latom) symm_fac = symm_fac/2.0_dp
+                  IF (iatom == katom .AND. iatom == jatom .AND. katom == latom) symm_fac = symm_fac/2.0_dp
 
                   lc_max => basis_parameter(kkind)%lmax
                   lc_min => basis_parameter(kkind)%lmin
@@ -1383,63 +1378,32 @@ CONTAINS
                               tmp_screen_pgf1 => screen_coeffs_pgf(:, :, jset, iset, jkind, ikind)
                               tmp_screen_pgf2 => screen_coeffs_pgf(:, :, lset, kset, lkind, kkind)
 
-                              IF (ASSOCIATED(kpoints)) THEN
-                                 CALL coulomb4(private_lib, ra, rb, rc, rd, npgfa(iset), npgfb(jset), npgfc(kset), npgfd(lset), &
-                                               la_min(iset), la_max(iset), lb_min(jset), lb_max(jset), &
-                                               lc_min(kset), lc_max(kset), ld_min(lset), ld_max(lset), &
-                                               nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
-                                               sphi_a_u1, sphi_a_u2, sphi_a_u3, &
-                                               sphi_b_u1, sphi_b_u2, sphi_b_u3, &
-                                               sphi_c_u1, sphi_c_u2, sphi_c_u3, &
-                                               sphi_d_u1, sphi_d_u2, sphi_d_u3, &
-                                               zeta(1:npgfa(iset), iset), zetb(1:npgfb(jset), jset), &
-                                               zetc(1:npgfc(kset), kset), zetd(1:npgfd(lset), lset), &
-                                               primitive_integrals, &
-                                               potential_parameter, &
-                                               shm_master_x_data%neighbor_cells, screen_coeffs_set(jset, iset, jkind, ikind)%x, &
-                                               screen_coeffs_set(lset, kset, lkind, kkind)%x, eps_schwarz, &
-                                               max_contraction_val, cartesian_estimate, cell, neris_coulomb, &
-                                               log10_pmax, log10_eps_schwarz, &
-                                               tmp_R_1, tmp_R_2, tmp_screen_pgf1, tmp_screen_pgf2, &
-                                               pgf_list_ij, pgf_list_kl, pgf_product_list, &
-                                               nsgfl_a(:, iset), nsgfl_b(:, jset), &
-                                               nsgfl_c(:, kset), nsgfl_d(:, lset), &
-                                               sphi_a_ext_set, &
-                                               sphi_b_ext_set, &
-                                               sphi_c_ext_set, &
-                                               sphi_d_ext_set, &
-                                               ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp, &
-                                               do_periodic, &
-                                               kpoints%index_to_cell(:, kp_idx_q), &
-                                               kpoints%index_to_cell(:, kp_idx_t))
-                              ELSE
-                                 CALL coulomb4(private_lib, ra, rb, rc, rd, npgfa(iset), npgfb(jset), npgfc(kset), npgfd(lset), &
-                                               la_min(iset), la_max(iset), lb_min(jset), lb_max(jset), &
-                                               lc_min(kset), lc_max(kset), ld_min(lset), ld_max(lset), &
-                                               nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
-                                               sphi_a_u1, sphi_a_u2, sphi_a_u3, &
-                                               sphi_b_u1, sphi_b_u2, sphi_b_u3, &
-                                               sphi_c_u1, sphi_c_u2, sphi_c_u3, &
-                                               sphi_d_u1, sphi_d_u2, sphi_d_u3, &
-                                               zeta(1:npgfa(iset), iset), zetb(1:npgfb(jset), jset), &
-                                               zetc(1:npgfc(kset), kset), zetd(1:npgfd(lset), lset), &
-                                               primitive_integrals, &
-                                               potential_parameter, &
-                                               shm_master_x_data%neighbor_cells, screen_coeffs_set(jset, iset, jkind, ikind)%x, &
-                                               screen_coeffs_set(lset, kset, lkind, kkind)%x, eps_schwarz, &
-                                               max_contraction_val, cartesian_estimate, cell, neris_coulomb, &
-                                               log10_pmax, log10_eps_schwarz, &
-                                               tmp_R_1, tmp_R_2, tmp_screen_pgf1, tmp_screen_pgf2, &
-                                               pgf_list_ij, pgf_list_kl, pgf_product_list, &
-                                               nsgfl_a(:, iset), nsgfl_b(:, jset), &
-                                               nsgfl_c(:, kset), nsgfl_d(:, lset), &
-                                               sphi_a_ext_set, &
-                                               sphi_b_ext_set, &
-                                               sphi_c_ext_set, &
-                                               sphi_d_ext_set, &
-                                               ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp, &
-                                               do_periodic)
-                              END IF
+                              CALL coulomb4(private_lib, ra, rb, rc, rd, npgfa(iset), npgfb(jset), npgfc(kset), npgfd(lset), &
+                                            la_min(iset), la_max(iset), lb_min(jset), lb_max(jset), &
+                                            lc_min(kset), lc_max(kset), ld_min(lset), ld_max(lset), &
+                                            nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
+                                            sphi_a_u1, sphi_a_u2, sphi_a_u3, &
+                                            sphi_b_u1, sphi_b_u2, sphi_b_u3, &
+                                            sphi_c_u1, sphi_c_u2, sphi_c_u3, &
+                                            sphi_d_u1, sphi_d_u2, sphi_d_u3, &
+                                            zeta(1:npgfa(iset), iset), zetb(1:npgfb(jset), jset), &
+                                            zetc(1:npgfc(kset), kset), zetd(1:npgfd(lset), lset), &
+                                            primitive_integrals, &
+                                            potential_parameter, &
+                                            screen_coeffs_set(jset, iset, jkind, ikind)%x, &
+                                            screen_coeffs_set(lset, kset, lkind, kkind)%x, eps_schwarz, &
+                                            max_contraction_val, cartesian_estimate, cell, neris_coulomb, &
+                                            log10_pmax, log10_eps_schwarz, &
+                                            tmp_R_1, tmp_R_2, tmp_screen_pgf1, tmp_screen_pgf2, &
+                                            pgf_list_ij, pgf_list_kl, pgf_product_list, &
+                                            nsgfl_a(:, iset), nsgfl_b(:, jset), &
+                                            nsgfl_c(:, kset), nsgfl_d(:, lset), &
+                                            sphi_a_ext_set, &
+                                            sphi_b_ext_set, &
+                                            sphi_c_ext_set, &
+                                            sphi_d_ext_set, &
+                                            ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp, &
+                                            do_periodic, shm_master_x_data%neighbor_cells)
 
                               shm_neris_total = shm_neris_total + nints
                               shm_nprim_ints = shm_nprim_ints + neris_coulomb
@@ -1592,42 +1556,30 @@ CONTAINS
                                  iset, jset, kset, lset, nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), primitive_integrals)
                            ENDIF
 
-                           IF (.NOT. is_anti_symmetric) THEN
-                              !! Update Kohn-Sham matrix
+                           !! Update Kohn-Sham matrix
+                           CALL update_fock_matrix( &
+                              nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
+                              fac, symm_fac, &
+                              full_density_alpha(:, kp_idx_q), full_density_alpha(:, kp_idx_q), &
+                              full_density_alpha(:, kp_idx_q), full_density_alpha(:, kp_idx_q), &
+                              full_ks_alpha(:, kp_idx_t), full_ks_alpha(:, kp_idx_t), &
+                              full_ks_alpha(:, kp_idx_t), full_ks_alpha(:, kp_idx_t), &
+                              primitive_integrals, pbd_buf, pbc_buf, pad_buf, pac_buf, kbd_buf, &
+                              kbc_buf, kad_buf, kac_buf, iatom, jatom, katom, latom, &
+                              iset, jset, kset, lset, offset_bd_set, offset_bc_set, offset_ad_set, offset_ac_set, &
+                              atomic_offset_bd, atomic_offset_bc, atomic_offset_ad, atomic_offset_ac, is_anti_symmetric)
+                           IF (is_unrestricted .AND. .NOT. treat_lsd_in_core) THEN
                               CALL update_fock_matrix( &
                                  nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
-                                 fac, symm_fac, full_density_alpha(:, kp_idx_q), full_ks_alpha(:, kp_idx_t), &
+                                 fac, symm_fac, &
+                                 full_density_beta(:, kp_idx_q), full_density_beta(:, kp_idx_q), &
+                                 full_density_beta(:, kp_idx_q), full_density_beta(:, kp_idx_q), &
+                                 full_ks_beta(:, kp_idx_t), full_ks_beta(:, kp_idx_t), &
+                                 full_ks_beta(:, kp_idx_t), full_ks_beta(:, kp_idx_t), &
                                  primitive_integrals, pbd_buf, pbc_buf, pad_buf, pac_buf, kbd_buf, &
                                  kbc_buf, kad_buf, kac_buf, iatom, jatom, katom, latom, &
                                  iset, jset, kset, lset, offset_bd_set, offset_bc_set, offset_ad_set, offset_ac_set, &
-                                 atomic_offset_bd, atomic_offset_bc, atomic_offset_ad, atomic_offset_ac)
-                              IF (is_unrestricted .AND. .NOT. treat_lsd_in_core) THEN
-                                 CALL update_fock_matrix( &
-                                    nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
-                                    fac, symm_fac, full_density_beta(:, kp_idx_q), full_ks_beta(:, kp_idx_t), &
-                                    primitive_integrals, pbd_buf, pbc_buf, pad_buf, pac_buf, kbd_buf, &
-                                    kbc_buf, kad_buf, kac_buf, iatom, jatom, katom, latom, &
-                                    iset, jset, kset, lset, offset_bd_set, offset_bc_set, offset_ad_set, offset_ac_set, &
-                                    atomic_offset_bd, atomic_offset_bc, atomic_offset_ad, atomic_offset_ac)
-                              END IF
-                           ELSE
-                              !! Update Kohn-Sham matrix
-                              CALL update_fock_matrix_as( &
-                                 nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
-                                 fac, symm_fac, full_density_alpha(:, kp_idx_q), full_ks_alpha(:, kp_idx_t), &
-                                 primitive_integrals, pbd_buf, pbc_buf, pad_buf, pac_buf, kbd_buf, &
-                                 kbc_buf, kad_buf, kac_buf, iatom, jatom, katom, latom, &
-                                 iset, jset, kset, lset, offset_bd_set, offset_bc_set, offset_ad_set, offset_ac_set, &
-                                 atomic_offset_bd, atomic_offset_bc, atomic_offset_ad, atomic_offset_ac)
-                              IF (is_unrestricted .AND. .NOT. treat_lsd_in_core) THEN
-                                 CALL update_fock_matrix_as( &
-                                    nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
-                                    fac, symm_fac, full_density_beta(:, kp_idx_q), full_ks_beta(:, kp_idx_t), &
-                                    primitive_integrals, pbd_buf, pbc_buf, pad_buf, pac_buf, kbd_buf, &
-                                    kbc_buf, kad_buf, kac_buf, iatom, jatom, katom, latom, &
-                                    iset, jset, kset, lset, offset_bd_set, offset_bc_set, offset_ad_set, offset_ac_set, &
-                                    atomic_offset_bd, atomic_offset_bc, atomic_offset_ad, atomic_offset_ac)
-                              END IF
+                                 atomic_offset_bd, atomic_offset_bc, atomic_offset_ad, atomic_offset_ac, is_anti_symmetric)
                            END IF
                         END DO ! kp_idx_q
                         END DO ! kp_idx_t
@@ -2038,6 +1990,1241 @@ CONTAINS
    END SUBROUTINE integrate_four_center
 
 ! **************************************************************************************************
+!> \brief computes four center integrals for a full basis set and updates the
+!>      Kohn-Sham-Matrix and energy. Uses all 8 eri symmetries
+!> \param qs_env ...
+!> \param x_data ...
+!> \param ks_matrix ...
+!> \param ehfx energy calculated with the updated HFX matrix
+!> \param rho_ao density matrix in ao basis
+!> \param hfx_section input_section HFX
+!> \param para_env ...
+!> \param geometry_did_change flag that indicates we have to recalc integrals
+!> \param irep Index for the HFX replica
+!> \param distribute_fock_matrix Flag that indicates whether to communicate the
+!>        new fock matrix or not
+!> \param ispin ...
+!> \par History
+!>      06.2007 created [Manuel Guidon]
+!>      08.2007 optimized load balance [Manuel Guidon]
+!>      09.2007 new parallelization [Manuel Guidon]
+!>      02.2009 completely rewritten screening part [Manuel Guidon]
+!>      12.2017 major bug fix. removed wrong cycle that was caussing segfault.
+!>              see https://groups.google.com/forum/#!topic/cp2k/pc6B14XOALY
+!>              [Tobias Binninger + Valery Weber]
+!> \author Manuel Guidon
+! **************************************************************************************************
+   SUBROUTINE integrate_four_center_kp(qs_env, x_data, ks_matrix, ehfx, rho_ao, hfx_section, para_env, &
+                                       geometry_did_change, irep, distribute_fock_matrix, &
+                                       ispin)
+
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(hfx_type), DIMENSION(:, :), POINTER           :: x_data
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: ks_matrix
+      REAL(KIND=dp), INTENT(OUT)                         :: ehfx
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: rho_ao
+      TYPE(section_vals_type), POINTER                   :: hfx_section
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+      LOGICAL                                            :: geometry_did_change
+      INTEGER                                            :: irep
+      LOGICAL, INTENT(IN)                                :: distribute_fock_matrix
+      INTEGER, INTENT(IN)                                :: ispin
+
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'integrate_four_center_kp', &
+         routineP = moduleN//':'//routineN
+      REAL(dp), PARAMETER                                :: ln_10 = LOG(10.0_dp)
+
+      CHARACTER(len=default_string_length)               :: eps_scaling_str, eps_schwarz_min_str
+      INTEGER :: act_atomic_block_offset, act_set_offset, atomic_offset_ad, atomic_offset_bc, bin, &
+         block_size, buffer_left, buffer_size, buffer_start, current_pgf_product_list_size, &
+         handle, handle_bin, handle_dist_ks, handle_getP, handle_load, i, i_list_ij, i_list_kl, &
+         i_set_list_ij, i_set_list_ij_start, i_set_list_ij_stop, i_set_list_kl, &
+         i_set_list_kl_start, i_set_list_kl_stop, i_thread, iatom, iatom_block, iatom_end, &
+         iatom_start, ikind, img, img_ks, img_p, iset, iw, j, jatom, jatom_block, jatom_end, &
+         jatom_start, jkind, jset, katom, katom_block, katom_end, katom_start, kimg_ac, kimg_bd
+      INTEGER :: kind_kind_idx, kkind, kset, l_max, latom, latom_block, latom_end, latom_start, &
+         lkind, lset, ma, max_pgf, max_set, mb, my_bin_id, my_bin_size, my_task_counter, &
+         my_thread_id, n_threads, natom, nb_a, nb_b, nb_c, nbcell_s, nbidx, nbits, ncoa, ncob, &
+         ncos_max, nints, nkimages, nkind, nneighbors, nseta, nsetb, nsgf_max, pa, sgfa, &
+         shm_number_of_p_entries, shm_task_counter, shm_total_bins, sphi_a_u1, sphi_a_u2, &
+         sphi_a_u3, sphi_b_u1, sphi_b_u2, sphi_b_u3, sphi_c_u1, sphi_c_u2, sphi_c_u3, sphi_d_u1, &
+         sphi_d_u2, sphi_d_u3, swap_id, unit_id
+      INTEGER(int_8) :: atom_block, estimate_to_store_int, memsize_after, memsize_before, &
+         n_processes, nblocks, ncpu, neris_coulomb, shm_neris_total, shm_nprim_ints, tmp_block, &
+         tmp_stats(2)
+      INTEGER(int_8), ALLOCATABLE, DIMENSION(:)          :: tmp_task_list_cost
+      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: kind_of, tmp_index
+      INTEGER, DIMENSION(:), POINTER :: la_max, la_min, lb_max, lb_min, lc_max, lc_min, ld_max, &
+         ld_min, npgfa, npgfb, npgfc, npgfd, nsgfa, nsgfb, nsgfc, nsgfd, shm_block_offset
+      INTEGER, DIMENSION(:, :), POINTER :: first_sgfa, nsgfl_a, nsgfl_b, nsgfl_c, nsgfl_d, &
+         offset_ad_set, offset_bc_set, shm_atomic_block_offset, shm_is_assoc_atomic_block
+      INTEGER, DIMENSION(:, :, :, :), POINTER            :: shm_set_offset
+      LOGICAL :: do_kpoints, do_p_screening, do_periodic, do_print_load_balance_info, &
+         is_anti_symmetric, is_unrestricted, my_geo_change, treat_lsd_in_core
+      LOGICAL, DIMENSION(:, :), POINTER                  :: shm_atomic_pair_list
+      REAL(dp) :: afac, bintime_start, bintime_stop, cartesian_estimate, ene_x_aa, ene_x_aa_diag, &
+         ene_x_bb, ene_x_bb_diag, eps_schwarz, etmp, frac, log10_eps_schwarz, log10_pmax, &
+         max_contraction_val, max_val1, max_val2, max_val2_set, pmax_atom, pmax_blocks, &
+         pmax_entry, ra(3), rab2, rb(3), rc(3), rcd2, rd(3), screen_kind_ij, screen_kind_kl, &
+         spherical_estimate, symm_fac
+      REAL(dp), ALLOCATABLE, DIMENSION(:)                :: ee_buffer1, ee_buffer2, &
+                                                            ee_primitives_tmp, ee_work, ee_work2, &
+                                                            kad_buf, pbc_buf, primitive_integrals
+      REAL(dp), DIMENSION(:, :), POINTER :: full_density_alpha, full_density_beta, full_ks_alpha, &
+         full_ks_beta, max_contraction, ptr_p_1, ptr_p_2, ptr_p_3, ptr_p_4, shm_pmax_atom, &
+         shm_pmax_block, sphi_a, zeta, zetb, zetc, zetd
+      REAL(dp), DIMENSION(:, :, :), POINTER              :: sphi_a_ext_set, sphi_b_ext_set, &
+                                                            sphi_c_ext_set, sphi_d_ext_set
+      REAL(dp), DIMENSION(:, :, :, :), POINTER           :: sphi_a_ext, sphi_b_ext, sphi_c_ext, &
+                                                            sphi_d_ext
+      REAL(KIND=dp)                                      :: coeffs_kind_max0
+      REAL(KIND=dp), DIMENSION(3, 3)                     :: hmat
+      TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
+      TYPE(cell_type), POINTER                           :: cell
+      TYPE(cp_libint_t)                                  :: private_lib
+      TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_ks_aux_fit_hfx_kp
+      TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(hfx_basis_type), DIMENSION(:), POINTER        :: basis_parameter
+      TYPE(hfx_distribution), POINTER                    :: distribution_energy
+      TYPE(hfx_p_kind), DIMENSION(:), POINTER            :: shm_initial_p
+      TYPE(hfx_pgf_list), ALLOCATABLE, DIMENSION(:)      :: pgf_list_ij, pgf_list_kl
+      TYPE(hfx_pgf_product_list), ALLOCATABLE, &
+         DIMENSION(:)                                    :: pgf_product_list
+      TYPE(hfx_potential_type)                           :: potential_parameter
+      TYPE(hfx_screen_coeff_type), DIMENSION(:, :), &
+         POINTER                                         :: screen_coeffs_kind, tmp_R_1, tmp_R_2, &
+                                                            tmp_screen_pgf1, tmp_screen_pgf2
+      TYPE(hfx_screen_coeff_type), &
+         DIMENSION(:, :, :, :), POINTER                  :: screen_coeffs_set
+      TYPE(hfx_screen_coeff_type), &
+         DIMENSION(:, :, :, :, :, :), POINTER            :: radii_pgf, screen_coeffs_pgf
+      TYPE(hfx_task_list_type), DIMENSION(:), POINTER    :: shm_task_list, tmp_task_list
+      TYPE(hfx_type), POINTER                            :: shm_master_x_data
+      TYPE(kpoint_type), POINTER                         :: kpoints
+      TYPE(pair_list_type)                               :: list_ij, list_kl
+      TYPE(pair_set_list_type), ALLOCATABLE, &
+         DIMENSION(:)                                    :: set_list_ij, set_list_kl
+      TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
+      TYPE(qs_ks_env_type), POINTER                      :: ks_env
+
+      NULLIFY (dft_control)
+
+      CALL timeset(routineN, handle)
+
+      CALL cite_reference(Guidon2008)
+      CALL cite_reference(Guidon2009)
+
+      ehfx = 0.0_dp
+
+      ! ** This is not very clean, but effective. ispin can only be 2 if we do the beta spin part in core
+      my_geo_change = geometry_did_change
+      IF (ispin == 2) my_geo_change = .FALSE.
+
+      logger => cp_get_default_logger()
+
+      is_anti_symmetric = dbcsr_get_matrix_type(rho_ao(1, 1)%matrix) .EQ. dbcsr_type_antisymmetric
+
+      IF (my_geo_change) THEN
+         CALL m_memory(memsize_before)
+         CALL mp_max(memsize_before, para_env%group)
+         iw = cp_print_key_unit_nr(logger, hfx_section, "HF_INFO", &
+                                   extension=".scfLog")
+         IF (iw > 0) THEN
+            WRITE (UNIT=iw, FMT="(/,(T3,A,T60,I21))") &
+               "HFX_MEM_INFO| Est. max. program size before HFX [MiB]:", memsize_before/1024**2
+            CALL m_flush(iw)
+         END IF
+         CALL cp_print_key_finished_output(iw, logger, hfx_section, &
+                                           "HF_INFO")
+      END IF
+
+      CALL get_qs_env(qs_env=qs_env, &
+                      atomic_kind_set=atomic_kind_set, &
+                      cell=cell, &
+                      matrix_ks_aux_fit_hfx_kp=matrix_ks_aux_fit_hfx_kp, &
+                      do_kpoints=do_kpoints, &
+                      dft_control=dft_control, &
+                      particle_set=particle_set, &
+                      ks_env=ks_env)
+      CALL get_ks_env(ks_env=ks_env, kpoints=kpoints)
+      CALL get_cell(cell, h=hmat)
+
+      shm_master_x_data => x_data(irep, 1)
+      basis_parameter => shm_master_x_data%basis_parameter
+
+      !! Calculate l_max used in fgamma , because init_md_ftable is definitely not thread safe
+      nkind = SIZE(atomic_kind_set, 1)
+      l_max = 0
+      DO ikind = 1, nkind
+         l_max = MAX(l_max, MAXVAL(basis_parameter(ikind)%lmax))
+      ENDDO
+      l_max = 4*l_max
+      CALL init_md_ftable(l_max)
+
+      IF (shm_master_x_data%potential_parameter%potential_type == do_potential_truncated .OR. &
+          shm_master_x_data%potential_parameter%potential_type == do_potential_mix_cl_trunc) THEN
+         IF (l_max > init_t_c_g0_lmax) THEN
+            IF (para_env%ionode) THEN
+               CALL open_file(unit_number=unit_id, file_name=shm_master_x_data%potential_parameter%filename)
+            END IF
+            CALL t_c_g0_init(l_max, unit_id, para_env%mepos, para_env%group)
+            IF (para_env%ionode) THEN
+               CALL close_file(unit_id)
+            END IF
+            init_t_c_g0_lmax = l_max
+         END IF
+      END IF
+
+      n_threads = omp_get_max_threads()
+
+      shm_neris_total = 0
+      shm_nprim_ints = 0
+      memsize_after = 0
+
+      is_unrestricted = dft_control%nspins == 2
+
+      natom = SIZE(particle_set, 1)
+      ALLOCATE (kind_of(natom))
+      CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set, kind_of=kind_of)
+
+      ! Number of image matrices in k-point calculations (nkimages==1 -> no kpoints)
+      nkimages = dft_control%nimages
+      CPASSERT(nkimages > 1)
+
+      ncpu = para_env%num_pe
+      n_processes = ncpu*n_threads
+
+      ! many parameters are the same, just replicated across the thread data,
+      ! initialize them here from the "master" thread
+
+      do_periodic = shm_master_x_data%periodic_parameter%do_periodic
+      do_p_screening = shm_master_x_data%screening_parameter%do_initial_p_screening
+
+      ! Special treatment for MP2 with initial density screening
+      IF (do_p_screening .AND. ASSOCIATED(qs_env%mp2_env)) THEN
+         IF ((qs_env%mp2_env%ri_mp2%free_hfx_buffer)) THEN
+            do_p_screening = ((qs_env%mp2_env%p_screen) .AND. (qs_env%mp2_env%not_last_hfx))
+         ELSE
+            do_p_screening = .FALSE.
+         ENDIF
+      ENDIF
+
+      !! Get screening parameter
+      eps_schwarz = shm_master_x_data%screening_parameter%eps_schwarz
+      log10_eps_schwarz = MERGE(log_zero, LOG10(eps_schwarz), eps_schwarz <= 0.0_dp)
+
+      treat_lsd_in_core = shm_master_x_data%general_parameter%treat_lsd_in_core
+
+      ! If we have a hybrid functional, we may need only a fraction of exact exchange
+      ! Initialize a prefactor depending on the fraction and the number of spins
+      frac = shm_master_x_data%general_parameter%fraction*MERGE(1.0_dp, 0.5_dp, is_unrestricted)
+
+      ! Calculate helper array that stores if a certain atomic pair is associated in the KS matrix
+      ! Can we assume that all matrices ks_matrix(i,j) have the same occupation pattern?
+      IF (my_geo_change) THEN
+         CALL get_atomic_block_maps(ks_matrix(1, 1)%matrix, &
+                                    basis_parameter, &
+                                    kind_of, &
+                                    shm_master_x_data%is_assoc_atomic_block, &
+                                    shm_master_x_data%number_of_p_entries, &
+                                    para_env, &
+                                    shm_master_x_data%atomic_block_offset, &
+                                    shm_master_x_data%set_offset, &
+                                    shm_master_x_data%block_offset, &
+                                    shm_master_x_data%map_atoms_to_cpus, &
+                                    nkind)
+
+         ! Check occupation of KS-matrix, only warn if geometry changed 'cause that's when the occupation can change
+         IF (ANY(shm_master_x_data%is_assoc_atomic_block == 0)) THEN
+            CALL cp_warn(__LOCATION__, &
+                         "The Kohn Sham matrix is not 100% occupied. This "// &
+                         "may result in incorrect Hartree-Fock results. Try to decrease EPS_PGF_ORB "// &
+                         "and EPS_FILTER_MATRIX in the QS section. For more information "// &
+                         "see FAQ: https://www.cp2k.org/faq:hfx_eps_warning")
+         END IF
+      END IF
+
+      ! Set pointers which should be defined now
+      shm_number_of_p_entries = shm_master_x_data%number_of_p_entries
+      shm_is_assoc_atomic_block => shm_master_x_data%is_assoc_atomic_block
+      shm_atomic_block_offset => shm_master_x_data%atomic_block_offset
+      shm_set_offset => shm_master_x_data%set_offset
+      shm_block_offset => shm_master_x_data%block_offset
+
+      ! Get the full density from all the processors
+      NULLIFY (full_density_alpha, full_density_beta)
+      ALLOCATE (full_density_alpha(shm_block_offset(ncpu + 1), nkimages))
+      IF (.NOT. treat_lsd_in_core .OR. .NOT. is_unrestricted) THEN
+         CALL timeset(routineN//"_getP", handle_getP)
+         DO img = 1, nkimages
+            CALL get_full_density(para_env, &
+                                  full_density_alpha(:, img), &
+                                  rho_ao(ispin, img)%matrix, &
+                                  shm_number_of_p_entries, &
+                                  shm_master_x_data%block_offset, &
+                                  kind_of, &
+                                  basis_parameter, &
+                                  get_max_vals_spin=.FALSE., &
+                                  antisymmetric=is_anti_symmetric)
+         END DO
+
+         IF (is_unrestricted) THEN
+            ALLOCATE (full_density_beta(shm_block_offset(ncpu + 1), nkimages))
+            DO img = 1, nkimages
+               CALL get_full_density(para_env, &
+                                     full_density_beta(:, img), &
+                                     rho_ao(2, img)%matrix, &
+                                     shm_number_of_p_entries, &
+                                     shm_master_x_data%block_offset, &
+                                     kind_of, &
+                                     basis_parameter, &
+                                     get_max_vals_spin=.FALSE., &
+                                     antisymmetric=is_anti_symmetric)
+            END DO
+         END IF
+         CALL timestop(handle_getP)
+
+         ! Calculate the max values of the density matrix actual_pmax stores the data from the actual density matrix
+         !! and x_data%initial_p stores the same for the initial guess. The initial guess is updated only in the case of
+         !! a changed geometry
+         NULLIFY (shm_initial_p)
+         IF (do_p_screening) THEN
+            shm_initial_p => shm_master_x_data%initial_p
+            shm_pmax_atom => shm_master_x_data%pmax_atom
+            IF (my_geo_change) THEN
+               CALL update_pmax_mat(shm_master_x_data%initial_p, &
+                                    shm_master_x_data%map_atom_to_kind_atom, &
+                                    shm_master_x_data%set_offset, &
+                                    shm_master_x_data%atomic_block_offset, &
+                                    shm_pmax_atom, &
+                                    full_density_alpha, full_density_beta, &
+                                    natom, kind_of, basis_parameter, &
+                                    nkind, shm_is_assoc_atomic_block)
+            END IF
+         END IF
+      ELSE
+         IF (do_p_screening) THEN
+            CALL timeset(routineN//"_getP", handle_getP)
+            DO img = 1, nkimages
+               CALL get_full_density(para_env, &
+                                     full_density_alpha(:, img), &
+                                     rho_ao(1, img)%matrix, &
+                                     shm_number_of_p_entries, &
+                                     shm_master_x_data%block_offset, &
+                                     kind_of, &
+                                     basis_parameter, &
+                                     get_max_vals_spin=.TRUE., &
+                                     rho_beta=rho_ao(2, img)%matrix, &
+                                     antisymmetric=is_anti_symmetric)
+            END DO
+            CALL timestop(handle_getP)
+
+            !! Calculate the max values of the density matrix actual_pmax stores the data from the actual density matrix
+            !! and x_data%initial_p stores the same for the initial guess. The initial guess is updated only in the case of
+            !! a changed geometry
+            NULLIFY (shm_initial_p)
+            shm_initial_p => shm_master_x_data%initial_p
+            shm_pmax_atom => shm_master_x_data%pmax_atom
+            IF (my_geo_change) THEN
+               CALL update_pmax_mat(shm_master_x_data%initial_p, &
+                                    shm_master_x_data%map_atom_to_kind_atom, &
+                                    shm_master_x_data%set_offset, &
+                                    shm_master_x_data%atomic_block_offset, &
+                                    shm_pmax_atom, &
+                                    full_density_alpha, full_density_beta, &
+                                    natom, kind_of, basis_parameter, &
+                                    nkind, shm_is_assoc_atomic_block)
+            END IF
+         END IF
+         ! ** Now get the density(ispin)
+         DO img = 1, nkimages
+            CALL get_full_density(para_env, &
+                                  full_density_alpha(:, img), &
+                                  rho_ao(ispin, img)%matrix, &
+                                  shm_number_of_p_entries, &
+                                  shm_master_x_data%block_offset, &
+                                  kind_of, &
+                                  basis_parameter, &
+                                  get_max_vals_spin=.FALSE., &
+                                  antisymmetric=is_anti_symmetric)
+         END DO
+      END IF
+
+      NULLIFY (full_ks_alpha, full_ks_beta)
+      ALLOCATE (shm_master_x_data%full_ks_alpha(shm_block_offset(ncpu + 1), nkimages))
+      full_ks_alpha => shm_master_x_data%full_ks_alpha
+      full_ks_alpha = 0.0_dp
+
+      IF (.NOT. treat_lsd_in_core .AND. is_unrestricted) THEN
+         ALLOCATE (shm_master_x_data%full_ks_beta(shm_block_offset(ncpu + 1), nkimages))
+         full_ks_beta => shm_master_x_data%full_ks_beta
+         full_ks_beta = 0.0_dp
+      END IF
+
+      ! the basis_info is replicated across all the x_data (see hfx_create_basis_types in hfx_types.F)
+      ! hence we can get basic information like max L, ... here:
+      max_set = shm_master_x_data%basis_info%max_set
+
+      ALLOCATE (max_contraction(max_set, natom))
+      max_contraction = 0.0_dp
+
+      ! precompute maximum nco, nsgf, max_pgf (allocation of scratch is done locally in each thread)
+      ! as well as the max_contraction which only depends on the shared basis_parameter and kind_of
+      ncos_max = 0
+      nsgf_max = 0
+      max_pgf = 0
+      DO iatom = 1, natom
+         ikind = kind_of(iatom)
+         nseta = basis_parameter(ikind)%nset
+         npgfa => basis_parameter(ikind)%npgf
+         la_max => basis_parameter(ikind)%lmax
+         nsgfa => basis_parameter(ikind)%nsgf
+         sphi_a => basis_parameter(ikind)%sphi
+         first_sgfa => basis_parameter(ikind)%first_sgf
+         DO iset = 1, nseta
+            ncos_max = MAX(ncos_max, ncoset(la_max(iset)))
+            nsgf_max = MAX(nsgf_max, nsgfa(iset))
+            max_pgf = MAX(max_pgf, npgfa(iset))
+
+            ! takes the primitive to contracted transformation into account
+            ncoa = npgfa(iset)*ncoset(la_max(iset))
+            sgfa = first_sgfa(1, iset)
+            ! if the primitives are assumed to be all of max_val2, max_val2*p2s_b becomes
+            ! the maximum value after multiplication with sphi_a
+            max_contraction(iset, iatom) = MAXVAL([(SUM(ABS(sphi_a(1:ncoa, i))), i=sgfa, sgfa + nsgfa(iset) - 1)])
+         ENDDO
+      ENDDO
+
+      !! Initialize schwarz screening matrices for near field estimates and boxing screening matrices
+      !! for far field estimates. The update is only performed if the geomtry of the system changed.
+      !! If the system is periodic, then the corresponding routines are called and some variables
+      !! are initialized
+      IF (.NOT. shm_master_x_data%screen_funct_is_initialized) THEN
+         CALL calc_pair_dist_radii(qs_env, basis_parameter, &
+                                   shm_master_x_data%pair_dist_radii_pgf, max_set, max_pgf, eps_schwarz)
+         CALL calc_screening_functions(qs_env, basis_parameter, x_data(irep, :)%lib, &
+                                       shm_master_x_data%potential_parameter, &
+                                       shm_master_x_data%screen_funct_coeffs_set, &
+                                       shm_master_x_data%screen_funct_coeffs_kind, &
+                                       shm_master_x_data%screen_funct_coeffs_pgf, &
+                                       shm_master_x_data%pair_dist_radii_pgf, &
+                                       max_set, max_pgf)
+
+         shm_master_x_data%screen_funct_is_initialized = .TRUE.
+      END IF
+
+      screen_coeffs_set => shm_master_x_data%screen_funct_coeffs_set
+      screen_coeffs_kind => shm_master_x_data%screen_funct_coeffs_kind
+      screen_coeffs_pgf => shm_master_x_data%screen_funct_coeffs_pgf
+      radii_pgf => shm_master_x_data%pair_dist_radii_pgf
+
+      IF (do_periodic) THEN
+         ! ** Rebuild neighbor lists in case the cell has changed (i.e. NPT MD)
+         shm_master_x_data%periodic_parameter%number_of_shells = shm_master_x_data%periodic_parameter%mode
+         CALL hfx_create_neighbor_cells(shm_master_x_data, cell, .TRUE.)
+      END IF
+      nneighbors = SIZE(shm_master_x_data%neighbor_cells)
+
+      !! Parameters related to the potential 1/r, erf(wr)/r, erfc(wr/r)
+      potential_parameter = shm_master_x_data%potential_parameter
+
+      coeffs_kind_max0 = MAXVAL(screen_coeffs_kind(:, :)%x(2))
+
+      !! Call routines that distribute the load on all processes. If we want to screen on a initial density matrix, there is
+      !! an optional parameter. Of course, this is only done if the geometry did change
+      CALL timeset(routineN//"_load", handle_load)
+
+      IF (my_geo_change) THEN
+         IF (shm_master_x_data%b_first_load_balance_energy) THEN
+            CALL hfx_load_balance(x_data(irep, :), eps_schwarz, particle_set, max_set, para_env, &
+                                  screen_coeffs_set, screen_coeffs_kind, &
+                                  shm_is_assoc_atomic_block, do_periodic, x_data(irep, :)%load_balance_parameter, &
+                                  kind_of, basis_parameter, shm_initial_p, shm_pmax_atom, &
+                                  cell, do_p_screening, shm_master_x_data%map_atom_to_kind_atom, &
+                                  nkind, hfx_do_eval_energy, use_virial=.FALSE.)
+            shm_master_x_data%b_first_load_balance_energy = .FALSE.
+            ! load balancing is ignored anyway, don't update it
+         END IF
+      END IF
+
+      block_size = shm_master_x_data%load_balance_parameter%block_size
+      nblocks = shm_master_x_data%load_balance_parameter%nblocks
+
+      !! precalculate maximum density matrix elements in blocks
+      shm_master_x_data%pmax_block = 0.0_dp
+      shm_pmax_block => shm_master_x_data%pmax_block
+      IF (do_p_screening) THEN
+         DO iatom_block = 1, SIZE(shm_master_x_data%blocks)
+            iatom_start = shm_master_x_data%blocks(iatom_block)%istart
+            iatom_end = shm_master_x_data%blocks(iatom_block)%iend
+            DO jatom_block = 1, SIZE(shm_master_x_data%blocks)
+               jatom_start = shm_master_x_data%blocks(jatom_block)%istart
+               jatom_end = shm_master_x_data%blocks(jatom_block)%iend
+               shm_pmax_block(iatom_block, jatom_block) = MAXVAL(shm_pmax_atom(iatom_start:iatom_end, jatom_start:jatom_end))
+            END DO
+         END DO
+      END IF
+      shm_atomic_pair_list => shm_master_x_data%atomic_pair_list
+      IF (my_geo_change) &
+         CALL build_atomic_pair_list(shm_atomic_pair_list, kind_of, basis_parameter, particle_set, &
+                                     do_periodic, screen_coeffs_kind, coeffs_kind_max0, log10_eps_schwarz, cell, &
+                                     shm_master_x_data%blocks)
+
+      ! reset timings for the new SCF round
+      IF (my_geo_change) THEN
+         shm_master_x_data%distribution_energy(:)%time_first_scf = 0.0_dp
+         shm_master_x_data%distribution_energy(:)%time_other_scf = 0.0_dp
+         shm_master_x_data%distribution_energy(:)%time_forces = 0.0_dp
+      ENDIF
+
+      CALL timestop(handle_load)
+
+!$OMP PARALLEL DEFAULT(NONE) SHARED(qs_env,&
+!$OMP                                  x_data,&
+!$OMP                                  ehfx,&
+!$OMP                                  rho_ao,&
+!$OMP                                  para_env,&
+!$OMP                                  my_geo_change,&
+!$OMP                                  irep,&
+!$OMP                                  kpoints,&
+!$OMP                                  dft_control,&
+!$OMP                                  is_unrestricted,&
+!$OMP                                  ncoset,&
+!$OMP                                  nso,&
+!$OMP                                  nco,&
+!$OMP                                  full_ks_alpha,&
+!$OMP                                  full_ks_beta,&
+!$OMP                                  n_threads,&
+!$OMP                                  full_density_alpha,&
+!$OMP                                  full_density_beta,&
+!$OMP                                  shm_initial_p,&
+!$OMP                                  shm_is_assoc_atomic_block,&
+!$OMP                                  cell,&
+!$OMP                                  screen_coeffs_set,&
+!$OMP                                  screen_coeffs_kind,&
+!$OMP                                  screen_coeffs_pgf,&
+!$OMP                                  particle_set,&
+!$OMP                                  kind_of,&
+!$OMP                                  natom,&
+!$OMP                                  nkimages,&
+!$OMP                                  n_processes,&
+!$OMP                                  pgf_product_list_size,&
+!$OMP                                  radii_pgf,&
+!$OMP                                  nkind,&
+!$OMP                                  do_p_screening,&
+!$OMP                                  do_periodic,&
+!$OMP                                  eps_schwarz,&
+!$OMP                                  log10_eps_schwarz,&
+!$OMP                                  treat_lsd_in_core,&
+!$OMP                                  frac,&
+!$OMP                                  is_anti_symmetric,&
+!$OMP                                  max_set,&
+!$OMP                                  ncos_max,&
+!$OMP                                  nsgf_max,&
+!$OMP                                  max_pgf,&
+!$OMP                                  nneighbors,&
+!$OMP                                  shm_atomic_block_offset,&
+!$OMP                                  shm_set_offset,&
+!$OMP                                  shm_block_offset,&
+!$OMP                                  shm_task_counter,&
+!$OMP                                  shm_task_list,&
+!$OMP                                  shm_total_bins,&
+!$OMP                                  shm_master_x_data,&
+!$OMP                                  shm_pmax_atom,&
+!$OMP                                  shm_pmax_block,&
+!$OMP                                  shm_atomic_pair_list,&
+!$OMP                                  basis_parameter,&
+!$OMP                                  potential_parameter,&
+!$OMP                                  max_contraction,&
+!$OMP                                  coeffs_kind_max0,&
+!$OMP                                  block_size,hmat,&
+!$OMP                                  nblocks) &
+!$OMP PRIVATE(i_thread,&
+!$OMP         neris_coulomb,ikind,&
+!$OMP         nseta,npgfa,la_max,nsgfa,primitive_integrals,pbc_buf,&
+!$OMP         kad_buf,ee_work,ee_work2,ee_buffer1,ee_buffer2,ee_primitives_tmp,&
+!$OMP         jkind,lb_max,nsetb,npgfb,nsgfb,ncob,pgf_list_ij,pgf_list_kl,&
+!$OMP         pgf_product_list,my_task_counter,my_bin_size,&
+!$OMP         private_lib,handle_getp,handle_load,&
+!$OMP         tmp_task_list,tmp_task_list_cost,tmp_index,iset,jset,set_list_ij,&
+!$OMP         set_list_kl,iatom,iatom_start,iatom_end,jatom,jatom_start,jatom_end,distribution_energy,&
+!$OMP         my_thread_id,my_bin_id,handle_bin,bintime_start,latom_block,tmp_block,&
+!$OMP         katom_block,katom_start,katom_end,latom_start,latom_end,pmax_blocks,list_ij,list_kl,i_set_list_ij_start,&
+!$OMP         i_set_list_ij_stop,ra,rb,rab2,la_min,zeta,sphi_a_ext,nsgfl_a,sphi_a_u1,sphi_a_u2,sphi_a_u3,&
+!$OMP         lb_min,zetb,sphi_b_ext,nsgfl_b,sphi_b_u1,sphi_b_u2,sphi_b_u3,katom,latom,i_set_list_kl_start,i_set_list_kl_stop,&
+!$OMP         kkind,lkind,rc,rd,rcd2,pmax_atom,screen_kind_ij,screen_kind_kl,symm_fac,lc_max,lc_min,npgfc,zetc,nsgfc,sphi_c_ext,&
+!$OMP         nsgfl_c,sphi_c_u1,sphi_c_u2,sphi_c_u3,ld_max,ld_min,npgfd,zetd,nsgfd,sphi_d_ext,nsgfl_d,sphi_d_u1,sphi_d_u2,&
+!$OMP         sphi_d_u3,atomic_offset_bc,atomic_offset_ad,offset_bc_set,&
+!$OMP         offset_ad_set,swap_id,kind_kind_idx,ptr_p_1,ptr_p_2,ptr_p_3,ptr_p_4,&
+!$OMP         max_val1,sphi_a_ext_set,sphi_b_ext_set,kset,lset,max_val2_set,max_val2,&
+!$OMP         sphi_c_ext_set,sphi_d_ext_set,pmax_entry,log10_pmax,nints,estimate_to_store_int,&
+!$OMP         spherical_estimate,nbits,buffer_left,buffer_start,buffer_size,max_contraction_val,tmp_r_1,tmp_r_2,&
+!$OMP         tmp_screen_pgf1,tmp_screen_pgf2,cartesian_estimate,bintime_stop,iw,i,j,current_pgf_product_list_size,&
+!$OMP         bin,eps_scaling_str,eps_schwarz_min_str,nbidx,nb_b,nb_a,kimg_ac,img_ks,img_p,kimg_bd,&
+!$OMP         nbcell_s,nb_c,iatom_block,jatom_block) &
+!$OMP REDUCTION(+: shm_neris_total,shm_nprim_ints) &
+!$OMP REDUCTION(MAX: memsize_after)
+
+      i_thread = omp_get_thread_num()
+
+      ! get a handle to this threads libint library structure
+      private_lib = x_data(irep, i_thread + 1)%lib
+
+      !! Allocate the arrays for the integrals.
+      ALLOCATE (primitive_integrals(nsgf_max**4))
+      primitive_integrals = 0.0_dp
+
+      ALLOCATE (pbc_buf(nsgf_max**2))
+      ALLOCATE (kad_buf(nsgf_max**2))
+      ALLOCATE (ee_work(ncos_max**4))
+      ALLOCATE (ee_work2(ncos_max**4))
+      ALLOCATE (ee_buffer1(ncos_max**4))
+      ALLOCATE (ee_buffer2(ncos_max**4))
+      ALLOCATE (ee_primitives_tmp(nsgf_max**4))
+
+      ! ** Allocate buffers for pgf_lists
+      ALLOCATE (pgf_list_ij(max_pgf**2))
+      ALLOCATE (pgf_list_kl(max_pgf**2))
+      ! the size of pgf_product_list is allocated and resized as needed. The initial guess grows as needed
+!$OMP ATOMIC READ
+      current_pgf_product_list_size = pgf_product_list_size
+      ALLOCATE (pgf_product_list(current_pgf_product_list_size))
+
+      DO i = 1, max_pgf**2
+         ALLOCATE (pgf_list_ij(i)%image_list(1))
+         ALLOCATE (pgf_list_kl(i)%image_list(1))
+      END DO
+
+      ALLOCATE (set_list_ij((max_set*block_size)**2))
+      ALLOCATE (set_list_kl((max_set*block_size)**2))
+
+      !! Start caluclating integrals of the form (ab|cd) or (ij|kl)
+      !! In order to do so, there is a main four-loop structure that takes into account the two symmetries
+      !!
+      !!   (ab|cd) = (ba|cd) = (ab|dc) = (ba|dc)
+      !!
+      !! by iterating in the following way
+      !!
+      !! DO iatom=1,natom               and       DO katom=1,natom
+      !!   DO jatom=iatom,natom                     DO latom=katom,natom
+      !!
+      !! The third symmetry
+      !!
+      !!  (ab|cd) = (cd|ab)
+      !!
+      !! is taken into account by the following criterion:
+      !!
+      !! IF(katom+latom<=iatom+jatom)  THEN
+      !!   IF( ((iatom+jatom).EQ.(katom+latom) ) .AND.(katom<iatom)) CYCLE
+      !!
+      !! Depending on the degeneracy of an integral the exchange contribution is multiplied by a corresponding
+      !! factor ( symm_fac ).
+      !!
+      !! If one quartet does not pass the screening we CYCLE on the outer most possible loop. Thats why we use
+      !! different hierarchies of short range screening matrices.
+      !!
+      !! If we do a parallel run, each process owns a unique array of workloads. Here, a workload is
+      !! defined as :
+      !!
+      !! istart, jstart, kstart, lstart, number_of_atom_quartets, initial_cpu_id
+      !!
+      !! This tells the process where to start the main loops and how many bunches of integrals it has to
+      !! calculate. The original parallelization is a simple modulo distribution that is binned and
+      !! optimized in the load_balance routines. Since the Monte Carlo routines can swap processors,
+      !! we need to know which was the initial cpu_id.
+      !! Furthermore, the indices iatom, jatom, katom, latom have to be set to istart, jstart, kstart and
+      !! lstart only the first time the loop is executed. All subsequent loops have to start with one or
+      !! iatom and katom respectively. Therefore, we use flags like first_j_loop etc.
+
+      CALL timeset(routineN//"_bin", handle_bin)
+
+      ! Ignore the binning for the KP-case in favour of parallelising over target KS images.
+      ! Each rank and thread start at a different point and advance by the number of ranks*threads.
+      ! An atom_block identifies a KS image and blocks in the i,j, k and l list.
+      DO atom_block = para_env%mepos*n_threads + i_thread, INT(nkimages, KIND=int_8)*nblocks**4 - 1, n_processes
+         tmp_block = atom_block
+
+         latom_block = INT(MODULO(tmp_block, nblocks)) + 1
+         tmp_block = atom_block/nblocks
+         katom_block = INT(MODULO(tmp_block, nblocks)) + 1
+
+         tmp_block = tmp_block/nblocks
+         jatom_block = INT(MODULO(tmp_block, nblocks)) + 1
+         tmp_block = tmp_block/nblocks
+         iatom_block = INT(MODULO(tmp_block, nblocks)) + 1
+
+         nb_c = INT(MODULO(tmp_block, INT(nkimages, KIND=int_8))) + 1
+         tmp_block = atom_block/nkimages
+
+         iatom_start = shm_master_x_data%blocks(iatom_block)%istart
+         iatom_end = shm_master_x_data%blocks(iatom_block)%iend
+         jatom_start = shm_master_x_data%blocks(jatom_block)%istart
+         jatom_end = shm_master_x_data%blocks(jatom_block)%iend
+         katom_start = shm_master_x_data%blocks(katom_block)%istart
+         katom_end = shm_master_x_data%blocks(katom_block)%iend
+         latom_start = shm_master_x_data%blocks(latom_block)%istart
+         latom_end = shm_master_x_data%blocks(latom_block)%iend
+
+         pmax_blocks = MAX(shm_pmax_block(katom_block, iatom_block), &
+                           shm_pmax_block(latom_block, jatom_block), &
+                           shm_pmax_block(latom_block, iatom_block), &
+                           shm_pmax_block(katom_block, jatom_block))
+
+         IF (2.0_dp*coeffs_kind_max0 + pmax_blocks < log10_eps_schwarz) &
+            CYCLE
+
+         CALL build_pair_list(list_ij, set_list_ij, iatom_start, iatom_end, &
+                              jatom_start, jatom_end, &
+                              kind_of, basis_parameter, particle_set, &
+                              do_periodic, screen_coeffs_set, screen_coeffs_kind, &
+                              coeffs_kind_max0, log10_eps_schwarz, cell, pmax_blocks, &
+                              shm_atomic_pair_list, do_all_combinations=.TRUE.)
+
+         CALL build_pair_list(list_kl, set_list_kl, katom_start, katom_end, &
+                              latom_start, latom_end, &
+                              kind_of, basis_parameter, particle_set, &
+                              do_periodic, screen_coeffs_set, screen_coeffs_kind, &
+                              coeffs_kind_max0, log10_eps_schwarz, cell, pmax_blocks, &
+                              shm_atomic_pair_list, do_all_combinations=.TRUE.)
+
+         DO i_list_ij = 1, list_ij%n_element
+
+            iatom = list_ij%elements(i_list_ij)%pair(1)
+            jatom = list_ij%elements(i_list_ij)%pair(2)
+            i_set_list_ij_start = list_ij%elements(i_list_ij)%set_bounds(1)
+            i_set_list_ij_stop = list_ij%elements(i_list_ij)%set_bounds(2)
+            ikind = list_ij%elements(i_list_ij)%kind_pair(1)
+            jkind = list_ij%elements(i_list_ij)%kind_pair(2)
+            ra = list_ij%elements(i_list_ij)%r1
+            rb = list_ij%elements(i_list_ij)%r2
+            rab2 = list_ij%elements(i_list_ij)%dist2
+
+            la_max => basis_parameter(ikind)%lmax
+            la_min => basis_parameter(ikind)%lmin
+            npgfa => basis_parameter(ikind)%npgf
+            nseta = basis_parameter(ikind)%nset
+            zeta => basis_parameter(ikind)%zet
+            nsgfa => basis_parameter(ikind)%nsgf
+            sphi_a_ext => basis_parameter(ikind)%sphi_ext(:, :, :, :)
+            nsgfl_a => basis_parameter(ikind)%nsgfl
+            sphi_a_u1 = UBOUND(sphi_a_ext, 1)
+            sphi_a_u2 = UBOUND(sphi_a_ext, 2)
+            sphi_a_u3 = UBOUND(sphi_a_ext, 3)
+
+            lb_max => basis_parameter(jkind)%lmax
+            lb_min => basis_parameter(jkind)%lmin
+            npgfb => basis_parameter(jkind)%npgf
+            nsetb = basis_parameter(jkind)%nset
+            zetb => basis_parameter(jkind)%zet
+            nsgfb => basis_parameter(jkind)%nsgf
+            sphi_b_ext => basis_parameter(jkind)%sphi_ext(:, :, :, :)
+            nsgfl_b => basis_parameter(jkind)%nsgfl
+            sphi_b_u1 = UBOUND(sphi_b_ext, 1)
+            sphi_b_u2 = UBOUND(sphi_b_ext, 2)
+            sphi_b_u3 = UBOUND(sphi_b_ext, 3)
+
+            DO i_list_kl = 1, list_kl%n_element
+               katom = list_kl%elements(i_list_kl)%pair(1)
+               latom = list_kl%elements(i_list_kl)%pair(2)
+
+               i_set_list_kl_start = list_kl%elements(i_list_kl)%set_bounds(1)
+               i_set_list_kl_stop = list_kl%elements(i_list_kl)%set_bounds(2)
+               kkind = list_kl%elements(i_list_kl)%kind_pair(1)
+               lkind = list_kl%elements(i_list_kl)%kind_pair(2)
+               rc = list_kl%elements(i_list_kl)%r1
+               rd = list_kl%elements(i_list_kl)%r2
+               rcd2 = list_kl%elements(i_list_kl)%dist2
+
+               IF (do_p_screening) THEN
+                  pmax_atom = MAX(shm_pmax_atom(katom, iatom), &
+                                  shm_pmax_atom(latom, jatom), &
+                                  shm_pmax_atom(latom, iatom), &
+                                  shm_pmax_atom(katom, jatom))
+               ELSE
+                  pmax_atom = 0.0_dp
+               END IF
+
+               screen_kind_ij = screen_coeffs_kind(jkind, ikind)%x(1)*rab2 + &
+                                screen_coeffs_kind(jkind, ikind)%x(2)
+               screen_kind_kl = screen_coeffs_kind(lkind, kkind)%x(1)*rcd2 + &
+                                screen_coeffs_kind(lkind, kkind)%x(2)
+
+               IF (screen_kind_ij + screen_kind_kl + pmax_atom < log10_eps_schwarz) CYCLE
+
+               !! we want to be consistent with the KS matrix. If none of the atomic indices
+               !! is associated cycle
+               IF (.NOT. (shm_is_assoc_atomic_block(latom, iatom) >= 1 .AND. &
+                          shm_is_assoc_atomic_block(katom, iatom) >= 1 .AND. &
+                          shm_is_assoc_atomic_block(katom, jatom) >= 1 .AND. &
+                          shm_is_assoc_atomic_block(latom, jatom) >= 1)) CYCLE
+
+               !! calculate symmetry_factor according to degeneracy of atomic quartet
+               symm_fac = 1.0_dp  ! we are doing the full quartets now
+               ! IF (iatom == jatom) symm_fac = symm_fac/2.0_dp
+               ! IF (katom == latom) symm_fac = symm_fac/2.0_dp
+               ! IF (iatom == katom .AND. jatom == latom) symm_fac = symm_fac/2.0_dp
+
+               lc_max => basis_parameter(kkind)%lmax
+               lc_min => basis_parameter(kkind)%lmin
+               npgfc => basis_parameter(kkind)%npgf
+               zetc => basis_parameter(kkind)%zet
+               nsgfc => basis_parameter(kkind)%nsgf
+               sphi_c_ext => basis_parameter(kkind)%sphi_ext(:, :, :, :)
+               nsgfl_c => basis_parameter(kkind)%nsgfl
+               sphi_c_u1 = UBOUND(sphi_c_ext, 1)
+               sphi_c_u2 = UBOUND(sphi_c_ext, 2)
+               sphi_c_u3 = UBOUND(sphi_c_ext, 3)
+
+               ld_max => basis_parameter(lkind)%lmax
+               ld_min => basis_parameter(lkind)%lmin
+               npgfd => basis_parameter(lkind)%npgf
+               zetd => basis_parameter(lkind)%zet
+               nsgfd => basis_parameter(lkind)%nsgf
+               sphi_d_ext => basis_parameter(lkind)%sphi_ext(:, :, :, :)
+               nsgfl_d => basis_parameter(lkind)%nsgfl
+               sphi_d_u1 = UBOUND(sphi_d_ext, 1)
+               sphi_d_u2 = UBOUND(sphi_d_ext, 2)
+               sphi_d_u3 = UBOUND(sphi_d_ext, 3)
+
+               ! the following offsets are used to jump locate matrix elements
+               ! inside density and KS matrices for the different relevant combinations
+               ! of atoms.
+
+               ! While the atomic_block_offset stores both sides despite equal value - (ij) and (ji) lead to the same block due to
+               ! symmetry - the shm_set_offset does not, giving a reduction of:
+               !   nkind*nsgf_max**2 + nkind*(nkind-1)*nsgf_max
+               ! number of ints (?!)
+               atomic_offset_bc = shm_atomic_block_offset(jatom, katom)
+               atomic_offset_ad = shm_atomic_block_offset(iatom, latom)
+
+               IF (katom > jatom) THEN
+                  offset_bc_set => shm_set_offset(:, :, kkind, jkind)
+               ELSE
+                  offset_bc_set => shm_set_offset(:, :, jkind, kkind)
+               END IF
+               IF (latom > iatom) THEN
+                  offset_ad_set => shm_set_offset(:, :, lkind, ikind)
+               ELSE
+                  offset_ad_set => shm_set_offset(:, :, ikind, lkind)
+               END IF
+
+               IF (do_p_screening) THEN
+                  swap_id = 0
+                  kind_kind_idx = INT(get_1D_idx(kkind, ikind, INT(nkind, int_8)))
+                  IF (ikind >= kkind) THEN
+                     ptr_p_1 => shm_initial_p(kind_kind_idx)%p_kind(:, :, &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(katom), &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(iatom))
+                  ELSE
+                     ptr_p_1 => shm_initial_p(kind_kind_idx)%p_kind(:, :, &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(iatom), &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(katom))
+                     swap_id = swap_id + 1
+                  END IF
+                  kind_kind_idx = INT(get_1D_idx(lkind, jkind, INT(nkind, int_8)))
+                  IF (jkind >= lkind) THEN
+                     ptr_p_2 => shm_initial_p(kind_kind_idx)%p_kind(:, :, &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(latom), &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(jatom))
+                  ELSE
+                     ptr_p_2 => shm_initial_p(kind_kind_idx)%p_kind(:, :, &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(jatom), &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(latom))
+                     swap_id = swap_id + 2
+                  END IF
+                  kind_kind_idx = INT(get_1D_idx(lkind, ikind, INT(nkind, int_8)))
+                  IF (ikind >= lkind) THEN
+                     ptr_p_3 => shm_initial_p(kind_kind_idx)%p_kind(:, :, &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(latom), &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(iatom))
+                  ELSE
+                     ptr_p_3 => shm_initial_p(kind_kind_idx)%p_kind(:, :, &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(iatom), &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(latom))
+                     swap_id = swap_id + 4
+                  END IF
+                  kind_kind_idx = INT(get_1D_idx(kkind, jkind, INT(nkind, int_8)))
+                  IF (jkind >= kkind) THEN
+                     ptr_p_4 => shm_initial_p(kind_kind_idx)%p_kind(:, :, &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(katom), &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(jatom))
+                  ELSE
+                     ptr_p_4 => shm_initial_p(kind_kind_idx)%p_kind(:, :, &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(jatom), &
+                                                                    shm_master_x_data%map_atom_to_kind_atom(katom))
+                     swap_id = swap_id + 8
+                  END IF
+               END IF
+
+               DO i_set_list_ij = i_set_list_ij_start, i_set_list_ij_stop
+                  iset = set_list_ij(i_set_list_ij)%pair(1)
+                  jset = set_list_ij(i_set_list_ij)%pair(2)
+
+                  ncob = npgfb(jset)*ncoset(lb_max(jset))
+                  max_val1 = screen_coeffs_set(jset, iset, jkind, ikind)%x(1)*rab2 + &
+                             screen_coeffs_set(jset, iset, jkind, ikind)%x(2)
+                  IF (max_val1 + screen_kind_kl + pmax_atom < log10_eps_schwarz) CYCLE
+
+                  sphi_a_ext_set => sphi_a_ext(:, :, :, iset)
+                  sphi_b_ext_set => sphi_b_ext(:, :, :, jset)
+
+                  DO i_set_list_kl = i_set_list_kl_start, i_set_list_kl_stop
+                     kset = set_list_kl(i_set_list_kl)%pair(1)
+                     lset = set_list_kl(i_set_list_kl)%pair(2)
+
+                     !! Near field screening
+                     max_val2_set = (screen_coeffs_set(lset, kset, lkind, kkind)%x(1)*rcd2 + &
+                                     screen_coeffs_set(lset, kset, lkind, kkind)%x(2))
+                     max_val2 = max_val1 + max_val2_set
+
+                     IF (max_val2 + pmax_atom < log10_eps_schwarz) CYCLE
+
+                     !! get max_vals if we screen on initial density
+                     IF (do_p_screening) THEN
+                        log10_pmax = get_pmax_val(ptr_p_1, ptr_p_2, ptr_p_3, ptr_p_4, &
+                                                  iset, jset, kset, lset, swap_id)
+                     ELSE
+                        log10_pmax = 0.0_dp
+                     END IF
+                     max_val2 = max_val2 + log10_pmax
+                     IF (max_val2 < log10_eps_schwarz) CYCLE
+
+                     pmax_entry = EXP(log10_pmax*ln_10)
+
+                     !! store current number of integrals, update total number and number of integrals in buffer
+                     nints = nsgfa(iset)*nsgfb(jset)*nsgfc(kset)*nsgfd(lset)
+
+                     sphi_c_ext_set => sphi_c_ext(:, :, :, kset)
+                     sphi_d_ext_set => sphi_d_ext(:, :, :, lset)
+
+                     DO nb_b = 1, nneighbors
+
+                        ! At this point we could do another screening on the correct density matrix
+                        ! rather than on the maximum over all images.
+                        ! If we were to interchange the loops of KS and P matrix, (kimg_q, kimg_t)
+                        ! we could do this screening even earlier!
+
+                        !! Calculate integrals if we run out of buffer or the geometry did change
+                        max_contraction_val = max_contraction(iset, iatom)* &
+                                              max_contraction(jset, jatom)* &
+                                              max_contraction(kset, katom)* &
+                                              max_contraction(lset, latom)*pmax_entry
+                        tmp_R_1 => radii_pgf(:, :, jset, iset, jkind, ikind)
+                        tmp_R_2 => radii_pgf(:, :, lset, kset, lkind, kkind)
+                        tmp_screen_pgf1 => screen_coeffs_pgf(:, :, jset, iset, jkind, ikind)
+                        tmp_screen_pgf2 => screen_coeffs_pgf(:, :, lset, kset, lkind, kkind)
+
+                        ! HFX is doing: (i^0 j^a | k^b l^b+c) with all the summations over NB
+                        ! inside coulomb4. Here we turn this inside out by manipulating the neighbor
+                        ! lists for each of the pair (and pair product) building methods.
+                        ! In the process we have to obtain the correct density and exchange/KS matrix.
+                        ! This follows the derivation in Pisani/Roetti, which has:
+                        !   P_34^Q \sum_S (1^0 3^S | 2^T 4^S+Q)
+                        ! Using Mulliken-Integral symmetry in the RHS and reindexing:
+                        !   S = a, Q = b - a, T = b + c
+                        ! should then give us the right density and KS/X matrices.
+                        img_ks = kpoint_cell_to_index(kpoints, &
+                                                      shm_master_x_data%neighbor_cells(nb_b)%cell &
+                                                      + shm_master_x_data%neighbor_cells(nb_c)%cell)
+                        IF (img_ks == 0) CYCLE
+
+                        DO nb_a = 1, nneighbors
+                           img_p = kpoint_cell_to_index(kpoints, &
+                                                        shm_master_x_data%neighbor_cells(nb_b)%cell &
+                                                        - shm_master_x_data%neighbor_cells(nb_a)%cell)
+                           IF (img_p == 0) CYCLE
+
+                           CALL coulomb4(private_lib, ra, rb, rc, rd, npgfa(iset), npgfb(jset), npgfc(kset), npgfd(lset), &
+                                         la_min(iset), la_max(iset), lb_min(jset), lb_max(jset), &
+                                         lc_min(kset), lc_max(kset), ld_min(lset), ld_max(lset), &
+                                         nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
+                                         sphi_a_u1, sphi_a_u2, sphi_a_u3, &
+                                         sphi_b_u1, sphi_b_u2, sphi_b_u3, &
+                                         sphi_c_u1, sphi_c_u2, sphi_c_u3, &
+                                         sphi_d_u1, sphi_d_u2, sphi_d_u3, &
+                                         zeta(1:npgfa(iset), iset), zetb(1:npgfb(jset), jset), &
+                                         zetc(1:npgfc(kset), kset), zetd(1:npgfd(lset), lset), &
+                                         primitive_integrals, &
+                                         potential_parameter, &
+                                         screen_coeffs_set(jset, iset, jkind, ikind)%x, &
+                                         screen_coeffs_set(lset, kset, lkind, kkind)%x, eps_schwarz, &
+                                         max_contraction_val, cartesian_estimate, cell, neris_coulomb, &
+                                         log10_pmax, log10_eps_schwarz, &
+                                         tmp_R_1, tmp_R_2, tmp_screen_pgf1, tmp_screen_pgf2, &
+                                         pgf_list_ij, pgf_list_kl, pgf_product_list, &
+                                         nsgfl_a(:, iset), nsgfl_b(:, jset), &
+                                         nsgfl_c(:, kset), nsgfl_d(:, lset), &
+                                         sphi_a_ext_set, sphi_b_ext_set, &
+                                         sphi_c_ext_set, sphi_d_ext_set, &
+                                         ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp, &
+                                         do_periodic, &
+                                         neighbor_cells_a=shm_master_x_data%neighbor_cells(nb_a:nb_a), &
+                                         neighbor_cells_all_or_b=shm_master_x_data%neighbor_cells(nb_b:nb_b), &
+                                         neighbor_cells_c=shm_master_x_data%neighbor_cells(nb_c:nb_c) &
+                                         )
+
+                           IF (.FALSE.) THEN
+                              CALL print_integrals_kp( &
+                                 iatom, jatom, katom, latom, nb_a, nb_b, nb_c, &
+                                 shm_set_offset, shm_atomic_block_offset, &
+                                 iset, jset, kset, lset, &
+                                 nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
+                                 primitive_integrals)
+                           END IF
+
+                           ! no need for contraction if there were no integrals to calculate
+                           IF (neris_coulomb == 0) &
+                              CYCLE
+
+                           shm_neris_total = shm_neris_total + nints
+                           shm_nprim_ints = shm_nprim_ints + neris_coulomb
+
+                           !! Update Kohn-Sham matrix
+                           CALL update_fock_matrix_kp( &
+                              nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
+                              frac, symm_fac, &
+                              full_density_alpha(:, img_p), &
+                              full_ks_alpha(:, img_ks), &
+                              primitive_integrals, &
+                              pbc_buf, &
+                              kad_buf, &
+                              iatom, jatom, katom, latom, &
+                              iset, jset, kset, lset, &
+                              offset_bc_set, offset_ad_set, &
+                              atomic_offset_bc, atomic_offset_ad, &
+                              is_anti_symmetric)
+                           IF (is_unrestricted .AND. .NOT. treat_lsd_in_core) THEN
+                              CALL update_fock_matrix_kp( &
+                                 nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
+                                 frac, symm_fac, &
+                                 full_density_beta(:, img_p), &
+                                 full_ks_beta(:, img_ks), &
+                                 primitive_integrals, &
+                                 pbc_buf, &
+                                 kad_buf, &
+                                 iatom, jatom, katom, latom, &
+                                 iset, jset, kset, lset, &
+                                 offset_bc_set, offset_ad_set, &
+                                 atomic_offset_bc, atomic_offset_ad, &
+                                 is_anti_symmetric)
+                           END IF
+                        END DO
+                     END DO ! kimg_q
+                  END DO ! i_set_list_kl
+               END DO ! i_set_list_ij
+
+            END DO !i_list_ij
+         END DO !i_list_kl
+      END DO !atom_block
+
+      CALL timestop(handle_bin)
+
+      ! sample the memory prior to deallocation (OMP-max-reduced)
+!$OMP CRITICAL(hfxenergy_mem_sampling)
+      CALL m_memory(memsize_after)
+!$OMP END CRITICAL(hfxenergy_mem_sampling)
+
+      DEALLOCATE (primitive_integrals)
+      DEALLOCATE (pbc_buf)
+      DEALLOCATE (kad_buf)
+      DEALLOCATE (set_list_ij, set_list_kl)
+
+      DO i = 1, max_pgf**2
+         DEALLOCATE (pgf_list_ij(i)%image_list)
+         DEALLOCATE (pgf_list_kl(i)%image_list)
+      END DO
+
+      DEALLOCATE (pgf_list_ij)
+      DEALLOCATE (pgf_list_kl)
+      DEALLOCATE (pgf_product_list)
+
+      DEALLOCATE (ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp)
+!$OMP END PARALLEL
+
+      DEALLOCATE (max_contraction)
+
+      !! Calculate the exchange energies from the Kohn-Sham matrix. Before we can go on, we have to symmetrize.
+
+      afac = 1.0_dp
+      IF (is_anti_symmetric) afac = -1.0_dp
+      ene_x_aa_diag = 0.0_dp
+      ene_x_bb_diag = 0.0_dp
+      DO iatom = 1, natom
+         ikind = kind_of(iatom)
+         nseta = basis_parameter(ikind)%nset
+         nsgfa => basis_parameter(ikind)%nsgf
+         jatom = iatom
+         jkind = kind_of(jatom)
+         nsetb = basis_parameter(jkind)%nset
+         nsgfb => basis_parameter(jkind)%nsgf
+         act_atomic_block_offset = shm_atomic_block_offset(jatom, iatom)
+         DO img = 1, nkimages
+            DO iset = 1, nseta
+               DO jset = 1, nsetb
+                  act_set_offset = shm_set_offset(jset, iset, jkind, ikind)
+                  i = act_set_offset + act_atomic_block_offset - 1
+                  DO ma = 1, nsgfa(iset)
+                     j = shm_set_offset(iset, jset, jkind, ikind) + act_atomic_block_offset - 1 + ma - 1
+                     DO mb = 1, nsgfb(jset)
+                        IF (i > j) THEN
+                           full_ks_alpha(i, img) = (full_ks_alpha(i, img) + full_ks_alpha(j, img)*afac)
+                           full_ks_alpha(j, img) = full_ks_alpha(i, img)*afac
+                           IF (is_unrestricted .AND. .NOT. treat_lsd_in_core) THEN
+                              full_ks_beta(i, img) = (full_ks_beta(i, img) + full_ks_beta(j, img)*afac)
+                              full_ks_beta(j, img) = full_ks_beta(i, img)*afac
+                           END IF
+                        END IF
+                        ! ** For adiabatically rescaled functionals we need the energy coming from the diagonal elements
+                        IF (i == j) THEN
+                           ene_x_aa_diag = ene_x_aa_diag + full_ks_alpha(i, img)*full_density_alpha(i, img)
+                           IF (is_unrestricted .AND. .NOT. treat_lsd_in_core) THEN
+                              ene_x_bb_diag = ene_x_bb_diag + full_ks_beta(i, img)*full_density_beta(i, img)
+                           END IF
+                        END IF
+                        i = i + 1
+                        j = j + nsgfa(iset)
+                     END DO
+                  END DO
+               END DO
+            END DO
+         END DO
+      END DO
+
+      CALL mp_sync(para_env%group)
+
+      afac = 1.0_dp
+      IF (is_anti_symmetric) afac = 0._dp
+      ene_x_aa = 0.0_dp
+      ene_x_bb = 0.0_dp
+      IF (distribute_fock_matrix) THEN
+         !! Distribute the current KS-matrix to all the processes
+         CALL timeset(routineN//"_dist_KS", handle_dist_ks)
+         DO img = 1, nkimages
+            CALL distribute_ks_matrix(para_env, &
+                                      full_ks_alpha(:, img), &
+                                      ks_matrix(ispin, img)%matrix, &
+                                      shm_number_of_p_entries, &
+                                      shm_block_offset, &
+                                      kind_of, basis_parameter, &
+                                      off_diag_fac=0.5_dp, diag_fac=afac)
+            PRINT *, "min(X)/max(X) from img", img, "(", kpoints%index_to_cell(:, img), ")", ":", &
+               MINVAL(full_ks_alpha(:, img)), MAXVAL(full_ks_alpha(:, img))
+         END DO
+
+         NULLIFY (full_ks_alpha)
+         DEALLOCATE (shm_master_x_data%full_ks_alpha)
+
+         IF (is_unrestricted .AND. .NOT. treat_lsd_in_core) THEN
+            DO img = 1, nkimages
+               CALL distribute_ks_matrix(para_env, &
+                                         full_ks_beta(:, img), &
+                                         ks_matrix(2, img)%matrix, &
+                                         shm_number_of_p_entries, &
+                                         shm_block_offset, &
+                                         kind_of, basis_parameter, &
+                                         off_diag_fac=0.5_dp, diag_fac=afac)
+            END DO
+            NULLIFY (full_ks_beta)
+            DEALLOCATE (shm_master_x_data%full_ks_beta)
+         END IF
+         CALL timestop(handle_dist_ks)
+
+         !! ** Calculate the exchange energy
+         DO img = 1, nkimages
+            CALL dbcsr_dot(ks_matrix(ispin, img)%matrix, rho_ao(ispin, img)%matrix, &
+                           etmp)
+            PRINT *, "energy contribution from img", img, "(", kpoints%index_to_cell(:, img), ")", ":", &
+               etmp/2.0_dp, "max(abs(P)):", MAXVAL(ABS(full_density_alpha(:, img)))
+
+            ene_x_aa = ene_x_aa + etmp
+         END DO
+         !for ADMMS, we need the exchange matrix k(d) for both spins
+         IF (dft_control%do_admm) THEN
+            DO img = 1, nkimages
+               CALL dbcsr_copy(matrix_ks_aux_fit_hfx_kp(ispin, img)%matrix, ks_matrix(ispin, img)%matrix, &
+                               name="HF exch. part of matrix_ks_aux_fit for ADMMS")
+            END DO
+         END IF
+
+         IF (is_unrestricted .AND. .NOT. treat_lsd_in_core) THEN
+            DO img = 1, nkimages
+               CALL dbcsr_dot(ks_matrix(2, img)%matrix, rho_ao(2, img)%matrix, &
+                              etmp)
+               ene_x_bb = ene_x_bb + etmp
+            END DO
+            !for ADMMS, we need the exchange matrix k(d) for both spins
+            IF (dft_control%do_admm) THEN
+               DO img = 1, nkimages
+                  CALL dbcsr_copy(matrix_ks_aux_fit_hfx_kp(2, img)%matrix, ks_matrix(2, img)%matrix, &
+                                  name="HF exch. part of matrix_ks_aux_fit for ADMMS")
+               END DO
+            END IF
+         END IF
+
+         !! Update energy type
+         ehfx = 0.5_dp*(ene_x_aa + ene_x_bb)
+      ELSE
+         ! ** It is easier to correct the following expression by the diagonal energy contribution,
+         ! ** than explicitly going throuhg the diagonal elements
+         DO img = 1, nkimages
+            DO pa = 1, SIZE(full_ks_alpha, 1)
+               ene_x_aa = ene_x_aa + full_ks_alpha(pa, img)*full_density_alpha(pa, img)
+            END DO
+         END DO
+         ! ** Now correct
+         ene_x_aa = (ene_x_aa + ene_x_aa_diag)*0.5_dp
+         IF (is_unrestricted) THEN
+            DO img = 1, nkimages
+               DO pa = 1, SIZE(full_ks_beta, 1)
+                  ene_x_bb = ene_x_bb + full_ks_beta(pa, img)*full_density_beta(pa, img)
+               END DO
+            END DO
+            ! ** Now correct
+            ene_x_bb = (ene_x_bb + ene_x_bb_diag)*0.5_dp
+         END IF
+         CALL mp_sum(ene_x_aa, para_env%group)
+         IF (is_unrestricted) CALL mp_sum(ene_x_bb, para_env%group)
+         ehfx = 0.5_dp*(ene_x_aa + ene_x_bb)
+      END IF
+
+      DEALLOCATE (full_density_alpha)
+
+      IF (.NOT. treat_lsd_in_core .AND. is_unrestricted) &
+         DEALLOCATE (full_density_beta)
+
+      DEALLOCATE (kind_of)
+
+      ! only the MASTER thread will print, but it shouldn't hurt to get the logger pointer here already
+      logger => cp_get_default_logger()
+
+      do_print_load_balance_info = BTEST(cp_print_key_should_output(logger%iter_info, hfx_section, &
+                                                                    "LOAD_BALANCE%PRINT/LOAD_BALANCE_INFO"), cp_p_file)
+      IF (do_print_load_balance_info) THEN
+         iw = cp_print_key_unit_nr(logger, hfx_section, "LOAD_BALANCE%PRINT/LOAD_BALANCE_INFO", &
+                                   extension=".scfLog")
+
+         CALL collect_load_balance_info(para_env, x_data(irep, :), iw, n_threads, hfx_do_eval_energy)
+
+         CALL cp_print_key_finished_output(iw, logger, hfx_section, "LOAD_BALANCE%PRINT/LOAD_BALANCE_INFO")
+      END IF
+
+      ! Print some memeory information if this was the first step
+      IF (my_geo_change) THEN
+         tmp_stats = (/shm_neris_total, shm_nprim_ints/)
+         CALL mp_sum(tmp_stats, para_env%group)
+         shm_neris_total = tmp_stats(1)
+         shm_nprim_ints = tmp_stats(2)
+         CALL mp_max(memsize_after, para_env%group)
+
+         iw = cp_print_key_unit_nr(logger, hfx_section, "HF_INFO", extension=".scfLog")
+         CALL cp_print_key_finished_output(iw, logger, hfx_section, "HF_INFO")
+      END IF
+
+      CALL timestop(handle)
+   END SUBROUTINE integrate_four_center_kp
+
+! **************************************************************************************************
 !> \brief calculates two-electron integrals of a quartet/shell using the library
 !>      lib_int in the periodic case
 !> \param lib ...
@@ -2079,7 +3266,6 @@ CONTAINS
 !> \param zetd ...
 !> \param primitive_integrals array of primitive_integrals
 !> \param potential_parameter contains info for libint
-!> \param neighbor_cells Periodic images
 !> \param screen1 set based coefficients for near field screening
 !> \param screen2 set based coefficients for near field screening
 !> \param eps_schwarz threshold
@@ -2110,8 +3296,9 @@ CONTAINS
 !> \param ee_buffer2 ...
 !> \param ee_primitives_tmp ...
 !> \param do_periodic ...
-!> \param qcell ...
-!> \param tcell ...
+!> \param neighbor_cells_all_or_b ...
+!> \param neighbor_cells_a ...
+!> \param neighbor_cells_c ...
 !> \par History
 !>      11.2006 created [Manuel Guidon]
 !>      02.2009 completely rewritten screening part [Manuel Guidon]
@@ -2127,7 +3314,7 @@ CONTAINS
                        sphi_d_u1, sphi_d_u2, sphi_d_u3, &
                        zeta, zetb, zetc, zetd, &
                        primitive_integrals, &
-                       potential_parameter, neighbor_cells, &
+                       potential_parameter, &
                        screen1, screen2, eps_schwarz, max_contraction_val, &
                        cart_estimate, cell, neris, log10_pmax, &
                        log10_eps_schwarz, R1_pgf, R2_pgf, pgf1, pgf2, &
@@ -2138,7 +3325,9 @@ CONTAINS
                        sphi_a_ext, sphi_b_ext, sphi_c_ext, sphi_d_ext, &
                        ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp, &
                        do_periodic, &
-                       qcell, tcell)
+                       neighbor_cells_all_or_b, &
+                       neighbor_cells_a, &
+                       neighbor_cells_c)
 
       TYPE(cp_libint_t)                                  :: lib
       REAL(dp), INTENT(IN)                               :: ra(3), rb(3), rc(3), rd(3)
@@ -2153,8 +3342,6 @@ CONTAINS
       REAL(dp), DIMENSION(nsgfa, nsgfb, nsgfc, nsgfd), &
          INTENT(INOUT)                                   :: primitive_integrals
       TYPE(hfx_potential_type), INTENT(IN)               :: potential_parameter
-      TYPE(hfx_cell_type), DIMENSION(:), INTENT(IN), &
-         POINTER                                         :: neighbor_cells
       REAL(dp), INTENT(IN)                               :: screen1(2), screen2(2), eps_schwarz, &
                                                             max_contraction_val
       REAL(dp), INTENT(OUT)                              :: cart_estimate
@@ -2173,22 +3360,34 @@ CONTAINS
       REAL(dp), DIMENSION(:), INTENT(INOUT)              :: ee_work, ee_work2, ee_buffer1, &
                                                             ee_buffer2, ee_primitives_tmp
       LOGICAL, INTENT(IN)                                :: do_periodic
-      INTEGER, INTENT(IN), OPTIONAL                      :: qcell(3), tcell(3)
+      TYPE(hfx_cell_type), DIMENSION(:), INTENT(IN)      :: neighbor_cells_all_or_b
+      TYPE(hfx_cell_type), DIMENSION(:), INTENT(IN), &
+         OPTIONAL                                        :: neighbor_cells_a, neighbor_cells_c
 
       INTEGER :: ipgf, jpgf, kpgf, la, lb, lc, ld, list_ij, list_kl, lpgf, max_l, ncoa, ncob, &
          ncoc, ncod, nelements_ij, nelements_kl, nproducts, nsgfla, nsgflb, nsgflc, nsgfld, nsoa, &
          nsob, nsoc, nsod, s_offset_a, s_offset_b, s_offset_c, s_offset_d
       REAL(dp)                                           :: EtaInv, tmp_max, ZetaInv
 
-      CALL build_pair_list_pgf(npgfa, npgfb, pgf_list_ij, zeta, zetb, screen1, screen2, &
-                               pgf1, R1_pgf, log10_pmax, log10_eps_schwarz, ra, rb, &
-                               nelements_ij, &
-                               neighbor_cells, do_periodic)
+      IF (PRESENT(neighbor_cells_a) .OR. PRESENT(neighbor_cells_c)) THEN
+         CPASSERT(PRESENT(neighbor_cells_a) .AND. PRESENT(neighbor_cells_c))
 
-      CALL build_pair_list_pgf(npgfc, npgfd, pgf_list_kl, zetc, zetd, screen2, screen1, &
-                               pgf2, R2_pgf, log10_pmax, log10_eps_schwarz, rc, rd, &
-                               nelements_kl, &
-                               neighbor_cells, do_periodic)
+         CALL build_pair_list_pgf(npgfa, npgfb, pgf_list_ij, zeta, zetb, screen1, screen2, &
+                                  pgf1, R1_pgf, log10_pmax, log10_eps_schwarz, ra, rb, &
+                                  nelements_ij, neighbor_cells_a, do_periodic)
+
+         CALL build_pair_list_pgf(npgfc, npgfd, pgf_list_kl, zetc, zetd, screen2, screen1, &
+                                  pgf2, R2_pgf, log10_pmax, log10_eps_schwarz, rc, rd, &
+                                  nelements_kl, neighbor_cells_c, do_periodic)
+      ELSE
+         CALL build_pair_list_pgf(npgfa, npgfb, pgf_list_ij, zeta, zetb, screen1, screen2, &
+                                  pgf1, R1_pgf, log10_pmax, log10_eps_schwarz, ra, rb, &
+                                  nelements_ij, neighbor_cells_all_or_b, do_periodic)
+
+         CALL build_pair_list_pgf(npgfc, npgfd, pgf_list_kl, zetc, zetd, screen2, screen1, &
+                                  pgf2, R2_pgf, log10_pmax, log10_eps_schwarz, rc, rd, &
+                                  nelements_kl, neighbor_cells_all_or_b, do_periodic)
+      END IF
 
       cart_estimate = 0.0_dp
       neris = 0
@@ -2205,8 +3404,8 @@ CONTAINS
             lpgf = pgf_list_kl(list_kl)%jpgf
 
             CALL build_pgf_product_list(pgf_list_ij(list_ij), pgf_list_kl(list_kl), pgf_product_list, &
-                                        nproducts, log10_pmax, log10_eps_schwarz, neighbor_cells, cell, &
-                                        potential_parameter, max_l, do_periodic, tcell, qcell)
+                                        nproducts, log10_pmax, log10_eps_schwarz, neighbor_cells_all_or_b, &
+                                        cell, potential_parameter, max_l, do_periodic)
 
             s_offset_a = 0
             DO la = la_min, la_max
@@ -2296,8 +3495,14 @@ CONTAINS
 !> \param md_max Size of matrix blocks
 !> \param fac multiplication factor (spin)
 !> \param symm_fac multiplication factor (symmetry)
-!> \param density upper triangular density matrix
-!> \param ks upper triangular fock matrix
+!> \param density_bd upper triangular density matrix
+!> \param density_bc ...
+!> \param density_ad ...
+!> \param density_ac ...
+!> \param ks_bd upper triangular fock matrix
+!> \param ks_bc ...
+!> \param ks_ad ...
+!> \param ks_ac ...
 !> \param prim primitive integrals
 !> \param pbd buffer that will contain P(b,d)
 !> \param pbc buffer that will contain P(b,c)
@@ -2323,23 +3528,29 @@ CONTAINS
 !> \param atomic_offset_bc ...
 !> \param atomic_offset_ad ...
 !> \param atomic_offset_ac ...
+!> \param antisymmetric ...
 !> \par History
 !>      03.2009 created [Manuel Guidon]
 !> \author Manuel Guidon
 ! **************************************************************************************************
 
    SUBROUTINE update_fock_matrix(ma_max, mb_max, mc_max, md_max, &
-                                 fac, symm_fac, density, ks, prim, &
-                                 pbd, pbc, pad, pac, kbd, kbc, kad, kac, &
+                                 fac, symm_fac, &
+                                 density_bd, density_bc, density_ad, density_ac, &
+                                 ks_bd, ks_bc, ks_ad, ks_ac, &
+                                 prim, &
+                                 pbd, pbc, pad, pac, &
+                                 kbd, kbc, kad, kac, &
                                  iatom, jatom, katom, latom, &
                                  iset, jset, kset, lset, offset_bd_set, offset_bc_set, offset_ad_set, &
                                  offset_ac_set, atomic_offset_bd, atomic_offset_bc, atomic_offset_ad, &
-                                 atomic_offset_ac)
+                                 atomic_offset_ac, antisymmetric)
 
       INTEGER, INTENT(IN)                                :: ma_max, mb_max, mc_max, md_max
       REAL(dp), INTENT(IN)                               :: fac, symm_fac
-      REAL(dp), DIMENSION(:), INTENT(IN)                 :: density
-      REAL(dp), DIMENSION(:), INTENT(INOUT)              :: ks
+      REAL(dp), DIMENSION(:), INTENT(IN)                 :: density_bd, density_bc, density_ad, &
+                                                            density_ac
+      REAL(dp), DIMENSION(:), INTENT(INOUT)              :: ks_bd, ks_bc, ks_ad, ks_ac
       REAL(dp), DIMENSION(ma_max*mb_max*mc_max*md_max), &
          INTENT(IN)                                      :: prim
       REAL(dp), DIMENSION(*), INTENT(INOUT)              :: pbd, pbc, pad, pac, kbd, kbc, kad, kac
@@ -2349,9 +3560,19 @@ CONTAINS
                                                             offset_ad_set, offset_ac_set
       INTEGER, INTENT(IN)                                :: atomic_offset_bd, atomic_offset_bc, &
                                                             atomic_offset_ad, atomic_offset_ac
+      LOGICAL, OPTIONAL                                  :: antisymmetric
 
       INTEGER                                            :: i, j, ma, mb, mc, md, offset_ac, &
                                                             offset_ad, offset_bc, offset_bd
+      REAL(dp)                                           :: as_sign
+
+      as_sign = 1.0_dp
+
+      IF (PRESENT(antisymmetric)) THEN
+         IF (antisymmetric) THEN
+            as_sign = -1.0_dp
+         END IF
+      END IF
 
       IF (jatom >= latom) THEN
          i = 1
@@ -2359,7 +3580,7 @@ CONTAINS
          j = offset_bd
          DO md = 1, md_max
             DO mb = 1, mb_max
-               pbd(i) = density(j)
+               pbd(i) = density_bd(j)
                i = i + 1
                j = j + 1
             END DO
@@ -2370,7 +3591,7 @@ CONTAINS
          DO md = 1, md_max
             j = offset_bd + md - 1
             DO mb = 1, mb_max
-               pbd(i) = density(j)
+               pbd(i) = density_bd(j)*as_sign
                i = i + 1
                j = j + md_max
             END DO
@@ -2382,7 +3603,7 @@ CONTAINS
          j = offset_bc
          DO mc = 1, mc_max
             DO mb = 1, mb_max
-               pbc(i) = density(j)
+               pbc(i) = density_bc(j)
                i = i + 1
                j = j + 1
             END DO
@@ -2393,7 +3614,7 @@ CONTAINS
          DO mc = 1, mc_max
             j = offset_bc + mc - 1
             DO mb = 1, mb_max
-               pbc(i) = density(j)
+               pbc(i) = density_bc(j)*as_sign
                i = i + 1
                j = j + mc_max
             END DO
@@ -2405,7 +3626,7 @@ CONTAINS
          j = offset_ad
          DO md = 1, md_max
             DO ma = 1, ma_max
-               pad(i) = density(j)
+               pad(i) = density_ad(j)
                i = i + 1
                j = j + 1
             END DO
@@ -2416,7 +3637,7 @@ CONTAINS
          DO md = 1, md_max
             j = offset_ad + md - 1
             DO ma = 1, ma_max
-               pad(i) = density(j)
+               pad(i) = density_ad(j)*as_sign
                i = i + 1
                j = j + md_max
             END DO
@@ -2428,7 +3649,7 @@ CONTAINS
          j = offset_ac
          DO mc = 1, mc_max
             DO ma = 1, ma_max
-               pac(i) = density(j)
+               pac(i) = density_ac(j)
                i = i + 1
                j = j + 1
             END DO
@@ -2439,7 +3660,7 @@ CONTAINS
          DO mc = 1, mc_max
             j = offset_ac + mc - 1
             DO ma = 1, ma_max
-               pac(i) = density(j)
+               pac(i) = density_ac(j)*as_sign
                i = i + 1
                j = j + mc_max
             END DO
@@ -2447,13 +3668,14 @@ CONTAINS
       END IF
 
       CALL contract_block(ma_max, mb_max, mc_max, md_max, kbd, kbc, kad, kac, pbd, pbc, pad, pac, prim, fac*symm_fac)
+
       IF (jatom >= latom) THEN
          i = 1
          j = offset_bd
          DO md = 1, md_max
             DO mb = 1, mb_max
 !$OMP           ATOMIC
-               ks(j) = ks(j) + kbd(i)
+               ks_bd(j) = ks_bd(j) + kbd(i)
                i = i + 1
                j = j + 1
             END DO
@@ -2464,7 +3686,7 @@ CONTAINS
             j = offset_bd + md - 1
             DO mb = 1, mb_max
 !$OMP           ATOMIC
-               ks(j) = ks(j) + kbd(i)
+               ks_bd(j) = ks_bd(j) + kbd(i)*as_sign
                i = i + 1
                j = j + md_max
             END DO
@@ -2476,7 +3698,7 @@ CONTAINS
          DO mc = 1, mc_max
             DO mb = 1, mb_max
 !$OMP           ATOMIC
-               ks(j) = ks(j) + kbc(i)
+               ks_bc(j) = ks_bc(j) + kbc(i)
                i = i + 1
                j = j + 1
             END DO
@@ -2487,7 +3709,7 @@ CONTAINS
             j = offset_bc + mc - 1
             DO mb = 1, mb_max
 !$OMP           ATOMIC
-               ks(j) = ks(j) + kbc(i)
+               ks_bc(j) = ks_bc(j) + kbc(i)*as_sign
                i = i + 1
                j = j + mc_max
             END DO
@@ -2499,7 +3721,7 @@ CONTAINS
          DO md = 1, md_max
             DO ma = 1, ma_max
 !$OMP           ATOMIC
-               ks(j) = ks(j) + kad(i)
+               ks_ad(j) = ks_ad(j) + kad(i)
                i = i + 1
                j = j + 1
             END DO
@@ -2510,7 +3732,7 @@ CONTAINS
             j = offset_ad + md - 1
             DO ma = 1, ma_max
 !$OMP           ATOMIC
-               ks(j) = ks(j) + kad(i)
+               ks_ad(j) = ks_ad(j) + kad(i)*as_sign
                i = i + 1
                j = j + md_max
             END DO
@@ -2522,7 +3744,7 @@ CONTAINS
          DO mc = 1, mc_max
             DO ma = 1, ma_max
 !$OMP           ATOMIC
-               ks(j) = ks(j) + kac(i)
+               ks_ac(j) = ks_ac(j) + kac(i)
                i = i + 1
                j = j + 1
             END DO
@@ -2533,7 +3755,7 @@ CONTAINS
             j = offset_ac + mc - 1
             DO ma = 1, ma_max
 !$OMP           ATOMIC
-               ks(j) = ks(j) + kac(i)
+               ks_ac(j) = ks_ac(j) + kac(i)*as_sign
                i = i + 1
                j = j + mc_max
             END DO
@@ -2542,24 +3764,18 @@ CONTAINS
    END SUBROUTINE update_fock_matrix
 
 ! **************************************************************************************************
-!> \brief ...
+!> \brief Contract a block of density matrix elements and primitive integrals for the Fock matrix.
 !> \param ma_max ...
 !> \param mb_max ...
 !> \param mc_max ...
 !> \param md_max ...
-!> \param fac ...
+!> \param frac ...
 !> \param symm_fac ...
 !> \param density ...
 !> \param ks ...
 !> \param prim ...
-!> \param pbd ...
-!> \param pbc ...
-!> \param pad ...
-!> \param pac ...
-!> \param kbd ...
-!> \param kbc ...
-!> \param kad ...
-!> \param kac ...
+!> \param p_bc ...
+!> \param k_ad ...
 !> \param iatom ...
 !> \param jatom ...
 !> \param katom ...
@@ -2568,230 +3784,105 @@ CONTAINS
 !> \param jset ...
 !> \param kset ...
 !> \param lset ...
-!> \param offset_bd_set ...
 !> \param offset_bc_set ...
 !> \param offset_ad_set ...
-!> \param offset_ac_set ...
-!> \param atomic_offset_bd ...
 !> \param atomic_offset_bc ...
 !> \param atomic_offset_ad ...
-!> \param atomic_offset_ac ...
+!> \param antisymmetric ...
 ! **************************************************************************************************
-   SUBROUTINE update_fock_matrix_as(ma_max, mb_max, mc_max, md_max, &
-                                    fac, symm_fac, density, ks, prim, &
-                                    pbd, pbc, pad, pac, kbd, kbc, kad, kac, &
+   SUBROUTINE update_fock_matrix_kp(ma_max, mb_max, mc_max, md_max, &
+                                    frac, symm_fac, density, ks, prim, &
+                                    p_bc, k_ad, &
                                     iatom, jatom, katom, latom, &
-                                    iset, jset, kset, lset, offset_bd_set, offset_bc_set, offset_ad_set, &
-                                    offset_ac_set, atomic_offset_bd, atomic_offset_bc, atomic_offset_ad, &
-                                    atomic_offset_ac)
+                                    iset, jset, kset, lset, &
+                                    offset_bc_set, offset_ad_set, &
+                                    atomic_offset_bc, atomic_offset_ad, &
+                                    antisymmetric)
 
       INTEGER, INTENT(IN)                                :: ma_max, mb_max, mc_max, md_max
-      REAL(dp), INTENT(IN)                               :: fac, symm_fac
+      REAL(dp), INTENT(IN)                               :: frac, symm_fac
       REAL(dp), DIMENSION(:), INTENT(IN)                 :: density
       REAL(dp), DIMENSION(:), INTENT(INOUT)              :: ks
       REAL(dp), DIMENSION(ma_max*mb_max*mc_max*md_max), &
          INTENT(IN)                                      :: prim
-      REAL(dp), DIMENSION(*), INTENT(INOUT)              :: pbd, pbc, pad, pac, kbd, kbc, kad, kac
+      REAL(dp), DIMENSION(:), INTENT(INOUT)              :: p_bc, k_ad
       INTEGER, INTENT(IN)                                :: iatom, jatom, katom, latom, iset, jset, &
                                                             kset, lset
-      INTEGER, DIMENSION(:, :), POINTER                  :: offset_bd_set, offset_bc_set, &
-                                                            offset_ad_set, offset_ac_set
-      INTEGER, INTENT(IN)                                :: atomic_offset_bd, atomic_offset_bc, &
-                                                            atomic_offset_ad, atomic_offset_ac
+      INTEGER, DIMENSION(:, :), POINTER                  :: offset_bc_set, offset_ad_set
+      INTEGER, INTENT(IN)                                :: atomic_offset_bc, atomic_offset_ad
+      LOGICAL, OPTIONAL                                  :: antisymmetric
 
-      INTEGER                                            :: i, j, ma, mb, mc, md, offset_ac, &
-                                                            offset_ad, offset_bc, offset_bd
+      INTEGER                                            :: i, j, ma, mb, mc, md, p_idx
+      REAL(dp)                                           :: as_sign
 
-      IF (jatom >= latom) THEN
-         i = 1
-         offset_bd = offset_bd_set(jset, lset) + atomic_offset_bd - 1
-         j = offset_bd
-         DO md = 1, md_max
-            DO mb = 1, mb_max
-               pbd(i) = +density(j)
-               i = i + 1
-               j = j + 1
-            END DO
-         END DO
-      ELSE
-         i = 1
-         offset_bd = offset_bd_set(lset, jset) + atomic_offset_bd - 1
-         DO md = 1, md_max
-            j = offset_bd + md - 1
-            DO mb = 1, mb_max
-               pbd(i) = -density(j)
-               i = i + 1
-               j = j + md_max
-            END DO
-         END DO
+      as_sign = 1.0_dp
+
+      IF (PRESENT(antisymmetric)) THEN
+         IF (antisymmetric) THEN
+            as_sign = -1.0_dp
+         END IF
       END IF
+
       IF (jatom >= katom) THEN
          i = 1
-         offset_bc = offset_bc_set(jset, kset) + atomic_offset_bc - 1
-         j = offset_bc
+         j = offset_bc_set(jset, kset) + atomic_offset_bc - 1
          DO mc = 1, mc_max
             DO mb = 1, mb_max
-               pbc(i) = -density(j)
+               p_bc(i) = density(j)
                i = i + 1
                j = j + 1
             END DO
          END DO
       ELSE
          i = 1
-         offset_bc = offset_bc_set(kset, jset) + atomic_offset_bc - 1
          DO mc = 1, mc_max
-            j = offset_bc + mc - 1
+            j = offset_bc_set(kset, jset) + atomic_offset_bc - 1 + mc - 1
             DO mb = 1, mb_max
-               pbc(i) = density(j)
+               p_bc(i) = density(j)*as_sign
                i = i + 1
                j = j + mc_max
             END DO
          END DO
       END IF
+
+      k_ad(1:ma_max*md_max) = 0.0_dp
+
+      p_idx = 0
+      DO md = 1, md_max
+         DO mc = 1, mc_max
+            DO mb = 1, mb_max
+               DO ma = 1, ma_max
+                  p_idx = p_idx + 1
+                  k_ad((md - 1)*ma_max + ma) = k_ad((md - 1)*ma_max + ma) - frac*symm_fac*prim(p_idx)*p_bc((mc - 1)*mb_max + mb)
+               END DO
+            END DO
+         END DO
+      END DO
+
       IF (iatom >= latom) THEN
          i = 1
-         offset_ad = offset_ad_set(iset, lset) + atomic_offset_ad - 1
-         j = offset_ad
+         j = offset_ad_set(iset, lset) + atomic_offset_ad - 1
          DO md = 1, md_max
             DO ma = 1, ma_max
-               pad(i) = -density(j)
+!$OMP           ATOMIC
+               ks(j) = ks(j) + k_ad(i)
                i = i + 1
                j = j + 1
             END DO
          END DO
       ELSE
          i = 1
-         offset_ad = offset_ad_set(lset, iset) + atomic_offset_ad - 1
          DO md = 1, md_max
-            j = offset_ad + md - 1
+            j = offset_ad_set(lset, iset) + atomic_offset_ad - 1 + md - 1
             DO ma = 1, ma_max
-               pad(i) = density(j)
+!$OMP           ATOMIC
+               ks(j) = ks(j) + k_ad(i)*as_sign
                i = i + 1
                j = j + md_max
             END DO
          END DO
       END IF
-      IF (iatom >= katom) THEN
-         i = 1
-         offset_ac = offset_ac_set(iset, kset) + atomic_offset_ac - 1
-         j = offset_ac
-         DO mc = 1, mc_max
-            DO ma = 1, ma_max
-               pac(i) = +density(j)
-               i = i + 1
-               j = j + 1
-            END DO
-         END DO
-      ELSE
-         i = 1
-         offset_ac = offset_ac_set(kset, iset) + atomic_offset_ac - 1
-         DO mc = 1, mc_max
-            j = offset_ac + mc - 1
-            DO ma = 1, ma_max
-               pac(i) = -density(j)
-               i = i + 1
-               j = j + mc_max
-            END DO
-         END DO
-      END IF
-
-      CALL contract_block(ma_max, mb_max, mc_max, md_max, kbd, kbc, kad, kac, pbd, pbc, pad, pac, prim, fac*symm_fac)
-
-      IF (jatom >= latom) THEN
-         i = 1
-         j = offset_bd
-         DO md = 1, md_max
-            DO mb = 1, mb_max
-!$OMP           ATOMIC
-               ks(j) = ks(j) + kbd(i)
-               i = i + 1
-               j = j + 1
-            END DO
-         END DO
-      ELSE
-         i = 1
-         DO md = 1, md_max
-            j = offset_bd + md - 1
-            DO mb = 1, mb_max
-!$OMP           ATOMIC
-               ks(j) = ks(j) - kbd(i)
-               i = i + 1
-               j = j + md_max
-            END DO
-         END DO
-      END IF
-      IF (jatom >= katom) THEN
-         i = 1
-         j = offset_bc
-         DO mc = 1, mc_max
-            DO mb = 1, mb_max
-!$OMP           ATOMIC
-               ks(j) = ks(j) - kbc(i)
-               i = i + 1
-               j = j + 1
-            END DO
-         END DO
-      ELSE
-         i = 1
-         DO mc = 1, mc_max
-            j = offset_bc + mc - 1
-            DO mb = 1, mb_max
-!$OMP           ATOMIC
-               ks(j) = ks(j) + kbc(i)
-               i = i + 1
-               j = j + mc_max
-            END DO
-         END DO
-      END IF
-      IF (iatom >= latom) THEN
-         i = 1
-         j = offset_ad
-         DO md = 1, md_max
-            DO ma = 1, ma_max
-!$OMP           ATOMIC
-               ks(j) = ks(j) - kad(i)
-               i = i + 1
-               j = j + 1
-            END DO
-         END DO
-      ELSE
-         i = 1
-         DO md = 1, md_max
-            j = offset_ad + md - 1
-            DO ma = 1, ma_max
-!$OMP           ATOMIC
-               ks(j) = ks(j) + kad(i)
-               i = i + 1
-               j = j + md_max
-            END DO
-         END DO
-      END IF
-! XXXXXXXXXXXXXXXXXXXXXXXX
-      IF (iatom >= katom) THEN
-         i = 1
-         j = offset_ac
-         DO mc = 1, mc_max
-            DO ma = 1, ma_max
-!$OMP           ATOMIC
-               ks(j) = ks(j) + kac(i)
-               i = i + 1
-               j = j + 1
-            END DO
-         END DO
-      ELSE
-         i = 1
-         DO mc = 1, mc_max
-            j = offset_ac + mc - 1
-            DO ma = 1, ma_max
-!$OMP           ATOMIC
-               ks(j) = ks(j) - kac(i)
-               i = i + 1
-               j = j + mc_max
-            END DO
-         END DO
-      END IF
-
-   END SUBROUTINE update_fock_matrix_as
+   END SUBROUTINE update_fock_matrix_kp
 
 ! **************************************************************************************************
 !> \brief ...
@@ -2813,8 +3904,8 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE print_integrals(i, j, k, l, set_offsets, atom_offsets, iset, jset, kset, lset, ma_max, mb_max, mc_max, md_max, prim)
       INTEGER                                            :: i, j, k, l
-      INTEGER, DIMENSION(:, :, :, :), POINTER            :: set_offsets
-      INTEGER, DIMENSION(:, :), POINTER                  :: atom_offsets
+      INTEGER, DIMENSION(:, :, :, :)                     :: set_offsets
+      INTEGER, DIMENSION(:, :)                           :: atom_offsets
       INTEGER                                            :: iset, jset, kset, lset, ma_max, mb_max, &
                                                             mc_max, md_max
       REAL(dp), DIMENSION(ma_max*mb_max*mc_max*md_max), &
@@ -2841,6 +3932,60 @@ CONTAINS
       END DO
 
    END SUBROUTINE print_integrals
+
+! **************************************************************************************************
+!> \brief ...
+!> \param i ...
+!> \param j ...
+!> \param k ...
+!> \param l ...
+!> \param nb_a ...
+!> \param nb_b ...
+!> \param nb_c ...
+!> \param set_offsets ...
+!> \param atom_offsets ...
+!> \param iset ...
+!> \param jset ...
+!> \param kset ...
+!> \param lset ...
+!> \param ma_max ...
+!> \param mb_max ...
+!> \param mc_max ...
+!> \param md_max ...
+!> \param prim ...
+! **************************************************************************************************
+   SUBROUTINE print_integrals_kp(i, j, k, l, nb_a, nb_b, nb_c, &
+                                 set_offsets, atom_offsets, iset, jset, kset, lset, ma_max, mb_max, mc_max, md_max, prim)
+      INTEGER                                            :: i, j, k, l, nb_a, nb_b, nb_c
+      INTEGER, DIMENSION(:, :, :, :)                     :: set_offsets
+      INTEGER, DIMENSION(:, :)                           :: atom_offsets
+      INTEGER                                            :: iset, jset, kset, lset, ma_max, mb_max, &
+                                                            mc_max, md_max
+      REAL(dp), DIMENSION(ma_max*mb_max*mc_max*md_max), &
+         INTENT(IN)                                      :: prim
+
+      INTEGER                                            :: iint, ma, mb, mc, md
+
+      iint = 0
+      DO md = 1, md_max
+         DO mc = 1, mc_max
+            DO mb = 1, mb_max
+               DO ma = 1, ma_max
+                  iint = iint + 1
+                  IF (ABS(prim(iint)) < 1e-9_dp) CYCLE
+                  WRITE (99, *) &
+                     nb_a, nb_b, nb_c, &
+                     atom_offsets(i, 1) + ma + set_offsets(iset, 1, i, 1) - 1, &
+                     atom_offsets(j, 1) + ma + set_offsets(jset, 1, j, 1) - 1, &
+                     atom_offsets(k, 1) + ma + set_offsets(kset, 1, k, 1) - 1, &
+                     atom_offsets(l, 1) + ma + set_offsets(lset, 1, l, 1) - 1, &
+                     prim(iint)
+               END DO
+            END DO
+         END DO
+      END DO
+
+   END SUBROUTINE print_integrals_kp
 
 #include "hfx_get_pmax_val.f90"
 END MODULE hfx_energy_potential

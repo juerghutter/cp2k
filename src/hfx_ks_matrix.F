@@ -24,7 +24,8 @@ MODULE hfx_ks_matrix
                                               dbcsr_p_type,&
                                               dbcsr_set
    USE hfx_derivatives,                 ONLY: derivatives_four_center
-   USE hfx_energy_potential,            ONLY: integrate_four_center
+   USE hfx_energy_potential,            ONLY: integrate_four_center,&
+                                              integrate_four_center_kp
    USE hfx_pw_methods,                  ONLY: pw_hfx,&
                                               pw_hfx_kp
    USE hfx_ri,                          ONLY: hfx_ri_update_ks
@@ -523,9 +524,9 @@ CONTAINS
             END IF
          ELSE
             DO ispin = 1, mspin
-               CALL integrate_four_center(qs_env, x_data, matrix_ks_orb, eh1, rho_ao_orb, hfx_sections, &
-                                          para_env, s_mstruct_changed, irep, distribute_fock_matrix, &
-                                          ispin=ispin)
+               CALL integrate_four_center_kp(qs_env, x_data, matrix_ks_orb, eh1, rho_ao_orb, hfx_sections, &
+                                             para_env, s_mstruct_changed, irep, distribute_fock_matrix, &
+                                             ispin=ispin)
                ehfx = ehfx + eh1
             END DO
          ENDIF
@@ -573,8 +574,8 @@ CONTAINS
          virial%pv_calculate = .FALSE.
       ENDIF
 
-      !update the hfx aux_fit matrixIF (dft_control%do_admm) THEN
-      IF (dft_control%do_admm .AND. x_data(irep, 1)%do_hfx_ri) THEN
+      !update the hfx aux_fit matrix
+      IF (dft_control%do_admm) THEN
          DO ispin = 1, nspins
             DO img = 1, nimages
                CALL dbcsr_add(matrix_ks_aux_fit_hfx_kp(ispin, img)%matrix, matrix_ks_aux_fit_kp(ispin, img)%matrix, &

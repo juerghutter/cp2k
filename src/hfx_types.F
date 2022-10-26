@@ -313,7 +313,7 @@ MODULE hfx_types
       REAL(dp)                                 :: P(3)
       REAL(dp)                                 :: R
       REAL(dp)                                 :: pgf_max
-      INTEGER                                  :: bcell(3)
+      INTEGER                                  :: S
    END TYPE
 
 ! **************************************************************************************************
