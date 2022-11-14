@@ -2642,7 +2642,7 @@ CONTAINS
       ! Ignore the binning for the KP-case in favour of parallelising over target KS images.
       ! Each rank and thread start at a different point and advance by the number of ranks*threads.
       ! An atom_block identifies a KS image and blocks in the i,j, k and l list.
-      DO atom_block = para_env%mepos*n_threads + i_thread, INT(nkimages, KIND=int_8)*nblocks**4 - 1, n_processes
+      DO atom_block = para_env%mepos*n_threads + i_thread, INT(nneighbors, KIND=int_8)*nblocks**4 - 1, n_processes
          tmp_block = atom_block
 
          latom_block = INT(MODULO(tmp_block, nblocks)) + 1
@@ -2654,8 +2654,8 @@ CONTAINS
          tmp_block = tmp_block/nblocks
          iatom_block = INT(MODULO(tmp_block, nblocks)) + 1
 
-         nb_c = INT(MODULO(tmp_block, INT(nkimages, KIND=int_8))) + 1
-         tmp_block = atom_block/nkimages
+         nb_c = INT(MODULO(tmp_block, INT(nneighbors, KIND=int_8))) + 1
+         tmp_block = atom_block/nneighbors
 
          iatom_start = shm_master_x_data%blocks(iatom_block)%istart
          iatom_end = shm_master_x_data%blocks(iatom_block)%iend
