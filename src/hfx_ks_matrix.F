@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2023 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -377,7 +377,7 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       INTEGER                                            :: handle, ikind, img, irep, ispin, mspin, &
-                                                            n_rep_hf, nimages, ns, nspins
+                                                            n_rep_hf, nimages, nspins
       LOGICAL                                            :: distribute_fock_matrix, &
                                                             do_adiabatic_rescaling, &
                                                             hfx_treat_lsd_in_core, &
@@ -387,8 +387,7 @@ CONTAINS
       TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks_aux_fit_im, matrix_ks_im, &
                                                             rho_ao_resp
-      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_h, matrix_ks_1d, &
-                                                            matrix_ks_aux_fit_hfx_kp, &
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_h, matrix_ks_aux_fit_hfx_kp, &
                                                             matrix_ks_aux_fit_kp, matrix_ks_orb, &
                                                             rho_ao_orb
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -489,12 +488,8 @@ CONTAINS
 
          ! fetch the correct matrices for normal HFX or ADMM
          IF (dft_control%do_admm) THEN
-            CALL get_qs_env(qs_env=qs_env, matrix_ks_aux_fit_kp=matrix_ks_1d, &
+            CALL get_qs_env(qs_env=qs_env, matrix_ks_aux_fit_kp=matrix_ks_orb, &
                             rho_aux_fit=rho_orb)
-            DO img = 1, nimages
-               ns = SIZE(matrix_ks_1d(:, img))
-               matrix_ks_orb(1:ns, img:img) => matrix_ks_1d(1:ns, img)
-            END DO
          ELSE
             CALL get_qs_env(qs_env=qs_env, matrix_ks_kp=matrix_ks_orb, rho=rho_orb)
          END IF
