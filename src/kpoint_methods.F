@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2023 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -48,7 +48,8 @@ MODULE kpoint_methods
         dbcsr_copy, dbcsr_create, dbcsr_deallocate_matrix, dbcsr_distribution_get, &
         dbcsr_distribution_type, dbcsr_get_block_p, dbcsr_get_info, dbcsr_iterator_blocks_left, &
         dbcsr_iterator_next_block, dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, &
-        dbcsr_p_type, dbcsr_set, dbcsr_type, dbcsr_type_antisymmetric, dbcsr_type_symmetric
+        dbcsr_p_type, dbcsr_set, dbcsr_type, dbcsr_type_antisymmetric, dbcsr_type_no_symmetry, &
+        dbcsr_type_symmetric
    USE fermi_utils,                     ONLY: fermikp,&
                                               fermikp2
    USE input_constants,                 ONLY: smear_fermi_dirac
@@ -1109,7 +1110,8 @@ CONTAINS
       INTEGER                                            :: handle, ic, ik, ikk, indx, is, ispin, &
                                                             nc, nimg, nkp, nspin
       INTEGER, DIMENSION(:, :, :), POINTER               :: cell_to_index
-      LOGICAL                                            :: aux_fit, my_kpgrp, real_only
+      LOGICAL                                            :: aux_fit, do_symmetric, my_kpgrp, &
+                                                            real_only
       REAL(KIND=dp)                                      :: wkpx
       REAL(KIND=dp), DIMENSION(:), POINTER               :: wkp
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: xkp
@@ -1121,6 +1123,8 @@ CONTAINS
       TYPE(kpoint_sym_type), POINTER                     :: kpsym
 
       CALL timeset(routineN, handle)
+
+      CALL get_neighbor_list_set_p(neighbor_list_sets=sab_nl, symmetric=do_symmetric)
 
       IF (PRESENT(for_aux_fit)) THEN
          aux_fit = for_aux_fit
@@ -1134,10 +1138,12 @@ CONTAINS
 
       ! work storage
       ALLOCATE (rpmat)
-      CALL dbcsr_create(rpmat, template=tempmat, matrix_type=dbcsr_type_symmetric)
+      CALL dbcsr_create(rpmat, template=tempmat, &
+                        matrix_type=MERGE(dbcsr_type_symmetric, dbcsr_type_no_symmetry, do_symmetric))
       CALL cp_dbcsr_alloc_block_from_nbl(rpmat, sab_nl)
       ALLOCATE (cpmat)
-      CALL dbcsr_create(cpmat, template=tempmat, matrix_type=dbcsr_type_antisymmetric)
+      CALL dbcsr_create(cpmat, template=tempmat, &
+                        matrix_type=MERGE(dbcsr_type_antisymmetric, dbcsr_type_no_symmetry, do_symmetric))
       CALL cp_dbcsr_alloc_block_from_nbl(cpmat, sab_nl)
       IF (.NOT. kpoint%full_grid) THEN
          ALLOCATE (srpmat)
@@ -1149,7 +1155,7 @@ CONTAINS
       END IF
 
       CALL get_kpoint_info(kpoint, nkp=nkp, xkp=xkp, wkp=wkp, &
-                           sab_nl=sab_nl, cell_to_index=cell_to_index)
+                           cell_to_index=cell_to_index)
       ! initialize real space density matrices
       IF (aux_fit) THEN
          kp => kpoint%kp_aux_env(1)%kpoint_env
@@ -1343,6 +1349,8 @@ CONTAINS
             fc = 1.0_dp
          END IF
          icell = cell_to_index(cell(1), cell(2), cell(3))
+         CPASSERT(icell > 0)
+
          arg = REAL(cell(1), dp)*xkp(1) + REAL(cell(2), dp)*xkp(2) + REAL(cell(3), dp)*xkp(3)
          coskl = wkp*COS(twopi*arg)
          sinkl = wkp*fc*SIN(twopi*arg)

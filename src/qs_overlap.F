@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2023 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -372,6 +372,7 @@ CONTAINS
 
          IF (use_cell_mapping) THEN
             ic = cell_to_index(cell(1), cell(2), cell(3))
+            IF (.NOT. do_symmetric .AND. ic < 1) ic = cell_to_index(-cell(1), -cell(2), -cell(3))
             CPASSERT(ic > 0)
          ELSE
             ic = 1
@@ -1154,4 +1155,3 @@ CONTAINS
    END SUBROUTINE create_sab_matrix_2d
 
 END MODULE qs_overlap
-

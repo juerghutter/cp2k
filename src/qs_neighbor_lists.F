@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2022 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2023 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -656,7 +656,7 @@ CONTAINS
                   CALL pair_radius_setup(aux_fit_present, aux_fit_present, &
                                          aux_fit_radius, aux_fit_radius, &
                                          aux_pair_radius)
-                  pair_radius = MAX(pair_radius, aux_pair_radius)
+                  pair_radius(:, :) = MAX(pair_radius(:, :), aux_pair_radius(:, :))
                END BLOCK
             END IF
 
