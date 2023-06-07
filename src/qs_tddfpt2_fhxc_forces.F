@@ -273,7 +273,8 @@ CONTAINS
                                           qs_kind_set, dft_control, para_env)
          IF (gapw) THEN
             CALL get_qs_env(qs_env, natom=natom)
-            CALL init_rho0(local_rho_set, qs_env, dft_control%qs_control%gapw_control, .TRUE.)
+            CALL init_rho0(local_rho_set, qs_env, dft_control%qs_control%gapw_control, &
+                           zcore=0.0_dp)
             CALL rho0_s_grid_create(pw_env, local_rho_set%rho0_mpole)
             CALL hartree_local_create(hartree_local)
             CALL init_coulomb_local(hartree_local, natom)
@@ -425,7 +426,7 @@ CONTAINS
          END IF
          IF (gapw) THEN
             IF (debug_forces) fodeb(1:3) = force(1)%g0s_Vh_elec(1:3, 1)
-            CALL Vh_1c_gg_integrals(qs_env, eh1c, hartree_local%ecoul_1c, local_rho_set, para_env, tddft=.TRUE.)
+            CALL Vh_1c_gg_integrals(qs_env, eh1c, hartree_local%ecoul_1c, local_rho_set)
             CALL integrate_vhg0_rspace(qs_env, xv_hartree_rspace, para_env, calculate_forces=.TRUE., &
                                        local_rho_set=local_rho_set)
             IF (debug_forces) THEN

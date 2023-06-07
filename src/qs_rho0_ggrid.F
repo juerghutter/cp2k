@@ -312,14 +312,16 @@ CONTAINS
 !> \param para_env ...
 !> \param calculate_forces ...
 !> \param local_rho_set ...
+!> \param local_int_set ...
 ! **************************************************************************************************
-   SUBROUTINE integrate_vhg0_rspace(qs_env, v_rspace, para_env, calculate_forces, local_rho_set)
+   SUBROUTINE integrate_vhg0_rspace(qs_env, v_rspace, para_env, calculate_forces, &
+                                    local_rho_set, local_int_set)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(pw_type), INTENT(IN)                          :: v_rspace
       TYPE(mp_para_env_type), POINTER                    :: para_env
       LOGICAL, INTENT(IN)                                :: calculate_forces
-      TYPE(local_rho_type), OPTIONAL, POINTER            :: local_rho_set
+      TYPE(local_rho_type), OPTIONAL, POINTER            :: local_rho_set, local_int_set
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'integrate_vhg0_rspace'
 
@@ -357,7 +359,7 @@ CONTAINS
       TYPE(realspace_grid_type)                          :: rs_v
       TYPE(rho0_mpole_type), POINTER                     :: rho0_mpole
       TYPE(rho_atom_coeff), DIMENSION(:), POINTER        :: int_local_h, int_local_s
-      TYPE(rho_atom_type), DIMENSION(:), POINTER         :: rho_atom_set
+      TYPE(rho_atom_type), DIMENSION(:), POINTER         :: int_atom_set, rho_atom_set
       TYPE(rho_atom_type), POINTER                       :: rho_atom
       TYPE(virial_type), POINTER                         :: virial
 
@@ -368,9 +370,9 @@ CONTAINS
       ! attribute 'OPTIONAL' from the argument 'local_rho_set'.
 
       ! CPASSERT(.NOT. (calculate_forces .AND. PRESENT(local_rho_set)))
-      IF (calculate_forces .AND. PRESENT(local_rho_set)) THEN
-         CPWARN("Forces and External Density")
-      END IF
+      ! IF (calculate_forces .AND. PRESENT(local_rho_set)) THEN
+      !    CPWARN("Forces and External Density")
+      ! END IF
 
       NULLIFY (atomic_kind_set, qs_kind_set, dft_control, particle_set)
       NULLIFY (cell, force, pw_env, rho0_mpole, rho_atom_set)
@@ -381,8 +383,6 @@ CONTAINS
                       cell=cell, &
                       dft_control=dft_control, &
                       force=force, pw_env=pw_env, &
-                      rho0_mpole=rho0_mpole, &
-                      rho_atom_set=rho_atom_set, &
                       particle_set=particle_set, &
                       virial=virial)
 
@@ -403,8 +403,17 @@ CONTAINS
       !   END IF
       !END IF
 
-      IF (PRESENT(local_rho_set)) &
+      IF (PRESENT(local_rho_set)) THEN
          CALL get_local_rho(local_rho_set, rho0_mpole=rho0_mpole, rho_atom_set=rho_atom_set)
+      ELSE
+         CALL get_qs_env(qs_env=qs_env, &
+                         rho0_mpole=rho0_mpole, rho_atom_set=rho_atom_set)
+      END IF
+      IF (PRESENT(local_int_set)) THEN
+         CALL get_local_rho(local_int_set, rho_atom_set=int_atom_set)
+      ELSE
+         int_atom_set => rho_atom_set
+      END IF
 
       CALL get_rho0_mpole(rho0_mpole=rho0_mpole, lmax_0=lmax0, &
                           zet0_h=zet0, igrid_zet0_s=igrid, &
@@ -584,7 +593,6 @@ CONTAINS
 
                m1 = 0
                DO iset1 = 1, nset
-
                   m2 = 0
                   DO iset2 = 1, nset
                      CALL get_none0_cg_list(harmonics%my_CG, lmin(iset1), lmax(iset1), lmin(iset2), lmax(iset2), &
@@ -620,7 +628,7 @@ CONTAINS
                END IF
 
                IF (j == mepos) THEN
-                  rho_atom => rho_atom_set(iatom)
+                  rho_atom => int_atom_set(iatom)
                   CALL get_rho_atom(rho_atom=rho_atom, ga_Vlocal_gb_h=int_local_h, ga_Vlocal_gb_s=int_local_s)
                   DO ispin = 1, nspins
                      int_local_h(ispin)%r_coef = int_local_h(ispin)%r_coef + intloc

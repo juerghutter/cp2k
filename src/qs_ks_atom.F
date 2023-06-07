@@ -370,6 +370,7 @@ CONTAINS
                DO ispin = 1, nspins
                   NULLIFY (mat_h(ispin)%array, mat_p(ispin)%array)
 
+                  found = .FALSE.
                   IF (iatom <= jatom) THEN
                      CALL dbcsr_get_block_p(matrix=ksmat(nspins*(img - 1) + ispin)%matrix, &
                                             row=iatom, col=jatom, &
@@ -379,8 +380,10 @@ CONTAINS
                                             row=jatom, col=iatom, &
                                             BLOCK=mat_h(ispin)%array, found=found)
                   END IF
+                  CPASSERT(found)
 
                   IF (forces) THEN
+                     found = .FALSE.
                      IF (iatom <= jatom) THEN
                         CALL dbcsr_get_block_p(matrix=pmat(nspins*(img - 1) + ispin)%matrix, &
                                                row=iatom, col=jatom, &
@@ -390,6 +393,7 @@ CONTAINS
                                                row=jatom, col=iatom, &
                                                BLOCK=mat_p(ispin)%array, found=found)
                      END IF
+                     CPASSERT(found)
                   END IF
                END DO
 

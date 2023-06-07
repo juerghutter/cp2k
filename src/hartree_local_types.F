@@ -8,7 +8,6 @@
 MODULE hartree_local_types
 
    USE kinds,                           ONLY: dp
-   USE qs_rho_atom_types,               ONLY: rho_atom_coeff
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -23,7 +22,6 @@ MODULE hartree_local_types
 
 ! **************************************************************************************************
    TYPE ecoul_1center_type
-      TYPE(rho_atom_coeff), POINTER   :: Vh1_h, Vh1_s
       REAL(dp)                        :: ecoul_1_h, ecoul_1_s, &
                                          ecoul_1_z, ecoul_1_0
    END TYPE ecoul_1center_type
@@ -57,20 +55,11 @@ CONTAINS
       TYPE(ecoul_1center_type), DIMENSION(:), POINTER    :: ecoul_1c
       INTEGER, INTENT(IN)                                :: natom
 
-      INTEGER                                            :: iat
-
       IF (ASSOCIATED(ecoul_1c)) THEN
          CALL deallocate_ecoul_1center(ecoul_1c)
       END IF
 
       ALLOCATE (ecoul_1c(natom))
-
-      DO iat = 1, natom
-         ALLOCATE (ecoul_1c(iat)%Vh1_h)
-         NULLIFY (ecoul_1c(iat)%Vh1_h%r_coef)
-         ALLOCATE (ecoul_1c(iat)%Vh1_s)
-         NULLIFY (ecoul_1c(iat)%Vh1_s%r_coef)
-      END DO
 
    END SUBROUTINE allocate_ecoul_1center
 
@@ -81,23 +70,6 @@ CONTAINS
    SUBROUTINE deallocate_ecoul_1center(ecoul_1c)
 
       TYPE(ecoul_1center_type), DIMENSION(:), POINTER    :: ecoul_1c
-
-      INTEGER                                            :: iat, natom
-
-      natom = SIZE(ecoul_1c, 1)
-
-      DO iat = 1, natom
-         IF (ASSOCIATED(ecoul_1c(iat)%Vh1_h%r_coef)) THEN
-            DEALLOCATE (ecoul_1c(iat)%Vh1_h%r_coef)
-         END IF
-         DEALLOCATE (ecoul_1c(iat)%Vh1_h)
-
-         IF (ASSOCIATED(ecoul_1c(iat)%Vh1_s%r_coef)) THEN
-            DEALLOCATE (ecoul_1c(iat)%Vh1_s%r_coef)
-         END IF
-         DEALLOCATE (ecoul_1c(iat)%Vh1_s)
-
-      END DO
 
       DEALLOCATE (ecoul_1c)
 
@@ -144,7 +116,6 @@ CONTAINS
          IF (ASSOCIATED(hartree_local%ecoul_1c)) THEN
             CALL deallocate_ecoul_1center(hartree_local%ecoul_1c)
          END IF
-
          DEALLOCATE (hartree_local)
       END IF
 

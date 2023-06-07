@@ -2,7 +2,7 @@
   METHOD Quickstep
   &PROPERTIES
     &TDDFPT
-       KERNEL NONE
+       KERNEL STDA
        NSTATES      1
        MAX_ITER    50
        CONVERGENCE [eV] 1.0e-7
@@ -41,7 +41,7 @@
       EPS_SCF 1.0E-7
     &END SCF
     &XC
-      &XC_FUNCTIONAL PBE
+      &XC_FUNCTIONAL PBE0
       &END XC_FUNCTIONAL
     &END XC
     &POISSON
