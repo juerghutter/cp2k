@@ -19,7 +19,7 @@
       CUTOFF 200
     &END MGRID
     &QS
-      METHOD GAPW
+      METHOD GAPW_XC
       EPS_DEFAULT 1.E-14
     &END QS
     &EXCITED_STATES T

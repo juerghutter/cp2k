@@ -526,8 +526,7 @@ CONTAINS
          IF (.NOT. (do_excitations .AND. nspins == 1 .AND. do_triplet)) THEN
             CALL Vh_1c_gg_integrals(qs_env, energy_hartree_1c, &
                                     p_env%hartree_local%ecoul_1c, &
-                                    p_env%local_rho_set, &
-                                    para_env, tddft=.TRUE.)
+                                    p_env%local_rho_set)
             CALL integrate_vhg0_rspace(qs_env, v_hartree_rspace, para_env, &
                                        calculate_forces=my_calc_forces, &
                                        local_rho_set=p_env%local_rho_set)

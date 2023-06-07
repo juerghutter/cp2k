@@ -41,7 +41,7 @@
       EPS_SCF 1.0E-7
     &END SCF
     &XC
-      &XC_FUNCTIONAL PBE
+      &XC_FUNCTIONAL PBE0
       &END XC_FUNCTIONAL
     &END XC
     &POISSON
