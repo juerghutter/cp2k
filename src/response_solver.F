@@ -1672,9 +1672,8 @@ CONTAINS
       IF (gapw .OR. gapw_xc) THEN
          ! Integrals
          IF (debug_forces) fodeb(1:3) = force(1)%Vhxc_atom(1:3, 1)
-         CALL update_ks_atom(qs_env, scrm, mpa, forces=.TRUE., tddft=.FALSE., &
-                             rho_atom_external=local_rho0_set%rho_atom_set, &
-                             kscale=1.0_dp)
+         CALL update_ks_atom(qs_env, scrm, mpa, forces=.TRUE., &
+                             rho_atom_external=local_rho0_set%rho_atom_set)
          IF (debug_forces) THEN
             fodeb(1:3) = force(1)%Vhxc_atom(1:3, 1) - fodeb(1:3)
             CALL para_env%sum(fodeb)

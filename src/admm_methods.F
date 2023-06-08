@@ -279,7 +279,7 @@ CONTAINS
                         matrix_ks_aux_fit_hfx=matrix_ks_aux_fit_hfx)
       CALL qs_rho_get(rho_aux_fit, rho_ao=rho_ao_aux)
 
-      CALL update_ks_atom(qs_env, matrix_ks_aux_fit, rho_ao_aux, calculate_forces, tddft=.FALSE., &
+      CALL update_ks_atom(qs_env, matrix_ks_aux_fit, rho_ao_aux, calculate_forces, &
                           rho_atom_external=admm_env%admm_gapw_env%local_rho_set%rho_atom_set, &
                           kind_set_external=admm_env%admm_gapw_env%admm_kind_set, &
                           oce_external=admm_env%admm_gapw_env%oce, &

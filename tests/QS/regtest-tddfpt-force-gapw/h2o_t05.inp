@@ -2,12 +2,12 @@
   METHOD Quickstep
   &PROPERTIES
     &TDDFPT
-       KERNEL NONE
+       KERNEL FULL
        NSTATES      1
        MAX_ITER    50
        CONVERGENCE [eV] 1.0e-7
        &XC
-         &XC_FUNCTIONAL PADE
+         &XC_FUNCTIONAL NONE
          &END XC_FUNCTIONAL
        &END XC
     &END TDDFPT
@@ -19,7 +19,7 @@
       CUTOFF 200
     &END MGRID
     &QS
-      METHOD GAPW_XC
+      METHOD GAPW
       EPS_DEFAULT 1.E-14
     &END QS
     &EXCITED_STATES T
@@ -31,13 +31,13 @@
       &OT
          PRECONDITIONER FULL_ALL
          MINIMIZER DIIS
-         STEPSIZE 0.1
+         STEPSIZE 0.05
       &END
       &OUTER_SCF
          MAX_SCF  20
          EPS_SCF 1.0E-7
       &END
-      MAX_SCF  20
+      MAX_SCF  12
       EPS_SCF 1.0E-7
     &END SCF
     &XC
@@ -51,7 +51,7 @@
   &END DFT
   &SUBSYS
     &CELL
-      ABC [angstrom] 8.0 8.0 8.0
+      ABC [angstrom] 6.0 6.0 6.0
       PERIODIC NONE
     &END
     &COORD

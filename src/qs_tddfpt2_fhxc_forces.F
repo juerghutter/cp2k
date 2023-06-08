@@ -435,8 +435,8 @@ CONTAINS
                IF (iounit > 0) WRITE (iounit, "(T3,A,T33,3F16.8)") "DEBUG:: Px*dKh[X]PAWg0", fodeb
             END IF
             IF (debug_forces) fodeb(1:3) = force(1)%Vhxc_atom(1:3, 1)
-            CALL update_ks_atom(qs_env, matrix_hx, matrix_px1, forces=.TRUE., tddft=.TRUE., &
-                                rho_atom_external=local_rho_set%rho_atom_set, kscale=0.5_dp)
+            CALL update_ks_atom(qs_env, matrix_hx, matrix_px1, forces=.TRUE., &
+                                rho_atom_external=local_rho_set%rho_atom_set)
             IF (debug_forces) THEN
                fodeb(1:3) = force(1)%Vhxc_atom(1:3, 1) - fodeb(1:3)
                CALL para_env%sum(fodeb)
@@ -552,17 +552,16 @@ CONTAINS
 
          IF (gapw .OR. gapw_xc) THEN
             IF (debug_forces) fodeb(1:3) = force(1)%Vhxc_atom(1:3, 1)
-            CALL update_ks_atom(qs_env, matrix_fx, matrix_px1, forces=.TRUE., tddft=.TRUE., &
-                                rho_atom_external=local_rho_set_f%rho_atom_set, kscale=0.5_dp)
+            CALL update_ks_atom(qs_env, matrix_fx, matrix_px1, forces=.TRUE., &
+                                rho_atom_external=local_rho_set_f%rho_atom_set)
             IF (debug_forces) THEN
                fodeb(1:3) = force(1)%Vhxc_atom(1:3, 1) - fodeb(1:3)
                CALL para_env%sum(fodeb)
                IF (iounit > 0) WRITE (iounit, "(T3,A,T33,3F16.8)") "DEBUG:: Px*dKf[X]PAW ", fodeb
             END IF
             IF (debug_forces) fodeb(1:3) = force(1)%Vhxc_atom(1:3, 1)
-            CALL update_ks_atom(qs_env, matrix_gx, matrix_p, forces=.TRUE., tddft=.TRUE., &
-                                rho_atom_external=local_rho_set_g%rho_atom_set, &
-                                kscale=0.5_dp)
+            CALL update_ks_atom(qs_env, matrix_gx, matrix_p, forces=.TRUE., &
+                                rho_atom_external=local_rho_set_g%rho_atom_set)
             IF (debug_forces) THEN
                fodeb(1:3) = force(1)%Vhxc_atom(1:3, 1) - fodeb(1:3)
                CALL para_env%sum(fodeb)

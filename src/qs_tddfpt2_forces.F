@@ -877,6 +877,9 @@ CONTAINS
       IF (gapw .OR. gapw_xc) THEN
          mhz(1:nspins, 1:1) => matrix_hz(1:nspins)
          mpe(1:nspins, 1:1) => matrix_pe(1:nspins)
+!        CALL update_ks_atom(qs_env, mhz, mpe, forces=.FALSE., &
+!                            rho_atom_external=local_rho_set%rho_atom_set, &
+!                            kintegral=0.5_dp)
          CALL update_ks_atom(qs_env, mhz, mpe, forces=.FALSE., tddft=.TRUE., &
                              rho_atom_external=local_rho_set%rho_atom_set, kscale=0.5_dp)
       END IF
