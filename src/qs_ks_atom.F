@@ -94,6 +94,8 @@ CONTAINS
 !> \param oce_external ...
 !> \param sab_external ...
 !> \param kscale ...
+!> \param kintegral ...
+!> \param kforce ...
 !> \par History
 !>      created [MI]
 !>      the loop over the spins is done internally [03-05,MI]
@@ -102,7 +104,8 @@ CONTAINS
 !>      Allow for external kind_set, rho_atom_set, oce, sab 12.2019 (A. Bussy)
 ! **************************************************************************************************
    SUBROUTINE update_ks_atom(qs_env, ksmat, pmat, forces, tddft, rho_atom_external, &
-                             kind_set_external, oce_external, sab_external, kscale)
+                             kind_set_external, oce_external, sab_external, kscale, &
+                             kintegral, kforce)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(dbcsr_p_type), DIMENSION(*), INTENT(INOUT)    :: ksmat, pmat
@@ -115,7 +118,7 @@ CONTAINS
       TYPE(oce_matrix_type), OPTIONAL, POINTER           :: oce_external
       TYPE(neighbor_list_set_p_type), DIMENSION(:), &
          OPTIONAL, POINTER                               :: sab_external
-      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: kscale
+      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: kscale, kintegral, kforce
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'update_ks_atom'
 
@@ -183,11 +186,12 @@ CONTAINS
       nspins = dft_control%nspins
       nimages = dft_control%nimages
 
+      factor1 = 1.0_dp
+      factor2 = 1.0_dp
+
       !deal with externals
       my_tddft = .FALSE.
       IF (PRESENT(tddft)) my_tddft = tddft
-      factor1 = 1.0_dp
-      factor2 = 1.0_dp
       IF (my_tddft) THEN
          IF (nspins == 1) factor1 = 2.0_dp
          CPASSERT(nimages == 1)
@@ -196,6 +200,8 @@ CONTAINS
          factor1 = factor1*kscale
          factor2 = factor2*kscale
       END IF
+      IF (PRESENT(kintegral)) factor1 = kintegral
+      IF (PRESENT(kforce)) factor2 = kforce
 
       IF (PRESENT(rho_atom_external)) my_rho_atom => rho_atom_external
       IF (PRESENT(kind_set_external)) my_kind_set => kind_set_external
