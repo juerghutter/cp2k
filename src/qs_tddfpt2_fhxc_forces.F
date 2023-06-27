@@ -131,7 +131,9 @@ MODULE qs_tddfpt2_fhxc_forces
    USE qs_tddfpt2_subgroups,            ONLY: tddfpt_subgroup_env_type
    USE qs_tddfpt2_types,                ONLY: tddfpt_ground_state_mos,&
                                               tddfpt_work_matrices
-   USE qs_vxc_atom,                     ONLY: calculate_gfxc_atom
+   USE qs_vxc_atom,                     ONLY: calculate_gfxc_atom, &
+                                              calculate_vxc_atom, &
+                                              calculate_xc_2nd_deriv_atom
    USE task_list_types,                 ONLY: task_list_type
    USE util,                            ONLY: get_limit
    USE virial_types,                    ONLY: virial_type
@@ -263,7 +265,8 @@ CONTAINS
       !
       CALL get_qs_env(qs_env, ks_env=ks_env, pw_env=pw_env, para_env=para_env)
       !
-      NULLIFY (hartree_local, local_rho_set, local_rho_set_admm)
+      NULLIFY (local_rho_set, local_rho_set_f, local_rho_set_g, local_rho_set_admm)
+      NULLIFY (hartree_local)
       IF (gapw .OR. gapw_xc) THEN
          CALL get_qs_env(qs_env, &
                          atomic_kind_set=atomic_kind_set, &
@@ -553,7 +556,8 @@ CONTAINS
          IF (gapw .OR. gapw_xc) THEN
             IF (debug_forces) fodeb(1:3) = force(1)%Vhxc_atom(1:3, 1)
             CALL update_ks_atom(qs_env, matrix_fx, matrix_px1, forces=.TRUE., &
-                                rho_atom_external=local_rho_set_f%rho_atom_set)
+                                rho_atom_external=local_rho_set_f%rho_atom_set, &
+                                kintegral=1.0_dp, kforce=1.0_dp)
             IF (debug_forces) THEN
                fodeb(1:3) = force(1)%Vhxc_atom(1:3, 1) - fodeb(1:3)
                CALL para_env%sum(fodeb)
@@ -561,7 +565,8 @@ CONTAINS
             END IF
             IF (debug_forces) fodeb(1:3) = force(1)%Vhxc_atom(1:3, 1)
             CALL update_ks_atom(qs_env, matrix_gx, matrix_p, forces=.TRUE., &
-                                rho_atom_external=local_rho_set_g%rho_atom_set)
+                                rho_atom_external=local_rho_set_g%rho_atom_set, &
+                                kintegral=1.0_dp, kforce=1.0_dp)
             IF (debug_forces) THEN
                fodeb(1:3) = force(1)%Vhxc_atom(1:3, 1) - fodeb(1:3)
                CALL para_env%sum(fodeb)

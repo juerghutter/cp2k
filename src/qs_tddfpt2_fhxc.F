@@ -200,7 +200,8 @@ CONTAINS
                                       pw_env_external=sub_env%pw_env, &
                                       task_list_external=sub_env%task_list_orb_soft, &
                                       para_env_external=sub_env%para_env)
-               CALL prepare_gapw_den(qs_env, work_matrices%local_rho_set)
+               CALL prepare_gapw_den(qs_env, work_matrices%local_rho_set, &
+                                     do_rho0=(.NOT.is_rks_triplets))
             ELSEIF (gapw_xc) THEN
                CALL qs_rho_update_rho(work_matrices%rho_orb_struct_sub, qs_env, &
                                       rho_xc_external=work_matrices%rho_xc_struct_sub, &
