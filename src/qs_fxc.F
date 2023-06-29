@@ -135,19 +135,18 @@ CONTAINS
 ! **************************************************************************************************
 !> \brief ...
 !> \param ks_env ...
-!> \param rho0_struct ...
-!> \param rho1_struct ...
+!> \param rho0 ...
+!> \param rho1 ...
 !> \param xc_section ...
 !> \param accuracy ...
 !> \param is_triplet ...
 !> \param fxc_rho ...
 !> \param fxc_tau ...
 ! **************************************************************************************************
-   SUBROUTINE qs_fxc_fdiff(ks_env, rho0_struct, rho1_struct, xc_section, accuracy, is_triplet, &
-                           fxc_rho, fxc_tau)
+   SUBROUTINE qs_fxc_fdiff(ks_env, rho0, rho1, xc_section, accuracy, is_triplet, fxc_rho, fxc_tau)
 
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
-      TYPE(qs_rho_type), POINTER                         :: rho0_struct, rho1_struct
+      TYPE(qs_rho_type)                                  :: rho0, rho1
       TYPE(section_vals_type), POINTER                   :: xc_section
       INTEGER, INTENT(IN)                                :: accuracy
       LOGICAL, INTENT(IN)                                :: is_triplet
@@ -169,8 +168,6 @@ CONTAINS
 
       CPASSERT(.NOT. ASSOCIATED(fxc_rho))
       CPASSERT(.NOT. ASSOCIATED(fxc_tau))
-      CPASSERT(ASSOCIATED(rho0_struct))
-      CPASSERT(ASSOCIATED(rho1_struct))
 
       ak = 0.0_dp
       SELECT CASE (accuracy)
@@ -203,15 +200,15 @@ CONTAINS
             NULLIFY (vxc00, v_tau_rspace)
             IF (is_triplet) THEN
                CPASSERT(nspins == 1)
-               CALL qs_rho_copy(rho0_struct, rhoin, auxbas_pw_pool, 2)
-               CALL qs_rho_scale_and_add(rhoin, rho1_struct, alpha, 0.5_dp*beta)
+               CALL qs_rho_copy(rho0, rhoin, auxbas_pw_pool, 2)
+               CALL qs_rho_scale_and_add(rhoin, rho1, alpha, 0.5_dp*beta)
                CALL qs_vxc_create(ks_env=ks_env, rho_struct=rhoin, xc_section=xc_section, &
                                   vxc_rho=vxc00, vxc_tau=v_tau_rspace, exc=exc, just_energy=.FALSE.)
                CALL pw_axpy(vxc00(2), vxc00(1), -1.0_dp)
                IF (ASSOCIATED(v_tau_rspace)) CALL pw_axpy(v_tau_rspace(2), v_tau_rspace(1), -1.0_dp)
             ELSE
-               CALL qs_rho_copy(rho0_struct, rhoin, auxbas_pw_pool, nspins)
-               CALL qs_rho_scale_and_add(rhoin, rho1_struct, alpha, beta)
+               CALL qs_rho_copy(rho0, rhoin, auxbas_pw_pool, nspins)
+               CALL qs_rho_scale_and_add(rhoin, rho1, alpha, beta)
                CALL qs_vxc_create(ks_env=ks_env, rho_struct=rhoin, xc_section=xc_section, &
                                   vxc_rho=vxc00, vxc_tau=v_tau_rspace, exc=exc, just_energy=.FALSE.)
             END IF
@@ -284,7 +281,7 @@ CONTAINS
                              fxc_rho, fxc_tau, gxc_rho, gxc_tau)
 
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
-      TYPE(qs_rho_type), POINTER                         :: rho0_struct, rho1_struct
+      TYPE(qs_rho_type)                                  :: rho0_struct, rho1_struct
       TYPE(section_vals_type), POINTER                   :: xc_section
       INTEGER, INTENT(IN)                                :: accuracy
       LOGICAL, INTENT(IN)                                :: is_triplet
@@ -308,8 +305,6 @@ CONTAINS
       CPASSERT(.NOT. ASSOCIATED(fxc_tau))
       CPASSERT(.NOT. ASSOCIATED(gxc_rho))
       CPASSERT(.NOT. ASSOCIATED(gxc_tau))
-      CPASSERT(ASSOCIATED(rho0_struct))
-      CPASSERT(ASSOCIATED(rho1_struct))
 
       ak = 0.0_dp
       bl = 0.0_dp
