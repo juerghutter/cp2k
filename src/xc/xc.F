@@ -73,7 +73,10 @@ MODULE xc
                                xc_rho_set_release, &
                                xc_rho_set_type, &
                                xc_rho_set_update, xc_rho_set_recover_pw
-   USE xc_util, ONLY: xc_pw_smooth, xc_pw_laplace, xc_pw_divergence, xc_requires_tmp_g
+   USE xc_util, ONLY: xc_pw_smooth, &
+                      xc_pw_laplace, &
+                      xc_pw_divergence, &
+                      xc_requires_tmp_g
 #include "../base/base_uses.f90"
 
    IMPLICIT NONE
@@ -95,9 +98,9 @@ CONTAINS
 !> \return ...
 ! **************************************************************************************************
    FUNCTION xc_uses_kinetic_energy_density(xc_fun_section, lsd) RESULT(res)
-      TYPE(section_vals_type), POINTER, INTENT(IN) :: xc_fun_section
-      LOGICAL, INTENT(IN) :: lsd
-      LOGICAL :: res
+      TYPE(section_vals_type), POINTER, INTENT(IN)       :: xc_fun_section
+      LOGICAL, INTENT(IN)                                :: lsd
+      LOGICAL                                            :: res
 
       TYPE(xc_rho_cflags_type)                           :: needs
 
@@ -115,9 +118,9 @@ CONTAINS
 !> \return ...
 ! **************************************************************************************************
    FUNCTION xc_uses_norm_drho(xc_fun_section, lsd) RESULT(res)
-      TYPE(section_vals_type), POINTER, INTENT(IN) :: xc_fun_section
-      LOGICAL, INTENT(IN) :: lsd
-      LOGICAL :: res
+      TYPE(section_vals_type), POINTER, INTENT(IN)       :: xc_fun_section
+      LOGICAL, INTENT(IN)                                :: lsd
+      LOGICAL                                            :: res
 
       TYPE(xc_rho_cflags_type)                           :: needs
 
@@ -154,16 +157,16 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE xc_vxc_pw_create1(vxc_rho, vxc_tau, rho_r, rho_g, tau, exc, xc_section, &
                                 pw_pool, compute_virial, virial_xc, exc_r)
-      TYPE(pw_type), DIMENSION(:), POINTER             :: vxc_rho, vxc_tau
-      TYPE(pw_type), DIMENSION(:), POINTER :: rho_r, rho_g, tau
+      TYPE(pw_type), DIMENSION(:), POINTER               :: vxc_rho, vxc_tau
+      TYPE(pw_type), DIMENSION(:), POINTER               :: rho_r, rho_g, tau
       REAL(KIND=dp), INTENT(out)                         :: exc
       TYPE(section_vals_type), POINTER                   :: xc_section
       TYPE(pw_pool_type), POINTER                        :: pw_pool
       LOGICAL, INTENT(IN)                                :: compute_virial
       REAL(KIND=dp), DIMENSION(3, 3), INTENT(OUT)        :: virial_xc
-      TYPE(pw_type), INTENT(INOUT), OPTIONAL           :: exc_r
+      TYPE(pw_type), INTENT(INOUT), OPTIONAL             :: exc_r
 
-      INTEGER                                            :: f_routine
+!     INTEGER                                            :: f_routine
 
       CPASSERT(ASSOCIATED(rho_r))
       CPASSERT(ASSOCIATED(xc_section))
@@ -172,25 +175,29 @@ CONTAINS
 
       virial_xc = 0.0_dp
 
-      CALL section_vals_val_get(xc_section, "FUNCTIONAL_ROUTINE", &
-                                i_val=f_routine)
-      SELECT CASE (f_routine)
-      CASE (xc_default_f_routine)
-         CALL xc_vxc_pw_create(vxc_rho=vxc_rho, vxc_tau=vxc_tau, tau=tau, exc_r=exc_r, &
-                               rho_r=rho_r, rho_g=rho_g, exc=exc, xc_section=xc_section, &
-                               pw_pool=pw_pool, compute_virial=compute_virial, virial_xc=virial_xc)
-      CASE (xc_debug_new_routine)
-         CPASSERT(.NOT. PRESENT(exc_r))
-         CALL xc_vxc_pw_create_debug(vxc_rho=vxc_rho, vxc_tau=vxc_tau, tau=tau, &
-                                     rho_r=rho_r, rho_g=rho_g, exc=exc, xc_section=xc_section, &
-                                     pw_pool=pw_pool)
-      CASE (xc_test_lsd_f_routine)
-         CPASSERT(.NOT. PRESENT(exc_r))
-         CALL xc_vxc_pw_create_test_lsd(vxc_rho=vxc_rho, vxc_tau=vxc_tau, &
-                                        tau=tau, rho_r=rho_r, rho_g=rho_g, exc=exc, &
-                                        xc_section=xc_section, pw_pool=pw_pool)
-      CASE default
-      END SELECT
+      CALL xc_vxc_pw_create(vxc_rho=vxc_rho, vxc_tau=vxc_tau, tau=tau, exc_r=exc_r, &
+                            rho_r=rho_r, rho_g=rho_g, exc=exc, xc_section=xc_section, &
+                            pw_pool=pw_pool, compute_virial=compute_virial, virial_xc=virial_xc)
+
+!     CALL section_vals_val_get(xc_section, "FUNCTIONAL_ROUTINE", &
+!                               i_val=f_routine)
+!     SELECT CASE (f_routine)
+!     CASE (xc_default_f_routine)
+!        CALL xc_vxc_pw_create(vxc_rho=vxc_rho, vxc_tau=vxc_tau, tau=tau, exc_r=exc_r, &
+!                              rho_r=rho_r, rho_g=rho_g, exc=exc, xc_section=xc_section, &
+!                              pw_pool=pw_pool, compute_virial=compute_virial, virial_xc=virial_xc)
+!     CASE (xc_debug_new_routine)
+!        CPASSERT(.NOT. PRESENT(exc_r))
+!        CALL xc_vxc_pw_create_debug(vxc_rho=vxc_rho, vxc_tau=vxc_tau, tau=tau, &
+!                                    rho_r=rho_r, rho_g=rho_g, exc=exc, xc_section=xc_section, &
+!                                    pw_pool=pw_pool)
+!     CASE (xc_test_lsd_f_routine)
+!        CPASSERT(.NOT. PRESENT(exc_r))
+!        CALL xc_vxc_pw_create_test_lsd(vxc_rho=vxc_rho, vxc_tau=vxc_tau, &
+!                                       tau=tau, rho_r=rho_r, rho_g=rho_g, exc=exc, &
+!                                       xc_section=xc_section, pw_pool=pw_pool)
+!     CASE default
+!     END SELECT
 
    END SUBROUTINE xc_vxc_pw_create1
 
@@ -1762,10 +1769,10 @@ CONTAINS
             END DO
             DEALLOCATE (vxc_rho)
             IF (ASSOCIATED(vxc_tau)) THEN
-            DO ispin = 1, 2
-               CALL pw_release(vxc_tau(ispin))
-            END DO
-            DEALLOCATE (vxc_tau)
+               DO ispin = 1, 2
+                  CALL pw_release(vxc_tau(ispin))
+               END DO
+               DEALLOCATE (vxc_tau)
             END IF
 !$OMP PARALLEL DEFAULT(NONE) SHARED(rho_r,rhoa,rhob,step,rho1_r,tau_r,tau_a,tau_b,tau1_r)
 !$OMP WORKSHARE
@@ -1795,10 +1802,10 @@ CONTAINS
             END DO
             DEALLOCATE (vxc_rho)
             IF (ASSOCIATED(vxc_tau)) THEN
-            DO ispin = 1, 2
-               CALL pw_release(vxc_tau(ispin))
-            END DO
-            DEALLOCATE (vxc_tau)
+               DO ispin = 1, 2
+                  CALL pw_release(vxc_tau(ispin))
+               END DO
+               DEALLOCATE (vxc_tau)
             END IF
          END DO
       ELSE

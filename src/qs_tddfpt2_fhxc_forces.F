@@ -131,9 +131,7 @@ MODULE qs_tddfpt2_fhxc_forces
    USE qs_tddfpt2_subgroups,            ONLY: tddfpt_subgroup_env_type
    USE qs_tddfpt2_types,                ONLY: tddfpt_ground_state_mos,&
                                               tddfpt_work_matrices
-   USE qs_vxc_atom,                     ONLY: calculate_gfxc_atom, &
-                                              calculate_vxc_atom, &
-                                              calculate_xc_2nd_deriv_atom
+   USE qs_vxc_atom,                     ONLY: calculate_gfxc_atom
    USE task_list_types,                 ONLY: task_list_type
    USE util,                            ONLY: get_limit
    USE virial_types,                    ONLY: virial_type
