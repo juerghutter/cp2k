@@ -121,8 +121,7 @@ MODULE qs_tddfpt2_fhxc_forces
    USE qs_rho0_methods,                 ONLY: init_rho0
    USE qs_rho_atom_methods,             ONLY: allocate_rho_atom_internals,&
                                               calculate_rho_atom_coeff
-   USE qs_rho_types,                    ONLY: qs_rho_create,&
-                                              qs_rho_get,&
+   USE qs_rho_types,                    ONLY: qs_rho_get,&
                                               qs_rho_set,&
                                               qs_rho_type
    USE qs_tddfpt2_stda_types,           ONLY: stda_env_type
@@ -212,7 +211,8 @@ CONTAINS
       TYPE(qs_force_type), DIMENSION(:), POINTER         :: force
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
-      TYPE(qs_rho_type), POINTER                         :: rho, rho_aux_fit, rhox, rhox_aux
+      TYPE(qs_rho_type)                                  :: rhox, rhox_aux
+      TYPE(qs_rho_type), POINTER                         :: rho, rho_aux_fit
       TYPE(section_vals_type), POINTER                   :: hfx_section, xc_section
       TYPE(task_list_type), POINTER                      :: task_list_aux_fit
       TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
@@ -475,9 +475,6 @@ CONTAINS
             CALL get_qs_env(qs_env=qs_env, ks_env=ks_env, rho=rho)
          END IF
          CALL qs_rho_get(rho, rho_ao=matrix_p)
-         NULLIFY (rhox)
-         ALLOCATE (rhox)
-         CALL qs_rho_create(rhox)
          IF (gapw_xc) THEN
             CALL qs_rho_set(rho_struct=rhox, rho_ao=matrix_px1, rho_r=rhoxx_r, rho_g=rhoxx_g, &
                             rho_r_valid=.TRUE., rho_g_valid=.TRUE.)
@@ -491,12 +488,6 @@ CONTAINS
             CALL qs_fgxc_create(ks_env, rho, rhox, xc_section, 6, is_rks_triplets, &
                                 fxc_rho, fxc_tau, gxc_rho, gxc_tau)
          END IF
-
-         ! Well, this is a hack :-(
-         ! When qs_rho_set() was called on rhox it assumed ownership of the passed arrays.
-         ! However, these arrays actually belong to ex_env. Hence, we can not call qs_rho_release()
-         ! because this would release the arrays. Instead we're simply going to deallocate rhox.
-         DEALLOCATE (rhox)
 
          IF (nspins == 2) THEN
             DO ispin = 1, nspins
@@ -616,9 +607,6 @@ CONTAINS
                                           task_list_external=task_list_aux_fit)
                END DO
                !
-               NULLIFY (rhox_aux)
-               ALLOCATE (rhox_aux)
-               CALL qs_rho_create(rhox_aux)
                CALL qs_rho_set(rho_struct=rhox_aux, rho_ao=matrix_px1_admm, &
                                rho_r=rhox_r_aux, rho_g=rhox_g_aux, &
                                rho_r_valid=.TRUE., rho_g_valid=.TRUE.)
@@ -628,12 +616,6 @@ CONTAINS
                   CALL qs_fgxc_create(ks_env, rho_aux_fit, rhox_aux, xc_section, &
                                       6, is_rks_triplets, fxc_rho, fxc_tau, gxc_rho, gxc_tau)
                END IF
-
-               ! Well, this is a hack :-(
-               ! When qs_rho_set() was called on rhox_aux it assumed ownership of the passed arrays.
-               ! However, these arrays actually belong to ex_env. Hence, we can not call qs_rho_release()
-               ! because this would release the arrays. Instead we're simply going to deallocate rhox_aux.
-               DEALLOCATE (rhox_aux)
 
                DO ispin = 1, nspins
                   CALL pw_pool_give_back_pw(auxbas_pw_pool, rhox_r_aux(ispin))

@@ -686,7 +686,8 @@ CONTAINS
                                                             v_xc_tau
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
-      TYPE(qs_rho_type), POINTER                         :: rho, rho_aux_fit, rho_xc, rhoz_aux, trho
+      TYPE(qs_rho_type)                                  :: trho, trho_xc
+      TYPE(qs_rho_type), POINTER                         :: rho, rho_aux_fit, rho_xc, rhoz_aux
       TYPE(rho_atom_type), DIMENSION(:), POINTER         :: rho1_atom_set, rho_atom_set
       TYPE(section_vals_type), POINTER                   :: hfx_section, input, xc_section
       TYPE(task_list_type), POINTER                      :: task_list_aux_fit
@@ -841,13 +842,16 @@ CONTAINS
                                              do_tddft=.TRUE., do_triplet=.FALSE.)
          END IF
       ELSE
-         CPABORT("NYA 00006")
-         NULLIFY (v_xc, trho)
-         ALLOCATE (trho)
-         CALL qs_rho_create(trho)
-         CALL qs_rho_set(trho, rho_r=trho_r, rho_g=trho_g)
-         CALL qs_fxc_fdiff(ks_env, rho, trho, xc_section, 6, .FALSE., v_xc, v_xc_tau)
-         DEALLOCATE (trho)
+         NULLIFY (v_xc, v_xc_tau, tau_r)
+         IF (gapw_xc) THEN
+            CALL get_qs_env(qs_env=qs_env, rho_xc=rho_xc)
+            CALL qs_rho_set(trho_xc, rho_r=trho_xc_r, rho_g=trho_xc_g)
+            CALL qs_fxc_fdiff(ks_env, rho_xc, trho_xc, xc_section, 6, .FALSE., v_xc, v_xc_tau)
+         ELSE
+            CALL qs_rho_set(trho, rho_r=trho_r, rho_g=trho_g)
+            CALL qs_fxc_fdiff(ks_env, rho, trho, xc_section, 6, .FALSE., v_xc, v_xc_tau)
+         END IF
+         CPASSERT((.NOT. gapw) .AND. (.NOT. gapw_xc))
       END IF
 
       DO ispin = 1, nspins
