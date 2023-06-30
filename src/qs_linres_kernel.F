@@ -41,7 +41,6 @@ MODULE qs_linres_kernel
                                               do_admm_purify_none,&
                                               kg_tnadd_embed
    USE input_section_types,             ONLY: section_get_ival,&
-                                              section_get_lval,&
                                               section_get_rval,&
                                               section_vals_get,&
                                               section_vals_get_subs_vals,&
@@ -76,8 +75,6 @@ MODULE qs_linres_kernel
                                               pw_type
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
-   USE qs_fxc,                          ONLY: qs_fxc_analytic,&
-                                              qs_fxc_fdiff
    USE qs_gapw_densities,               ONLY: prepare_gapw_den
    USE qs_integrate_potential,          ONLY: integrate_v_rspace,&
                                               integrate_v_rspace_diagonal,&
@@ -100,6 +97,8 @@ MODULE qs_linres_kernel
    USE task_list_types,                 ONLY: task_list_type
    USE xc,                              ONLY: xc_calc_2nd_deriv,&
                                               xc_prep_2nd_deriv
+   USE xc_derivative_set_types,         ONLY: xc_derivative_set_type,&
+                                              xc_dset_release
    USE xc_derivatives,                  ONLY: xc_functionals_get_needs
    USE xc_rho_cflags_types,             ONLY: xc_rho_cflags_type
    USE xc_rho_set_types,                ONLY: xc_rho_set_create,&
@@ -179,8 +178,7 @@ CONTAINS
       CHARACTER(len=*), PARAMETER                        :: routineN = 'apply_op_2_dft'
 
       INTEGER                                            :: handle, ikind, ispin, nkind, ns, nspins
-      LOGICAL                                            :: deriv2_analytic, gapw, gapw_xc, &
-                                                            lr_triplet, lrigpw
+      LOGICAL                                            :: gapw, gapw_xc, lr_triplet, lrigpw
       REAL(KIND=dp)                                      :: alpha, ekin_mol, energy_hartree, &
                                                             energy_hartree_1c
       TYPE(admm_type), POINTER                           :: admm_env
@@ -200,7 +198,7 @@ CONTAINS
       TYPE(pw_pool_type), POINTER                        :: auxbas_pw_pool
       TYPE(pw_type)                                      :: rho1_tot_gspace, v_hartree_gspace, &
                                                             v_hartree_rspace
-      TYPE(pw_type), DIMENSION(:), POINTER               :: rho1_g, rho1_r, rho_r, tau1_r, &
+      TYPE(pw_type), DIMENSION(:), POINTER               :: rho1_g, rho1_r, rho_r, tau1_r, tau_r, &
                                                             v_rspace_new, v_xc, v_xc_tau
       TYPE(qs_kpp1_env_type), POINTER                    :: kpp1_env
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
@@ -208,12 +206,14 @@ CONTAINS
                                                             rho_aux, rho_xc
       TYPE(rho_atom_type), DIMENSION(:), POINTER         :: rho1_atom_set, rho_atom_set
       TYPE(section_vals_type), POINTER                   :: input, xc_section, xc_section_aux
+      TYPE(xc_derivative_set_type)                       :: deriv_set
+      TYPE(xc_rho_set_type)                              :: rho_set
 
       CALL timeset(routineN, handle)
 
       NULLIFY (auxbas_pw_pool, pw_env, v_rspace_new, para_env, rho1_r, &
                v_xc, rho1_ao, rho_ao, poisson_env, input, rho, dft_control, &
-               logger, rho1_g, v_xc_tau)
+               logger, rho1_g, v_xc_tau, tau_r, rho_r)
       logger => cp_get_default_logger()
 
       energy_hartree = 0.0_dp
@@ -319,20 +319,21 @@ CONTAINS
          rho1a => rho1
       END IF
 
-      deriv2_analytic = section_get_lval(xc_section, "2ND_DERIV_ANALYTICAL")
-      NULLIFY (v_xc_tau)
-      IF (deriv2_analytic) THEN
-         CALL qs_rho_get(rho1a, rho_r=rho1_r, tau_r=tau1_r)
-         CALL qs_fxc_analytic(rho0, rho1_r, tau1_r, xc_section, auxbas_pw_pool, lr_triplet, v_xc, v_xc_tau)
-         IF (gapw .OR. gapw_xc) THEN
-            CALL get_qs_env(qs_env, rho_atom_set=rho_atom_set)
-            rho1_atom_set => p_env%local_rho_set%rho_atom_set
-            CALL calculate_xc_2nd_deriv_atom(rho_atom_set, rho1_atom_set, qs_env, xc_section, para_env, &
-                                             do_tddft=.FALSE., do_triplet=lr_triplet)
-         END IF
-      ELSE
-         CALL qs_fxc_fdiff(ks_env, rho0, rho1a, xc_section, 6, lr_triplet, v_xc, v_xc_tau)
-         CPASSERT((.NOT. gapw) .AND. (.NOT. gapw_xc))
+      CALL qs_rho_get(rho0, rho_r=rho_r, tau_r=tau_r)
+      CALL qs_rho_get(rho1a, rho_r=rho1_r, rho_g=rho1_g, tau_r=tau1_r)
+      CALL xc_prep_2nd_deriv(deriv_set=deriv_set, rho_set=rho_set, rho_r=rho_r, tau_r=tau_r, &
+                             pw_pool=auxbas_pw_pool, xc_section=xc_section)
+      CALL xc_calc_2nd_deriv(v_xc=v_xc, v_xc_tau=v_xc_tau, deriv_set=deriv_set, &
+                             rho_set=rho_set, rho1_r=rho1_r, rho1_g=rho1_g, tau1_r=tau1_r, &
+                             pw_pool=auxbas_pw_pool, xc_section=xc_section, gapw=.FALSE., &
+                             do_tddft=.FALSE., do_triplet=lr_triplet)
+      CALL xc_dset_release(deriv_set)
+      CALL xc_rho_set_release(rho_set=rho_set, pw_pool=auxbas_pw_pool)
+      IF (gapw .OR. gapw_xc) THEN
+         CALL get_qs_env(qs_env, rho_atom_set=rho_atom_set)
+         rho1_atom_set => p_env%local_rho_set%rho_atom_set
+         CALL calculate_xc_2nd_deriv_atom(rho_atom_set, rho1_atom_set, qs_env, xc_section, para_env, &
+                                          do_tddft=.FALSE., do_triplet=lr_triplet)
       END IF
 
       v_rspace_new => v_xc
