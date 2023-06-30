@@ -115,8 +115,7 @@ MODULE qs_tddfpt2_forces
    USE qs_rho_atom_methods,             ONLY: allocate_rho_atom_internals,&
                                               calculate_rho_atom_coeff
    USE qs_rho_atom_types,               ONLY: rho_atom_type
-   USE qs_rho_types,                    ONLY: qs_rho_create,&
-                                              qs_rho_get,&
+   USE qs_rho_types,                    ONLY: qs_rho_get,&
                                               qs_rho_set,&
                                               qs_rho_type
    USE qs_tddfpt2_fhxc_forces,          ONLY: fhxc_force,&
@@ -126,6 +125,12 @@ MODULE qs_tddfpt2_forces
                                               tddfpt_work_matrices
    USE qs_vxc_atom,                     ONLY: calculate_xc_2nd_deriv_atom
    USE task_list_types,                 ONLY: task_list_type
+   USE xc,                              ONLY: xc_calc_2nd_deriv,&
+                                              xc_prep_2nd_deriv
+   USE xc_derivative_set_types,         ONLY: xc_derivative_set_type,&
+                                              xc_dset_release
+   USE xc_rho_set_types,                ONLY: xc_rho_set_release,&
+                                              xc_rho_set_type
    USE xtb_ehess,                       ONLY: xtb_coulomb_hessian
    USE xtb_types,                       ONLY: get_xtb_atom_param,&
                                               xtb_atom_type
@@ -680,17 +685,18 @@ CONTAINS
       TYPE(pw_pool_type), POINTER                        :: auxbas_pw_pool
       TYPE(pw_type)                                      :: rho_tot_gspace, v_hartree_gspace, &
                                                             v_hartree_rspace
-      TYPE(pw_type), DIMENSION(:), POINTER               :: rho_g, rho_g_aux, rho_r, rho_r_aux, &
-                                                            rhoz_g_aux, rhoz_r_aux, tau_r, trho_g, &
-                                                            trho_r, trho_xc_g, trho_xc_r, v_xc, &
-                                                            v_xc_tau
+      TYPE(pw_type), DIMENSION(:), POINTER :: rho_g, rho_g_aux, rho_r, rho_r_aux, rho_xc_g, &
+         rho_xc_r, rhoz_g_aux, rhoz_r_aux, tau_r, tau_xc_r, trho_g, trho_r, trho_xc_g, trho_xc_r, &
+         ttau_r, ttau_xc_r, v_xc, v_xc_tau
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
-      TYPE(qs_rho_type)                                  :: trho, trho_xc
-      TYPE(qs_rho_type), POINTER                         :: rho, rho_aux_fit, rho_xc, rhoz_aux
+      TYPE(qs_rho_type)                                  :: rhoz_aux
+      TYPE(qs_rho_type), POINTER                         :: rho, rho_aux_fit, rho_xc
       TYPE(rho_atom_type), DIMENSION(:), POINTER         :: rho1_atom_set, rho_atom_set
       TYPE(section_vals_type), POINTER                   :: hfx_section, input, xc_section
       TYPE(task_list_type), POINTER                      :: task_list_aux_fit
+      TYPE(xc_derivative_set_type)                       :: deriv_set
+      TYPE(xc_rho_set_type)                              :: rho_set
 
       CALL timeset(routineN, handle)
 
@@ -815,9 +821,6 @@ CONTAINS
       END IF
 
       ! Fxc*drho term
-      CALL get_qs_env(qs_env, rho=rho)
-      CALL qs_rho_get(rho, rho_r=rho_r, rho_g=rho_g)
-      !
       CALL get_qs_env(qs_env, input=input)
       IF (dft_control%do_admm) THEN
          CALL get_qs_env(qs_env, admm_env=admm_env)
@@ -826,32 +829,37 @@ CONTAINS
          xc_section => section_vals_get_subs_vals(input, "DFT%XC")
       END IF
       !
-      deriv2_analytic = section_get_lval(xc_section, "2ND_DERIV_ANALYTICAL")
-      IF (deriv2_analytic) THEN
-         NULLIFY (v_xc, v_xc_tau, tau_r)
-         IF (gapw_xc) THEN
-            CALL get_qs_env(qs_env=qs_env, rho_xc=rho_xc)
-            CALL qs_fxc_analytic(rho_xc, trho_xc_r, tau_r, xc_section, auxbas_pw_pool, .FALSE., v_xc, v_xc_tau)
-         ELSE
-            CALL qs_fxc_analytic(rho, trho_r, tau_r, xc_section, auxbas_pw_pool, .FALSE., v_xc, v_xc_tau)
-         END IF
-         IF (gapw .OR. gapw_xc) THEN
-            CALL get_qs_env(qs_env, rho_atom_set=rho_atom_set)
-            rho1_atom_set => local_rho_set%rho_atom_set
-            CALL calculate_xc_2nd_deriv_atom(rho_atom_set, rho1_atom_set, qs_env, xc_section, para_env, &
-                                             do_tddft=.TRUE., do_triplet=.FALSE.)
-         END IF
+      ! *** calculate the xc potential ***
+      IF (gapw_xc) THEN
+         NULLIFY (rho_xc_r, rho_xc_g, tau_xc_r)
+         NULLIFY (ttau_xc_r)
+         CALL get_qs_env(qs_env=qs_env, rho_xc=rho_xc)
+         CALL qs_rho_get(rho_xc, rho_r=rho_xc_r, rho_g=rho_xc_g, tau_r=tau_xc_r)
+         CALL xc_prep_2nd_deriv(deriv_set=deriv_set, rho_set=rho_set, rho_r=rho_xc_r, tau_r=tau_xc_r, &
+                                pw_pool=auxbas_pw_pool, xc_section=xc_section)
+         CALL xc_calc_2nd_deriv(v_xc=v_xc, v_xc_tau=v_xc_tau, deriv_set=deriv_set, rho_set=rho_set, &
+                                rho1_r=trho_xc_r, rho1_g=trho_xc_g, tau1_r=ttau_xc_r, &
+                                pw_pool=auxbas_pw_pool, xc_section=xc_section, gapw=.FALSE., &
+                                do_tddft=.TRUE., do_triplet=.FALSE.)
       ELSE
-         NULLIFY (v_xc, v_xc_tau, tau_r)
-         IF (gapw_xc) THEN
-            CALL get_qs_env(qs_env=qs_env, rho_xc=rho_xc)
-            CALL qs_rho_set(trho_xc, rho_r=trho_xc_r, rho_g=trho_xc_g)
-            CALL qs_fxc_fdiff(ks_env, rho_xc, trho_xc, xc_section, 6, .FALSE., v_xc, v_xc_tau)
-         ELSE
-            CALL qs_rho_set(trho, rho_r=trho_r, rho_g=trho_g)
-            CALL qs_fxc_fdiff(ks_env, rho, trho, xc_section, 6, .FALSE., v_xc, v_xc_tau)
-         END IF
-         CPASSERT((.NOT. gapw) .AND. (.NOT. gapw_xc))
+         NULLIFY (rho_r, rho_g, tau_r)
+         NULLIFY (ttau_r)
+         CALL get_qs_env(qs_env=qs_env, rho=rho)
+         CALL qs_rho_get(rho, rho_r=rho_r, rho_g=rho_g, tau_r=tau_r)
+         CALL xc_prep_2nd_deriv(deriv_set=deriv_set, rho_set=rho_set, rho_r=rho_r, tau_r=tau_r, &
+                                pw_pool=auxbas_pw_pool, xc_section=xc_section)
+         CALL xc_calc_2nd_deriv(v_xc=v_xc, v_xc_tau=v_xc_tau, deriv_set=deriv_set, &
+                                rho_set=rho_set, rho1_r=trho_r, rho1_g=trho_g, tau1_r=ttau_r, &
+                                pw_pool=auxbas_pw_pool, xc_section=xc_section, gapw=.FALSE., &
+                                do_tddft=.TRUE., do_triplet=.FALSE.)
+      END IF
+      CALL xc_dset_release(deriv_set)
+      CALL xc_rho_set_release(rho_set=rho_set, pw_pool=auxbas_pw_pool)
+      IF (gapw .OR. gapw_xc) THEN
+         CALL get_qs_env(qs_env, rho_atom_set=rho_atom_set)
+         rho1_atom_set => local_rho_set%rho_atom_set
+         CALL calculate_xc_2nd_deriv_atom(rho_atom_set, rho1_atom_set, qs_env, xc_section, para_env, &
+                                          do_tddft=.TRUE., do_triplet=.FALSE.)
       END IF
 
       DO ispin = 1, nspins
@@ -972,12 +980,8 @@ CONTAINS
                CALL qs_fxc_analytic(rho_aux_fit, rhoz_r_aux, tau_r, xc_section, auxbas_pw_pool, .FALSE., v_xc, v_xc_tau)
             ELSE
                CPABORT("NYA 00007")
-               NULLIFY (rhoz_aux)
-               ALLOCATE (rhoz_aux)
-               CALL qs_rho_create(rhoz_aux)
                CALL qs_rho_set(rhoz_aux, rho_r=rhoz_r_aux, rho_g=rhoz_g_aux)
                CALL qs_fxc_fdiff(ks_env, rho_aux_fit, rhoz_aux, xc_section, 6, .FALSE., v_xc, v_xc_tau)
-               DEALLOCATE (rhoz_aux)
             END IF
             !
             DO ispin = 1, nspins

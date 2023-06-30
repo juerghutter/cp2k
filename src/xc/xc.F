@@ -854,7 +854,7 @@ CONTAINS
                                 lsd_singlets, do_excitations, do_triplet, do_tddft, &
                                 compute_virial, virial_xc)
 
-      TYPE(pw_type), DIMENSION(:), POINTER             :: v_xc, v_xc_tau
+      TYPE(pw_type), DIMENSION(:), POINTER               :: v_xc, v_xc_tau
       TYPE(xc_derivative_set_type)                       :: deriv_set
       TYPE(xc_rho_set_type)                              :: rho_set
       TYPE(pw_type), DIMENSION(:), POINTER               :: rho1_r, rho1_g, tau1_r
