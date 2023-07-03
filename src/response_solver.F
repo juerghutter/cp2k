@@ -1682,7 +1682,7 @@ CONTAINS
          IF (debug_forces) fodeb(1:3) = force(1)%Vhxc_atom(1:3, 1)
          CALL update_ks_atom(qs_env, matrix_hz, matrix_p, forces=.TRUE., tddft=.TRUE., &
                              rho_atom_external=local_rhoz_set%rho_atom_set, &
-                             kscale=0.5_dp)
+                             kscale=0.5_dp, kforce=1.0_dp)
          IF (debug_forces) THEN
             fodeb(1:3) = force(1)%Vhxc_atom(1:3, 1) - fodeb(1:3)
             CALL para_env%sum(fodeb)
