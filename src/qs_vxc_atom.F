@@ -554,15 +554,6 @@ CONTAINS
       ELSE
          nspins = 1
       END IF
-      needs = xc_functionals_get_needs(xc_fun_section, lsd=lsd, &
-                                       calc_potential=.TRUE.)
-      gradient_functional = needs%drho .OR. needs%drho_spin
-      tau_f = (needs%tau .OR. needs%tau_spin)
-      IF (tau_f) THEN
-         CPABORT("Tau functionals not implemented for GAPW 2nd derivatives")
-      ELSE
-         rtau = 0.0_dp
-      END IF
 
       IF (my_tddft) THEN
          IF (excitations == tddfpt_excitations) THEN
@@ -575,6 +566,30 @@ CONTAINS
       ELSEIF (PRESENT(do_triplet)) THEN
          IF (nspins == 1 .AND. do_triplet) lsd = .TRUE.
       END IF
+
+      needs = xc_functionals_get_needs(xc_fun_section, lsd=lsd, &
+                                       calc_potential=.TRUE.)
+      gradient_functional = needs%drho .OR. needs%drho_spin
+      tau_f = (needs%tau .OR. needs%tau_spin)
+      IF (tau_f) THEN
+         CPABORT("Tau functionals not implemented for GAPW 2nd derivatives")
+      ELSE
+         rtau = 0.0_dp
+      END IF
+
+!deb
+!     IF (my_tddft) THEN
+!        IF (excitations == tddfpt_excitations) THEN
+!           IF (nspins == 1 .AND. (lsd_singlets .OR. res_etype == tddfpt_triplet)) THEN
+!              lsd = .TRUE.
+!           END IF
+!        END IF
+!     ELSEIF (PRESENT(do_tddfpt2) .AND. PRESENT(do_triplet)) THEN
+!        IF (nspins == 1 .AND. do_triplet) lsd = .TRUE.
+!     ELSEIF (PRESENT(do_triplet)) THEN
+!        IF (nspins == 1 .AND. do_triplet) lsd = .TRUE.
+!     END IF
+!deb
 
       !  Here starts the loop over all the atoms
       DO ikind = 1, SIZE(atomic_kind_set)
@@ -716,6 +731,14 @@ CONTAINS
                                    rho_set=rho_set_s, rho1_set=rho1_set_s, &
                                    deriv_set=deriv_set, &
                                    w=weight, vxc=vxc_s, vxg=vxg_s, do_triplet=do_triplet)
+            IF(PRESENT(do_triplet)) THEN
+               IF(do_triplet) THEN
+                  vxc_h = 0.5_dp*vxc_h
+                  vxg_h = 0.5_dp*vxg_h
+                  vxc_s = 0.5_dp*vxc_s
+                  vxg_s = 0.5_dp*vxg_s
+               END IF
+            END IF
 
             CALL get_rho_atom(rho_atom=rho1_atom, ga_Vlocal_gb_h=int_hh, ga_Vlocal_gb_s=int_ss)
             IF (gradient_functional) THEN
