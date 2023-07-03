@@ -731,8 +731,8 @@ CONTAINS
                                    rho_set=rho_set_s, rho1_set=rho1_set_s, &
                                    deriv_set=deriv_set, &
                                    w=weight, vxc=vxc_s, vxg=vxg_s, do_triplet=do_triplet)
-            IF(PRESENT(do_triplet)) THEN
-               IF(do_triplet) THEN
+            IF (PRESENT(do_triplet)) THEN
+               IF (do_triplet) THEN
                   vxc_h = 0.5_dp*vxc_h
                   vxg_h = 0.5_dp*vxg_h
                   vxc_s = 0.5_dp*vxc_s
