@@ -5,7 +5,7 @@
        KERNEL sTDA
        NSTATES      1
        MAX_ITER    50
-###       EV_SHIFT    6.0
+       EV_SHIFT    6.0
        CONVERGENCE [eV] 1.0e-7
     &END TDDFPT
   &END PROPERTIES

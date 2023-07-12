@@ -2,12 +2,12 @@
   METHOD Quickstep
   &PROPERTIES
     &TDDFPT
-       KERNEL NONE
+       KERNEL FULL
        NSTATES      1
        MAX_ITER    50
        CONVERGENCE [eV] 1.0e-7
        &XC
-         &XC_FUNCTIONAL PADE
+         &XC_FUNCTIONAL PBE
          &END XC_FUNCTIONAL
        &END XC
     &END TDDFPT

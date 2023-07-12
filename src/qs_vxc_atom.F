@@ -577,20 +577,6 @@ CONTAINS
          rtau = 0.0_dp
       END IF
 
-!deb
-!     IF (my_tddft) THEN
-!        IF (excitations == tddfpt_excitations) THEN
-!           IF (nspins == 1 .AND. (lsd_singlets .OR. res_etype == tddfpt_triplet)) THEN
-!              lsd = .TRUE.
-!           END IF
-!        END IF
-!     ELSEIF (PRESENT(do_tddfpt2) .AND. PRESENT(do_triplet)) THEN
-!        IF (nspins == 1 .AND. do_triplet) lsd = .TRUE.
-!     ELSEIF (PRESENT(do_triplet)) THEN
-!        IF (nspins == 1 .AND. do_triplet) lsd = .TRUE.
-!     END IF
-!deb
-
       !  Here starts the loop over all the atoms
       DO ikind = 1, SIZE(atomic_kind_set)
 
