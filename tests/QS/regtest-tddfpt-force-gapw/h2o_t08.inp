@@ -20,7 +20,7 @@
     &END MGRID
     &QS
       METHOD GAPW
-      EPS_DEFAULT 1.E-14
+      EPS_DEFAULT 1.E-10
     &END QS
     &EXCITED_STATES T
        STATE 1
@@ -35,10 +35,10 @@
       &END
       &OUTER_SCF
          MAX_SCF  10
-         EPS_SCF 1.0E-7
+         EPS_SCF 1.0E-6
       &END
       MAX_SCF  10
-      EPS_SCF 1.0E-7
+      EPS_SCF 1.0E-6
     &END SCF
     &XC
       &XC_FUNCTIONAL PBE0
@@ -51,13 +51,13 @@
   &END DFT
   &SUBSYS
     &CELL
-      ABC [angstrom] 8.0 8.0 8.0
+      ABC [angstrom] 6.0 6.0 6.0
       PERIODIC NONE
     &END
     &COORD
-    O   0.000000    0.000000   -0.065587
-    H   0.000000   -0.757136    0.520545
-    H   0.000000    0.757136    0.520545
+    O   0.000000    0.000000    0.000000
+    H   0.000000   -0.757136    0.504545
+    H   0.000000    0.757136    0.504545
     &END COORD
     &TOPOLOGY
      &CENTER_COORDINATES
