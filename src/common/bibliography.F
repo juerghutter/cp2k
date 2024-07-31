@@ -1051,7 +1051,6 @@ CONTAINS
                          authors=s2a("R. Z. Khaliullin", "A. T. Bell", "M. Head-Gordon"), &
                          title="Analysis of charge transfer effects in molecular complexes "// &
                          "based on absolutely localized molecular orbitals", &
-<<<<<<< HEAD
                          source="J. Chem. Phys.", volume="128", pages="184112", &
                          year=2008, doi="10.1063/1.2912041")
 
@@ -1877,6 +1876,12 @@ CONTAINS
                          title="High-throughput electronic band structure calculations: Challenges and tools", &
                          source="Comput. Mater. Sci.", volume="49", pages="299-312", &
                          year=2010, doi="10.1016/j.commatsci.2010.05.010")
+
+      CALL add_reference(key=Pracht2019, &
+                         authors=s2a("P. Pracht", "E. Caldeweyher", "S. Ehlert", "S. Grimme"), &
+                         title="A Robust Non-Self-Consistent Tight-Binding Quantum Chemistry Method for large Molecules", &
+                         source="ChemRxiv", volume="", pages="", &
+                         year=2019, doi="10.26434/chemrxiv.8326202.v1")
 
    END SUBROUTINE add_all_references
 
