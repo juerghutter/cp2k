@@ -1155,7 +1155,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="POTENTIAL_TYPE", &
-                          description="The type of this kinds pseudopotential (ECP, ALL, GTH, UPS).", &
+                          description="The type of this kinds pseudopotential (ECP, ALL, GTH, UPF).", &
                           deprecation_notice="Use 'POTENTIAL <TYPE> ...' instead.", &
                           usage="POTENTIAL_TYPE <TYPE>", default_c_val="", n_var=1)
       CALL section_add_keyword(section, keyword)
@@ -1163,7 +1163,7 @@ CONTAINS
 
       CALL keyword_create(keyword, __LOCATION__, name="POTENTIAL", &
                           variants=(/"POT"/), &
-                          description="The type (ECP, ALL, GTH, UPS) and name of the pseudopotential for the defined kind.", &
+                          description="The type (ECP, ALL, GTH, UPF) and name of the pseudopotential for the defined kind.", &
                           usage="POTENTIAL [type] <POTENTIAL-NAME>", type_of_var=char_t, default_c_vals=(/" ", " "/), &
                           citations=(/Goedecker1996, Hartwigsen1998, Krack2005/), n_var=-1)
       CALL section_add_keyword(section, keyword)
