@@ -919,7 +919,11 @@ CONTAINS
          do_rotation = scf_env%qs_ot_env(1)%settings%do_rotation
          DO ispin = 1, SIZE(mos)
             IF (.NOT. mos(ispin)%uniform_occupation) THEN
-               CPASSERT(do_rotation)
+               IF (.NOT. do_rotation) &
+                  CALL cp_abort(__LOCATION__, &
+                                "Calculations with non-uniform occupations with OT "// &
+                                "requires orbital rotation. "// &
+                                "Please activate the OT%ROTATION keyword!")
             END IF
          END DO
       END SELECT
@@ -928,7 +932,10 @@ CONTAINS
       IF (dft_control%low_spin_roks) THEN
          CPASSERT(scf_env%method == ot_method_nr)
          do_rotation = scf_env%qs_ot_env(1)%settings%do_rotation
-         CPASSERT(do_rotation)
+         IF (.NOT. do_rotation) &
+            CALL cp_abort(__LOCATION__, &
+                          "Calculation with Low Spin ROKS with OT requires orbital rotation. "// &
+                          "Please activate the OT%ROTATION keyword!")
       END IF
 
       CALL timestop(handle)
