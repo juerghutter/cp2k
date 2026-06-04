@@ -134,7 +134,7 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'init_ec_env'
 
       INTEGER                                            :: handle, ikind, ispin, maxlgto, nel(2), &
-                                                            nkind, nsgf, nspins, unit_nr
+                                                            nkind, nsgf, nspins
       LOGICAL                                            :: explicit, gpw, gs_kpoints, paw_atom
       REAL(KIND=dp)                                      :: eps_pgf_orb, etemp, &
                                                             flexible_electron_count, focc, n_el_f, &
@@ -190,14 +190,6 @@ CONTAINS
       IF (qs_env%energy_correction) THEN
 
          CPASSERT(PRESENT(ec_section))
-
-         ! get a useful output_unit
-         logger => cp_get_default_logger()
-         IF (logger%para_env%is_source()) THEN
-            unit_nr = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
-         ELSE
-            unit_nr = -1
-         END IF
 
          CALL section_vals_val_get(ec_section, "ALGORITHM", &
                                    i_val=ec_env%ks_solver)
