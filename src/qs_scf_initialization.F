@@ -9,6 +9,7 @@
 !> \brief Utility routines for qs_scf
 ! **************************************************************************************************
 MODULE qs_scf_initialization
+   USE atom_kind_orbitals,              ONLY: calculate_atomic_orbitals
    USE atomic_kind_types,               ONLY: atomic_kind_type
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_api,                    ONLY: dbcsr_create,&
@@ -57,8 +58,8 @@ MODULE qs_scf_initialization
         broy_mix, cholesky_dbcsr, cholesky_inverse, cholesky_off, diag_block_davidson, &
         diag_block_krylov, diag_filter_matrix, diag_ot, diag_standard, direct_p_mix, kerker_mix, &
         modified_broy_mix, multisec_mix, new_pulay_mix, no_mix, ot2cdft, outer_scf_none, &
-        plus_u_lowdin, pulay_mix, smeagol_runtype_emtransport, wfi_frozen_method_nr, &
-        wfi_ps_method_nr, wfi_use_guess_method_nr
+        plus_u_lowdin, plus_u_tensorial, pulay_mix, smeagol_runtype_emtransport, &
+        wfi_frozen_method_nr, wfi_ps_method_nr, wfi_use_guess_method_nr
    USE input_section_types,             ONLY: section_vals_get_subs_vals,&
                                               section_vals_type,&
                                               section_vals_val_get
@@ -349,13 +350,15 @@ CONTAINS
       NULLIFY (outer_scf_history, gradient_history, variable_history)
       CALL get_qs_env(qs_env=qs_env, do_kpoints=do_kpoints)
       ! Test kpoints
-      IF (do_kpoints) &
+      IF (do_kpoints) THEN
          CPABORT("CDFT calculation not possible with kpoints")
+      END IF
       ! Check that OUTER_SCF section in DFT&SCF is active
       ! This section must always be active to facilitate
       ! switching of the CDFT and SCF control parameters in outer_loop_switch
-      IF (.NOT. scf_control%outer_scf%have_scf) &
+      IF (.NOT. scf_control%outer_scf%have_scf) THEN
          CPABORT("Section SCF&OUTER_SCF must be active for CDFT calculations.")
+      END IF
       ! Initialize CDFT and outer_loop variables (constraint settings active in scf_control)
       IF (dft_control%qs_control%cdft_control%constraint_control%have_scf) THEN
          nhistory = dft_control%qs_control%cdft_control%constraint_control%max_scf + 1
@@ -660,10 +663,12 @@ CONTAINS
             ! possible for OT gamma point calculations
             qs_env%requires_mo_derivs = .FALSE.
          END IF
-         IF (dft_control%do_xas_calculation) &
+         IF (dft_control%do_xas_calculation) THEN
             CPABORT("No XAS implemented with kpoints")
-         IF (qs_env%do_rixs) &
+         END IF
+         IF (qs_env%do_rixs) THEN
             CPABORT("RIXS not implemented with kpoints")
+         END IF
          DO ik = 1, SIZE(kpoints%kp_env)
             CALL mpools_get(kpoints%mpools, ao_mo_fm_pools=ao_mo_fm_pools)
             mos_k => kpoints%kp_env(ik)%kpoint_env%mos
@@ -794,12 +799,14 @@ CONTAINS
 
       IF (scf_control%use_diag) THEN
          ! sanity check whether combinations are allowed
-         IF (dft_control%restricted) &
+         IF (dft_control%restricted) THEN
             CPABORT("OT only for restricted (ROKS)")
+         END IF
          SELECT CASE (scf_control%diagonalization%method)
          CASE (diag_ot, diag_block_krylov, diag_block_davidson)
-            IF (.NOT. not_se_or_tb) &
+            IF (.NOT. not_se_or_tb) THEN
                CPABORT("TB and SE not possible with OT diagonalization")
+            END IF
          END SELECT
          SELECT CASE (scf_control%diagonalization%method)
             ! Diagonalization: additional check whether we are in an orthonormal basis
@@ -820,32 +827,39 @@ CONTAINS
             END IF
             ! OT Diagonalization: not possible with ROKS
          CASE (diag_ot)
-            IF (dft_control%roks) &
+            IF (dft_control%roks) THEN
                CPABORT("ROKS with OT diagonalization not possible")
-            IF (do_kpoints) &
+            END IF
+            IF (do_kpoints) THEN
                CPABORT("OT diagonalization not possible with kpoint calculations")
+            END IF
             scf_env%method = ot_diag_method_nr
             need_coeff_b = .TRUE.
             ! Block Krylov diagonlization: not possible with ROKS,
             ! allocation of additional matrices is needed
          CASE (diag_block_krylov)
-            IF (dft_control%roks) &
+            IF (dft_control%roks) THEN
                CPABORT("ROKS with block PF diagonalization not possible")
-            IF (do_kpoints) &
+            END IF
+            IF (do_kpoints) THEN
                CPABORT("Block Krylov diagonalization not possible with kpoint calculations")
+            END IF
             scf_env%method = block_krylov_diag_method_nr
             scf_env%needs_ortho = .TRUE.
-            IF (.NOT. ASSOCIATED(scf_env%krylov_space)) &
+            IF (.NOT. ASSOCIATED(scf_env%krylov_space)) THEN
                CALL krylov_space_create(scf_env%krylov_space, scf_section)
+            END IF
             CALL krylov_space_allocate(scf_env%krylov_space, scf_control, mos)
             ! Block davidson diagonlization: allocation of additional matrices is needed
          CASE (diag_block_davidson)
-            IF (do_kpoints) &
+            IF (do_kpoints) THEN
                CPABORT("Block Davidson diagonalization not possible with kpoint calculations")
+            END IF
             scf_env%method = block_davidson_diag_method_nr
-            IF (.NOT. ASSOCIATED(scf_env%block_davidson_env)) &
+            IF (.NOT. ASSOCIATED(scf_env%block_davidson_env)) THEN
                CALL block_davidson_env_create(scf_env%block_davidson_env, dft_control%nspins, &
                                               scf_section)
+            END IF
             DO ispin = 1, dft_control%nspins
                CALL get_mo_set(mo_set=mos(ispin), mo_coeff=mo_coeff, nao=nao, nmo=nmo)
                CALL block_davidson_allocate(scf_env%block_davidson_env(ispin), mo_coeff, nao, nmo)
@@ -868,24 +882,29 @@ CONTAINS
          ! Check if subspace diagonlization is requested: allocation of additional matrices is needed
          IF (scf_control%do_diag_sub) THEN
             scf_env%needs_ortho = .TRUE.
-            IF (.NOT. ASSOCIATED(scf_env%subspace_env)) &
+            IF (.NOT. ASSOCIATED(scf_env%subspace_env)) THEN
                CALL diag_subspace_env_create(scf_env%subspace_env, scf_section, &
                                              dft_control%qs_control%cutoff)
+            END IF
             CALL diag_subspace_allocate(scf_env%subspace_env, qs_env, mos)
-            IF (do_kpoints) &
+            IF (do_kpoints) THEN
                CPABORT("No subspace diagonlization with kpoint calculation")
+            END IF
          END IF
          ! OT: check if OT is used instead of diagonalization. Not possible with added MOS at the moment
-      ELSEIF (scf_control%use_ot) THEN
+      ELSE IF (scf_control%use_ot) THEN
          scf_env%method = ot_method_nr
          need_coeff_b = .TRUE.
-         IF (SUM(ABS(scf_control%added_mos)) > 0) &
+         IF (SUM(ABS(scf_control%added_mos)) > 0) THEN
             CPABORT("OT with ADDED_MOS/=0 not implemented")
-         IF (dft_control%restricted .AND. dft_control%nspins /= 2) &
+         END IF
+         IF (dft_control%restricted .AND. dft_control%nspins /= 2) THEN
             CPABORT("nspin must be 2 for restricted (ROKS)")
-         IF (do_kpoints) &
+         END IF
+         IF (do_kpoints) THEN
             CPABORT("OT not possible with kpoint calculations")
-      ELSEIF (scf_env%method /= smeagol_method_nr) THEN
+         END IF
+      ELSE IF (scf_env%method /= smeagol_method_nr) THEN
          CPABORT("OT or DIAGONALIZATION have to be set")
       END IF
       DO ispin = 1, dft_control%nspins
@@ -923,6 +942,7 @@ CONTAINS
       REAL(KIND=dp)                                      :: u_ramping
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: evals
       REAL(KIND=dp), DIMENSION(:), POINTER               :: eigenvalues
+      TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
       TYPE(cp_fm_type)                                   :: evecs, fm_w
       TYPE(cp_fm_type), POINTER                          :: mo_coeff
@@ -1137,6 +1157,23 @@ CONTAINS
          END DO
       END IF
 
+      IF (dft_control%dft_plus_u) THEN
+         IF (dft_control%plus_u_method_id == plus_u_tensorial) THEN
+            CALL get_qs_env(qs_env, atomic_kind_set=atomic_kind_set, qs_kind_set=qs_kind_set)
+            DO ikind = 1, SIZE(atomic_kind_set)
+               qs_kind => qs_kind_set(ikind)
+               CALL get_qs_kind(qs_kind=qs_kind, dft_plus_u_atom=dft_plus_u_atom)
+               IF (.NOT. dft_plus_u_atom) CYCLE
+               CALL calculate_atomic_orbitals(atomic_kind=atomic_kind_set(ikind), &
+                                              qs_kind=qs_kind_set(ikind), &
+                                              which_l=qs_kind%dft_plus_u%l, &
+                                              which_n=qs_kind%dft_plus_u%n, &
+                                              proj_shell_charge=qs_kind%dft_plus_u%proj_shell_charge, &
+                                              ao_coef=qs_kind%dft_plus_u%ao_coef)
+            END DO
+         END IF
+      END IF
+
       ! extrapolate outer loop variables
       IF (scf_control%outer_scf%have_scf) THEN
          CALL outer_loop_extrapolate(qs_env)
@@ -1289,9 +1326,9 @@ CONTAINS
             CALL get_qs_env(qs_env=qs_env, rho_atom_set=rho_atom)
             CALL mixing_init(scf_env%mixing_method, rho, scf_env%mixing_store, &
                              para_env, rho_atom=rho_atom)
-         ELSEIF (dft_control%qs_control%dftb .OR. dft_control%qs_control%xtb) THEN
+         ELSE IF (dft_control%qs_control%dftb .OR. dft_control%qs_control%xtb) THEN
             CALL charge_mixing_init(scf_env%mixing_store)
-         ELSEIF (dft_control%qs_control%semi_empirical) THEN
+         ELSE IF (dft_control%qs_control%semi_empirical) THEN
             CPABORT('SE Code not possible')
          ELSE
             CALL mixing_init(scf_env%mixing_method, rho, scf_env%mixing_store, &

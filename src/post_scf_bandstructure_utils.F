@@ -53,7 +53,8 @@ MODULE post_scf_bandstructure_utils
                                               cp_fm_set_all,&
                                               cp_fm_to_fm,&
                                               cp_fm_type
-   USE cp_log_handling,                 ONLY: cp_logger_get_default_io_unit
+   USE cp_log_handling,                 ONLY: cp_logger_get_default_io_unit,&
+                                              cp_to_string
    USE cp_parser_methods,               ONLY: read_float_object
    USE input_constants,                 ONLY: int_ldos_z,&
                                               large_cell_Gamma,&
@@ -83,6 +84,8 @@ MODULE post_scf_bandstructure_utils
    USE physcon,                         ONLY: angstrom,&
                                               evolt
    USE post_scf_bandstructure_types,    ONLY: band_edges_type,&
+                                              eps_qp_gap,&
+                                              max_qp_gap,&
                                               post_scf_bandstructure_type
    USE pw_env_types,                    ONLY: pw_env_get,&
                                               pw_env_type
@@ -255,8 +258,11 @@ CONTAINS
       CALL section_vals_val_get(floquet_sec, "ENERGY_WINDOW", r_val=bs_env%energy_window_floquet)
       CALL section_vals_val_get(floquet_sec, "ENERGY_STEP", r_val=bs_env%energy_step_floquet)
       CALL section_vals_val_get(floquet_sec, "BROADENING", r_val=bs_env%broadening_floquet)
+      CALL section_vals_val_get(floquet_sec, "MEM_FILL_FRACTION", r_val=bs_env%floquet_mem_fill_fraction)
+      CALL section_vals_val_get(floquet_sec, "TEMPERATURE", r_val=bs_env%floquet_temperature)
       CALL section_vals_val_get(floquet_sec, "FLOQUET_DOS_FILE_NAME", c_val=bs_env%floquet_dos_file)
       CALL section_vals_val_get(floquet_sec, "QUASI_ENERGIES_FILE_NAME", c_val=bs_env%floquet_qe_file)
+      CALL section_vals_val_get(floquet_sec, "FLOQUET_BS_FILE_NAME", c_val=bs_env%floquet_bs_file)
 
       ! read special points for band structure
       ALLOCATE (bs_env%xkp_special(3, bs_env%input_kp_bs_n_sp_pts))
@@ -1938,8 +1944,9 @@ CONTAINS
       CALL bs_env%para_env%max(z_end_global)
       n_z = z_end_global - z_start_global + 1
 
-      IF (ANY(ABS(bs_env%hmat(1:2, 3)) > 1.0E-6_dp) .OR. ANY(ABS(bs_env%hmat(3, 1:2)) > 1.0E-6_dp)) &
+      IF (ANY(ABS(bs_env%hmat(1:2, 3)) > 1.0E-6_dp) .OR. ANY(ABS(bs_env%hmat(3, 1:2)) > 1.0E-6_dp)) THEN
          CPABORT("Please choose a cell that has 90° angles to the z-direction.")
+      END IF
       ! for integration, we need the dz and the conversion from H -> eV and a_Bohr -> Å
       bs_env%unit_ldos_int_z_inv_Ang2_eV = bs_env%hmat(3, 3)/REAL(n_z, KIND=dp)/evolt/angstrom**2
 
@@ -2969,9 +2976,40 @@ CONTAINS
       CALL get_VBM_CBM_bandgaps(bs_env%band_edges_G0W0, bs_env%eigenval_G0W0, bs_env)
       CALL get_VBM_CBM_bandgaps(bs_env%band_edges_HF, bs_env%eigenval_HF, bs_env)
 
+      CALL check_qp_gap_sanity(bs_env)
+
       CALL timestop(handle)
 
    END SUBROUTINE get_all_VBM_CBM_bandgaps
+
+! **************************************************************************************************
+!> \brief Warn if the G0W0 fundamental band gap is inverted or implausibly large, i.e. if the
+!>        quasiparticle solve has produced a spectrum that cannot be physical.
+!> \param bs_env ...
+! **************************************************************************************************
+   SUBROUTINE check_qp_gap_sanity(bs_env)
+
+      TYPE(post_scf_bandstructure_type), POINTER         :: bs_env
+
+      REAL(KIND=dp)                                      :: gap, gap_scf
+
+      gap = bs_env%band_edges_G0W0%IDBG
+      gap_scf = bs_env%band_edges_scf%IDBG
+
+      ! requiring a healthy SCF gap keeps the inversion test from firing on a genuine metal
+      IF (gap < -eps_qp_gap .AND. gap_scf > eps_qp_gap) THEN
+         CALL cp_warn(__LOCATION__, &
+                      "G0W0 band gap is negative ("// &
+                      TRIM(ADJUSTL(cp_to_string(gap*evolt, '(F12.3)')))//" eV): the quasiparticle "// &
+                      "spectrum is inverted. Check numerical parameters.")
+      ELSE IF (ABS(gap) > max_qp_gap) THEN
+         CALL cp_warn(__LOCATION__, &
+                      "G0W0 band gap is implausibly large ("// &
+                      TRIM(ADJUSTL(cp_to_string(gap*evolt, '(F12.3)')))//" eV): the quasiparticle "// &
+                      "solve has likely diverged. Check numerical parameters.")
+      END IF
+
+   END SUBROUTINE check_qp_gap_sanity
 
 ! **************************************************************************************************
 !> \brief ...

@@ -60,14 +60,10 @@ MODULE gw_utils
    USE distribution_2d_types,           ONLY: distribution_2d_type
    USE gw_communication,                ONLY: fm_to_local_array
    USE gw_integrals,                    ONLY: build_3c_integral_block
-   USE input_constants,                 ONLY: do_potential_truncated,&
-                                              large_cell_Gamma,&
-                                              large_cell_Gamma_ri_rs,&
-                                              non_periodic_ri_rs,&
-                                              ri_rpa_g0w0_crossing_newton,&
-                                              rtp_method_bse,&
-                                              small_cell_full_kp,&
-                                              xc_none
+   USE input_constants,                 ONLY: &
+        do_potential_truncated, large_cell_Gamma, large_cell_Gamma_ri_rs, non_periodic_ri_rs, &
+        ri_rpa_g0w0_crossing_newton, rtp_bse_kernel_ri_ao, rtp_bse_kernel_ri_rs, rtp_method_bse, &
+        rtp_method_bse_linearized, small_cell_full_kp, xc_none
    USE input_section_types,             ONLY: section_vals_get,&
                                               section_vals_get_subs_vals,&
                                               section_vals_type,&
@@ -139,7 +135,8 @@ MODULE gw_utils
 
    PUBLIC :: create_and_init_bs_env_for_gw, de_init_bs_env, get_i_j_atoms, &
              compute_xkp, time_to_freq, analyt_conti_and_print, &
-             add_R, is_cell_in_index_to_cell, get_V_tr_R, power
+             add_R, is_cell_in_index_to_cell, get_V_tr_R, power, &
+             rtbse_resolve_rirs_flag
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'gw_utils'
 
@@ -234,15 +231,19 @@ CONTAINS
    END SUBROUTINE create_and_init_bs_env_for_gw
 
 ! **************************************************************************************************
-!> \brief ...
-!> \param bs_env ...
+!> \brief Releases the memory-heavy GW intermediates that cannot be freed in bs_env_release,
+!>        retaining the 3c neighbor list only when an AO-RI RT-BSE self-energy still needs it
+!> \param qs_env Quickstep environment - used to resolve the RT-BSE kernel-RI setting
+!> \param bs_env Bandstructure environment whose intermediates are released
 ! **************************************************************************************************
-   SUBROUTINE de_init_bs_env(bs_env)
+   SUBROUTINE de_init_bs_env(qs_env, bs_env)
+      TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(post_scf_bandstructure_type), POINTER         :: bs_env
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'de_init_bs_env'
 
       INTEGER                                            :: handle
+      LOGICAL                                            :: retain_nl_3c, rirs_kernel
 
       CALL timeset(routineN, handle)
       ! deallocate quantities here which:
@@ -250,8 +251,16 @@ CONTAINS
       ! 2. consume a lot of memory and should not be kept until the quantity is
       !    deallocated in bs_env_release
 
+      ! nl_3c feeds only the AO-RI SEX self-energy (compute_3c_integrals); the RI-RS SEX
+      ! path never reads it, and AO-RI Hartree builds its own blocks. Retain iff AO-RI SEX.
+      retain_nl_3c = .FALSE.
       IF (ASSOCIATED(bs_env%nl_3c%ij_list) .AND. (bs_env%rtp_method == rtp_method_bse)) THEN
-         IF (bs_env%unit_nr > 0) WRITE (bs_env%unit_nr, *) "Retaining nl_3c for RTBSE"
+         CALL rtbse_resolve_rirs_flag(qs_env, bs_env, rirs_kernel=rirs_kernel)
+         retain_nl_3c = .NOT. rirs_kernel
+      END IF
+
+      IF (retain_nl_3c) THEN
+         IF (bs_env%unit_nr > 0) WRITE (bs_env%unit_nr, *) "Retaining nl_3c for AO-RI RT-BSE self-energy"
       ELSE
          CALL neighbor_list_3c_destroy(bs_env%nl_3c)
       END IF
@@ -261,6 +270,52 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE de_init_bs_env
+
+! **************************************************************************************************
+!> \brief Resolve the linRTBSE RI-RS kernel switch from the KERNEL_RI input and the GW default.
+!> \param qs_env Quickstep environment - source of the input section and the RTP method
+!> \param bs_env Bandstructure environment - provides the do_gw_ri_rs default
+!> \param rirs_kernel (optional) .TRUE. if the Hartree + SEX kernels use the RI-RS grid backend
+!> \author Maximilian Graml
+!> \note Single source of truth shared by create_rtbse_env (sets the flag) and de_init_bs_env
+!>       (decides whether to retain nl_3c). KERNEL_RI=DEFAULT follows bs_env%do_gw_ri_rs;
+!>       RS/AO force; forced .FALSE. for non-linearized (full) RT-BSE (warn on explicit RS).
+! **************************************************************************************************
+   SUBROUTINE rtbse_resolve_rirs_flag(qs_env, bs_env, rirs_kernel)
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(post_scf_bandstructure_type), POINTER         :: bs_env
+      LOGICAL, INTENT(OUT), OPTIONAL                     :: rirs_kernel
+
+      INTEGER                                            :: kernel_ri
+      LOGICAL                                            :: my_rirs_kernel
+      TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(section_vals_type), POINTER                   :: input
+
+      NULLIFY (dft_control, input)
+      CALL get_qs_env(qs_env, dft_control=dft_control, input=input)
+
+      CALL section_vals_val_get(input, "DFT%REAL_TIME_PROPAGATION%RTBSE%KERNEL_RI", &
+                                i_val=kernel_ri)
+      SELECT CASE (kernel_ri)
+      CASE (rtp_bse_kernel_ri_rs)
+         my_rirs_kernel = .TRUE.
+      CASE (rtp_bse_kernel_ri_ao)
+         my_rirs_kernel = .FALSE.
+      CASE DEFAULT  ! rtp_bse_kernel_ri_default
+         my_rirs_kernel = bs_env%do_gw_ri_rs
+      END SELECT
+
+      ! RI-RS kernels are implemented for linearized RT-BSE only; full RT-BSE always uses AO-RI.
+      IF (dft_control%rtp_control%rtp_method /= rtp_method_bse_linearized) THEN
+         IF (kernel_ri == rtp_bse_kernel_ri_rs) THEN
+            CPWARN("RI-RS kernels are implemented for linearized RT-BSE only; forcing AO")
+         END IF
+         my_rirs_kernel = .FALSE.
+      END IF
+
+      IF (PRESENT(rirs_kernel)) rirs_kernel = my_rirs_kernel
+
+   END SUBROUTINE rtbse_resolve_rirs_flag
 
 ! **************************************************************************************************
 !> \brief ...
@@ -296,8 +351,14 @@ CONTAINS
       CALL section_vals_val_get(gw_sec, "PRINT%PRINT_DBT_CONTRACT_VERBOSE", l_val=bs_env%print_contract_verbose)
       CALL section_vals_val_get(gw_sec, "TIKHONOV", r_val=bs_env%ri_rs%tikhonov)
       CALL section_vals_val_get(gw_sec, "GRID_SELECT", i_val=bs_env%ri_rs%grid_select)
-      CALL section_vals_val_get(gw_sec, "CUTOFF_RADIUS_RI_RS", r_val=bs_env%ri_rs%cutoff_radius_ri_rs)
+      CALL section_vals_val_get(gw_sec, "GRID_FILE_SUFFIX", c_val=bs_env%ri_rs%grid_file_suffix)
+      CALL section_vals_val_get(gw_sec, "CUTOFF_RADIUS_RL_RI", r_val=bs_env%ri_rs%cutoff_radius_ri_rs)
+      CALL section_vals_val_get(gw_sec, "CUTOFF_RADIUS_RL_AO", r_val=bs_env%ri_rs%cutoff_radius_ri_ao)
       CALL section_vals_val_get(gw_sec, "N_PROCS_PER_ATOM_Z_LP", i_val=bs_env%ri_rs%n_procs_per_atom_z_lp)
+      CALL section_vals_val_get(gw_sec, "N_PANELS", i_val=bs_env%ri_rs%n_panels)
+      CALL section_vals_val_get(gw_sec, "KEEP_SPARSITY_RL", l_val=bs_env%ri_rs%keep_sparsity_rirs)
+      CALL section_vals_val_get(gw_sec, "CUTOFF_RADIUS_RL_W", r_val=bs_env%ri_rs%cutoff_radius_v_w)
+      CALL section_vals_val_get(gw_sec, "CUTOFF_RADIUS_G_W", r_val=bs_env%ri_rs%cutoff_radius_g_w)
 
       IF (bs_env%print_contract) THEN
          bs_env%unit_nr_contract = bs_env%unit_nr
@@ -1319,10 +1380,12 @@ CONTAINS
                WRITE (frmt, '(A)') '(3A,I1,A)'
                WRITE (f_S_p, frmt) TRIM(prefix), bs_env%Sigma_p_name, "_0", ind, ".matrix"
                WRITE (f_S_n, frmt) TRIM(prefix), bs_env%Sigma_n_name, "_0", ind, ".matrix"
-            ELSE IF (i_t_or_w < 100) THEN
+            ELSE IF (ind < 100) THEN
                WRITE (frmt, '(A)') '(3A,I2,A)'
                WRITE (f_S_p, frmt) TRIM(prefix), bs_env%Sigma_p_name, "_", ind, ".matrix"
                WRITE (f_S_n, frmt) TRIM(prefix), bs_env%Sigma_n_name, "_", ind, ".matrix"
+            ELSE
+               CPABORT('Please implement more than 99 combined spin+freq indices.')
             END IF
 
             INQUIRE (file=TRIM(f_S_p), exist=Sigma_pos_time_exists)
@@ -1336,7 +1399,8 @@ CONTAINS
       END DO
 
       ! Marek : In the RTBSE run, check also for zero frequency W
-      IF (bs_env%rtp_method == rtp_method_bse) THEN
+      IF (bs_env%rtp_method == rtp_method_bse .OR. &
+          bs_env%rtp_method == rtp_method_bse_linearized) THEN
          WRITE (f_W_t, '(3A,I1,A)') TRIM(prefix), "W_freq_rtp", "_0", 0, ".matrix"
          INQUIRE (file=TRIM(f_W_t), exist=W_time_exists)
          bs_env%all_W_exist = bs_env%all_W_exist .AND. W_time_exists
@@ -1401,8 +1465,9 @@ CONTAINS
       num_pe = para_env%num_pe
       ! if not already set, use all processors for the group (for large-cell GW, performance
       ! seems to be best for a single group with all MPI processes per group)
-      IF (bs_env%group_size_tensor < 0 .OR. bs_env%group_size_tensor > num_pe) &
+      IF (bs_env%group_size_tensor < 0 .OR. bs_env%group_size_tensor > num_pe) THEN
          bs_env%group_size_tensor = num_pe
+      END IF
 
       ! group_size_tensor must divide num_pe without rest; otherwise everything will be complicated
       IF (MODULO(num_pe, bs_env%group_size_tensor) /= 0) THEN
@@ -1696,15 +1761,30 @@ CONTAINS
          WRITE (u, '(T2,A,F37.1,A)') 'Input: Available memory per MPI process', &
             bs_env%input_memory_per_proc_GB, ' GB'
          IF (bs_env%do_gw_ri_rs) THEN
-            WRITE (u, FMT="(T2,A,ES44.1)") " "
-            WRITE (u, FMT="(T2,A,ES37.1)") "INPUT: Regularization parameter for RI-RS ", bs_env%ri_rs%tikhonov
-            IF (bs_env%ri_rs%cutoff_radius_ri_rs /= -1.0_dp) THEN
-               WRITE (u, FMT="(T2,A,F31.1,A)") "INPUT: Cutoff radius for grid points in RI-RS ", &
-                  bs_env%ri_rs%cutoff_radius_ri_rs*angstrom, " Å"
+            WRITE (u, '(A)') ' '
+            WRITE (u, '(T2,A,ES43.2)') 'Input: RI-RS Tikhonov regularization', &
+               bs_env%ri_rs%tikhonov
+            IF (bs_env%ri_rs%cutoff_radius_ri_rs > 0.0_dp) THEN
+               WRITE (u, '(T2,A,F39.2,A)') 'Input: RI-RS integration sphere cutoff', &
+                  bs_env%ri_rs%cutoff_radius_ri_rs*angstrom, ' Å'
             END IF
-            WRITE (u, FMT="(T2,A,I35)") "INPUT: Number of MPI ranks per atom in Z_lP solve ", &
+            IF (bs_env%ri_rs%cutoff_radius_ri_ao > 0.0_dp) THEN
+               WRITE (u, '(T2,A,F44.2,A)') 'Input: AO grid hard cutoff radius', &
+                  bs_env%ri_rs%cutoff_radius_ri_ao*angstrom, ' Å'
+            END IF
+            WRITE (u, '(T2,A,I40)') 'Input: MPI ranks per atom in Z_lP solve', &
                bs_env%ri_rs%n_procs_per_atom_z_lp
-            WRITE (u, FMT="(T2,A,ES44.1)") " "
+            WRITE (u, '(T2,A,L43)') 'Input: Keep sparsity in χ/G/W panels', &
+               bs_env%ri_rs%keep_sparsity_rirs
+            IF (bs_env%ri_rs%cutoff_radius_v_w > 0.0_dp) THEN
+               WRITE (u, '(T2,A,F43.2,A)') 'Input: G/W panel truncation radius', &
+                  bs_env%ri_rs%cutoff_radius_v_w*angstrom, ' Å'
+            END IF
+            IF (bs_env%ri_rs%cutoff_radius_g_w > 0.0_dp) THEN
+               WRITE (u, '(T2,A,F40.2,A)') 'Input: G/W operator truncation radius', &
+                  bs_env%ri_rs%cutoff_radius_g_w*angstrom, ' Å'
+            END IF
+            WRITE (u, '(A)') ' '
          END IF
       END IF
 
@@ -1897,6 +1977,15 @@ CONTAINS
          E_max = MAX(E_max, E_max_ispin)
       END DO
 
+      ! Open-shell uses ONE minimax grid for the combined [min gap, max span] over both spins (the
+      ! superset covers each channel, so it is accurate; per-spin grids would only be more efficient).
+      IF (bs_env%n_spin > 1) THEN
+         CALL cp_hint(__LOCATION__, &
+                      "Open-shell GW uses one minimax grid spanning [min gap, max span] across both "// &
+                      "spin channels; raise NUM_TIME_FREQ_POINTS if QP convergence is marginal for "// &
+                      "strongly spin-asymmetric systems.")
+      END IF
+
       E_range = E_max/E_min
 
       ALLOCATE (points_and_weights(2*num_time_freq_points))
@@ -2052,15 +2141,17 @@ CONTAINS
          DO i = 1, SIZE(exp_RI, 1)
             DO j = 1, SIZE(exp_RI, 2)
                IF (exp_RI(i, j) < exp_min_RI .AND. exp_RI(i, j) > 1E-3_dp) exp_min_RI = exp_RI(i, j)
-               IF (exp_RI(i, j) < exp_RI_kind(ikind) .AND. exp_RI(i, j) > 1E-3_dp) &
+               IF (exp_RI(i, j) < exp_RI_kind(ikind) .AND. exp_RI(i, j) > 1E-3_dp) THEN
                   exp_RI_kind(ikind) = exp_RI(i, j)
+               END IF
             END DO
          END DO
          DO i = 1, SIZE(exp_ao, 1)
             DO j = 1, SIZE(exp_ao, 2)
                IF (exp_ao(i, j) < exp_min_ao .AND. exp_ao(i, j) > 1E-3_dp) exp_min_ao = exp_ao(i, j)
-               IF (exp_ao(i, j) < exp_ao_kind(ikind) .AND. exp_ao(i, j) > 1E-3_dp) &
+               IF (exp_ao(i, j) < exp_ao_kind(ikind) .AND. exp_ao(i, j) > 1E-3_dp) THEN
                   exp_ao_kind(ikind) = exp_ao(i, j)
+               END IF
             END DO
          END DO
          radius_ao_kind(ikind) = SQRT(-LOG(eps)/exp_ao_kind(ikind))

@@ -43,6 +43,9 @@ MODULE input_constants
    INTEGER, PARAMETER, PUBLIC               :: do_full_density = 0, &
                                                do_spin_density = 1
 
+   INTEGER, PARAMETER, PUBLIC               :: moments_format_detailed = 1, &
+                                               moments_format_trajectory = 2
+
    INTEGER, PARAMETER, PUBLIC               :: do_no_et = 0, &
                                                do_et_ddapc = 1
    ! Method Names
@@ -144,7 +147,8 @@ MODULE input_constants
                                                tree_mc_run = 18, &
                                                driver_run = 19, &
                                                negf_run = 20, &
-                                               mimic_run = 21
+                                               mimic_run = 21, &
+                                               mtlr_run = 22
 
    ! Run Types of Atom Code
    INTEGER, PARAMETER, PUBLIC               :: atom_no_run = 1, &
@@ -246,16 +250,15 @@ MODULE input_constants
 
    INTEGER, PARAMETER, PUBLIC               :: wfi_use_guess_method_nr = 0, &
                                                wfi_use_prev_p_method_nr = 1, &
-                                               wfi_use_prev_rho_r_method_nr = 2, &
-                                               wfi_linear_wf_method_nr = 3, &
-                                               wfi_linear_p_method_nr = 4, &
-                                               wfi_linear_ps_method_nr = 5, &
-                                               wfi_use_prev_wf_method_nr = 6, &
-                                               wfi_ps_method_nr = 7, &
-                                               wfi_frozen_method_nr = 8, &
-                                               wfi_aspc_nr = 9, &
-                                               wfi_gext_proj_nr = 10, &
-                                               wfi_gext_proj_qtr_nr = 11
+                                               wfi_linear_wf_method_nr = 2, &
+                                               wfi_linear_p_method_nr = 3, &
+                                               wfi_linear_ps_method_nr = 4, &
+                                               wfi_use_prev_wf_method_nr = 5, &
+                                               wfi_ps_method_nr = 6, &
+                                               wfi_frozen_method_nr = 7, &
+                                               wfi_aspc_nr = 8, &
+                                               wfi_gext_proj_nr = 9, &
+                                               wfi_gext_proj_qtr_nr = 10
 
    INTEGER, PARAMETER, PUBLIC               :: do_method_undef = 0, &
                                                do_method_gapw = 1, &
@@ -922,7 +925,8 @@ MODULE input_constants
    ! Define DFT+U method identifier codes
    INTEGER, PARAMETER, PUBLIC               :: plus_u_lowdin = 1, &
                                                plus_u_mulliken = 2, &
-                                               plus_u_mulliken_charges = 3
+                                               plus_u_mulliken_charges = 3, &
+                                               plus_u_tensorial = 4
 
    ! Define identifier codes for smearing method
    INTEGER, PARAMETER, PUBLIC               :: smear_energy_window = 1, &
@@ -980,10 +984,15 @@ MODULE input_constants
                                                rtp_localize_each = 2
 
    INTEGER, PARAMETER, PUBLIC               :: rtp_method_tddft = 1, &
-                                               rtp_method_bse = 2
+                                               rtp_method_bse = 2, &
+                                               rtp_method_bse_linearized = 3
 
    INTEGER, PARAMETER, PUBLIC               :: rtp_bse_ham_ks = 1, &
                                                rtp_bse_ham_g0w0 = 2
+
+   INTEGER, PARAMETER, PUBLIC               :: rtp_bse_kernel_ri_default = 0, &
+                                               rtp_bse_kernel_ri_rs = 1, &
+                                               rtp_bse_kernel_ri_ao = 2
 
    ! how to solve polarizable force fields
    INTEGER, PARAMETER, PUBLIC               :: do_fist_pol_none = 1, &

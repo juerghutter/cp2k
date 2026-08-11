@@ -134,7 +134,6 @@ rm tools/build_utils/fypp
 %build
 cmake_common_args=(
   "-G Ninja"
-  "-DCMAKE_BUILD_TYPE:STRING=Generic"
   "-DCP2K_BLAS_VENDOR:STRING=FlexiBLAS"
   "-DCP2K_USE_EVERYTHING:BOOL=OFF"
   "-DCP2K_USE_STATIC_BLAS:BOOL=OFF"
@@ -154,6 +153,7 @@ for mpi in '' mpich openmpi; do
     module load mpi/${mpi}-%{_arch}
     cmake_mpi_args=(
       "-DCMAKE_INSTALL_PREFIX:PATH=${MPI_HOME}"
+      "-DCMAKE_INSTALL_LIBDIR:PATH=lib"
       "-DCMAKE_PREFIX_PATH:PATH=${MPI_HOME};%{_prefix}"
       "-DCMAKE_INSTALL_Fortran_MODULES:PATH=${MPI_FORTRAN_MOD_DIR}/cp2k"
       "-DCP2K_DATA_DIR:PATH=%{_datadir}/cp2k/data"
@@ -163,7 +163,6 @@ for mpi in '' mpich openmpi; do
   else
     cmake_mpi_args=(
       "-DCMAKE_INSTALL_Fortran_MODULES:PATH=%{_fmoddir}/cp2k"
-      "-DCMAKE_INSTALL_LIBDIR:PATH=lib64"
       "-DCP2K_USE_MPI:BOOL=OFF"
     )
   fi

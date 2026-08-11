@@ -41,6 +41,7 @@ MODULE accint_weights_forces
                                               qs_environment_type
    USE qs_force_types,                  ONLY: qs_force_type
    USE qs_fxc,                          ONLY: qs_fxc_analytic
+   USE qs_kind_types,                   ONLY: qs_kind_type
    USE qs_ks_types,                     ONLY: get_ks_env,&
                                               qs_ks_env_type
    USE qs_rho_types,                    ONLY: qs_rho_create,&
@@ -49,11 +50,16 @@ MODULE accint_weights_forces
                                               qs_rho_type
    USE realspace_grid_types,            ONLY: realspace_grid_type,&
                                               transfer_pw2rs
-   USE skala_gpw_functional,            ONLY: skala_gpw_exc_density,&
+   USE skala_gpw_functional,            ONLY: native_skala_gapw_atom_composite_requested,&
+                                              native_skala_gapw_composite_reference,&
+                                              skala_gapw_representation,&
+                                              skala_gpw_weight_derivative,&
                                               xc_section_uses_native_skala_grid
    USE virial_types,                    ONLY: virial_type
    USE xc,                              ONLY: xc_exc_pw_create,&
                                               xc_vxc_pw_create
+   USE xc_gauxc_functional,             ONLY: gauxc_gapw_has_paw_pseudopotentials
+   USE xc_input_constants,              ONLY: skala_gapw_paw_one_center
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -91,7 +97,8 @@ CONTAINS
       INTEGER                                            :: atom_a, handle, iatom, ikind, natom, &
                                                             natom_of_kind, nkind, output_unit
       INTEGER, DIMENSION(:), POINTER                     :: atom_list
-      LOGICAL                                            :: lr_triplet, native_grid_diagnostics, &
+      LOGICAL                                            :: composite_reference, lr_triplet, &
+                                                            native_grid_diagnostics, &
                                                             native_skala_grid, uf_grid, use_virial
       REAL(KIND=dp)                                      :: my_force_scale
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: calpha, cvalue
@@ -103,12 +110,28 @@ CONTAINS
       TYPE(pw_pool_type), POINTER                        :: auxbas_pw_pool, xc_pw_pool
       TYPE(pw_r3d_rs_type)                               :: e_force_rspace, e_rspace
       TYPE(qs_force_type), DIMENSION(:), POINTER         :: force
+      TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
       TYPE(virial_type), POINTER                         :: virial
 
       CALL timeset(routineN, handle)
 
-      CALL get_qs_env(qs_env, dft_control=dft_control)
+      CALL get_qs_env(qs_env, dft_control=dft_control, qs_kind_set=qs_kind_set)
+
+      ! Composite references replace the PW XC quadrature and its Gaussian weight derivative.
+      ! The public selector applies only when a pseudopotential kind actually uses PAW one-center
+      ! data; it must not change all-electron GAPW integration.
+      composite_reference = native_skala_gapw_composite_reference(xc_section) .OR. &
+                            native_skala_gapw_atom_composite_requested(xc_section)
+      IF (.NOT. composite_reference) THEN
+         composite_reference = skala_gapw_representation(xc_section) == &
+            skala_gapw_paw_one_center .AND. &
+            gauxc_gapw_has_paw_pseudopotentials(qs_kind_set)
+      END IF
+      IF (composite_reference) THEN
+         CALL timestop(handle)
+         RETURN
+      END IF
 
       IF (dft_control%qs_control%gapw_control%accurate_xcint) THEN
 
@@ -412,7 +435,7 @@ CONTAINS
          NULLIFY (rho_r, rho_g, tau_r, tau_g)
          IF (rho_g_valid) THEN
             CALL create_density_on_pool(xc_pw_pool, rho_g_base, rho_r, rho_g)
-         ELSEIF (ASSOCIATED(rho_r_base)) THEN
+         ELSE IF (ASSOCIATED(rho_r_base)) THEN
             CALL create_density_on_pool_from_r(auxbas_pw_pool, xc_pw_pool, rho_r_base, rho_r, rho_g)
          ELSE
             CPABORT("Fine Grid in xc_density requires rho_r or rho_g")
@@ -420,7 +443,7 @@ CONTAINS
          IF (rho_tau_valid) THEN
             IF (rho_tau_g_valid) THEN
                CALL create_density_on_pool(xc_pw_pool, tau_g_base, tau_r, tau_g)
-            ELSEIF (ASSOCIATED(tau_r_base)) THEN
+            ELSE IF (ASSOCIATED(tau_r_base)) THEN
                CALL create_density_on_pool_from_r(auxbas_pw_pool, xc_pw_pool, tau_r_base, tau_r, tau_g)
             ELSE
                CPABORT("Fine Grid in xc_density requires tau_r or tau_g")
@@ -461,8 +484,8 @@ CONTAINS
          SELECT CASE (order)
          CASE (0)
             IF (native_skala_grid) THEN
-               CALL skala_gpw_exc_density(exc, rho_r, rho_g, tau_r, xc_section, weights, &
-                                          xc_pw_pool, particle_set, cell)
+               CALL skala_gpw_weight_derivative(exc, rho_r, rho_g, tau_r, xc_section, weights, &
+                                                xc_pw_pool, particle_set, cell)
             ELSE
                ! we could reduce to energy only here
                CALL xc_exc_pw_create(rho_r, rho_g, tau_r, xc_section, weights, xc_pw_pool, exc)
@@ -482,7 +505,7 @@ CONTAINS
                NULLIFY (rho1_r, rho1_g, tau1_r, tau1_g)
                IF (rho1_g_valid) THEN
                   CALL create_density_on_pool(xc_pw_pool, rho1_g_base, rho1_r, rho1_g)
-               ELSEIF (ASSOCIATED(rho1_r_base)) THEN
+               ELSE IF (ASSOCIATED(rho1_r_base)) THEN
                   CALL create_density_on_pool_from_r(auxbas_pw_pool, xc_pw_pool, rho1_r_base, rho1_r, rho1_g)
                ELSE
                   CPABORT("Fine Grid in xc_density requires rho1_r or rho1_g")
@@ -490,7 +513,7 @@ CONTAINS
                IF (rho1_tau_valid) THEN
                   IF (rho1_tau_g_valid) THEN
                      CALL create_density_on_pool(xc_pw_pool, tau1_g_base, tau1_r, tau1_g)
-                  ELSEIF (ASSOCIATED(tau1_r_base)) THEN
+                  ELSE IF (ASSOCIATED(tau1_r_base)) THEN
                      CALL create_density_on_pool_from_r(auxbas_pw_pool, xc_pw_pool, tau1_r_base, tau1_r, tau1_g)
                   ELSE
                      CPABORT("Fine Grid in xc_density requires tau1_r or tau1_g")
@@ -518,7 +541,7 @@ CONTAINS
                NULLIFY (rho1_r, rho1_g, tau1_r, tau1_g)
                IF (rho1_g_valid) THEN
                   CALL create_density_on_pool(xc_pw_pool, rho1_g_base, rho1_r, rho1_g)
-               ELSEIF (ASSOCIATED(rho1_r_base)) THEN
+               ELSE IF (ASSOCIATED(rho1_r_base)) THEN
                   CALL create_density_on_pool_from_r(auxbas_pw_pool, xc_pw_pool, rho1_r_base, rho1_r, rho1_g)
                ELSE
                   CPABORT("Fine Grid in xc_density requires rho1_r or rho1_g")
@@ -526,7 +549,7 @@ CONTAINS
                IF (rho1_tau_valid) THEN
                   IF (rho1_tau_g_valid) THEN
                      CALL create_density_on_pool(xc_pw_pool, tau1_g_base, tau1_r, tau1_g)
-                  ELSEIF (ASSOCIATED(tau1_r_base)) THEN
+                  ELSE IF (ASSOCIATED(tau1_r_base)) THEN
                      CALL create_density_on_pool_from_r(auxbas_pw_pool, xc_pw_pool, tau1_r_base, tau1_r, tau1_g)
                   ELSE
                      CPABORT("Fine Grid in xc_density requires tau1_r or tau1_g")
@@ -574,8 +597,9 @@ CONTAINS
                DEALLOCATE (vxc_rho)
             END IF
             IF (ASSOCIATED(vxc_tau)) THEN
-               IF (.NOT. ASSOCIATED(tau1_r)) &
+               IF (.NOT. ASSOCIATED(tau1_r)) THEN
                   CPABORT("Tau response density required for mGGA xc_density")
+               END IF
                DO ispin = 1, nspins
                   CALL pw_multiply_with(vxc_tau(ispin), tau1_r(ispin))
                   CALL pw_axpy(vxc_tau(ispin), exc, 1.0_dp)

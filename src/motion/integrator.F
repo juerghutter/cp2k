@@ -44,7 +44,10 @@ MODULE integrator
    USE constraint_util,                 ONLY: getold,&
                                               pv_constraint
    USE cp_control_types,                ONLY: dft_control_type
-   USE cp_log_handling,                 ONLY: cp_to_string
+   USE cp_log_handling,                 ONLY: cp_get_default_logger,&
+                                              cp_logger_type,&
+                                              cp_to_string
+   USE cp_output_handling,              ONLY: cp_iterate
    USE cp_parser_methods,               ONLY: parser_get_next_line,&
                                               parser_read_line
    USE cp_subsys_types,                 ONLY: cp_subsys_get,&
@@ -195,8 +198,9 @@ CONTAINS
                          nshell=nshell, &
                          particles=particles, &
                          virial=virial)
-      IF (nshell /= 0) &
+      IF (nshell /= 0) THEN
          CPABORT("Langevin dynamics is not yet implemented for core-shell models")
+      END IF
 
       nparticle_kind = atomic_kinds%n_els
       atomic_kind_set => atomic_kinds%els
@@ -1519,6 +1523,7 @@ CONTAINS
                                                             vol
       REAL(KIND=dp), POINTER                             :: time
       TYPE(cell_type), POINTER                           :: cell
+      TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(cp_subsys_type), POINTER                      :: subsys
       TYPE(force_env_type), POINTER                      :: force_env
       TYPE(mp_para_env_type), POINTER                    :: para_env
@@ -1527,9 +1532,10 @@ CONTAINS
       TYPE(reftraj_type), POINTER                        :: reftraj_env
       TYPE(simpar_type), POINTER                         :: simpar
 
-      NULLIFY (reftraj_env, particle_set, particles, force_env, subsys, simpar, para_env, cell, itimes, time)
+      NULLIFY (reftraj_env, particle_set, particles, force_env, subsys, simpar, para_env, cell, logger, itimes, time)
       CALL get_md_env(md_env=md_env, init=init, reftraj=reftraj_env, force_env=force_env, &
                       para_env=para_env, simpar=simpar)
+      logger => cp_get_default_logger()
 
       CALL force_env_get(force_env=force_env, cell=cell, subsys=subsys)
       reftraj_env%isnap = reftraj_env%isnap + reftraj_env%info%stride
@@ -1651,10 +1657,11 @@ CONTAINS
 
       ! Check if we reached the end of the file and provide some info..
       IF (my_end) THEN
-         IF (reftraj_env%isnap /= (simpar%nsteps - 1)) &
+         IF (reftraj_env%isnap /= (simpar%nsteps - 1)) THEN
             CALL cp_abort(__LOCATION__, &
                           "Reached the end of the Trajectory  frames in the TRAJECTORY file. Number of "// &
                           "missing frames ("//cp_to_string((simpar%nsteps - 1) - reftraj_env%isnap)//").")
+         END IF
       END IF
 
       ! Read cell parameters from cell file if requested and if not yet available
@@ -1664,10 +1671,11 @@ CONTAINS
          CPASSERT(trj_itimes == cell_itimes)
          ! Check if we reached the end of the file and provide some info..
          IF (my_end) THEN
-            IF (reftraj_env%isnap /= (simpar%nsteps - 1)) &
+            IF (reftraj_env%isnap /= (simpar%nsteps - 1)) THEN
                CALL cp_abort(__LOCATION__, &
                              "Reached the end of the cell info frames in the CELL file. Number of "// &
                              "missing frames ("//cp_to_string((simpar%nsteps - 1) - reftraj_env%isnap)//").")
+            END IF
          END IF
       END IF
 
@@ -1682,8 +1690,12 @@ CONTAINS
       reftraj_env%epot = trj_epot
       reftraj_env%itimes = trj_itimes
       reftraj_env%time = trj_time/femtoseconds
-      CALL get_md_env(md_env, t=time)
+      CALL get_md_env(md_env, itimes=itimes, t=time)
+      itimes = reftraj_env%itimes
       time = reftraj_env%time
+      CALL cp_iterate(logger%iter_info, &
+                      last=logger%iter_info%last_iter(logger%iter_info%n_rlevel), &
+                      iter_nr=reftraj_env%itimes)
 
       IF (traj_has_cell_info) THEN
          CALL init_cell(cell)
@@ -2527,9 +2539,10 @@ CONTAINS
                               core_particle_set, para_env, shell_adiabatic, vel=.TRUE.)
 
       ! Update constraint virial
-      IF (simpar%constraint) &
+      IF (simpar%constraint) THEN
          CALL pv_constraint(gci, local_molecules, molecule_set, &
                             molecule_kind_set, particle_set, virial, para_env)
+      END IF
 
       CALL virial_evaluate(atomic_kind_set, particle_set, &
                            local_particles, virial, para_env)

@@ -45,12 +45,14 @@ MODULE input_cp2k_xc
    USE string_utilities,                ONLY: s2a
    USE xc_input_constants,              ONLY: &
         c_pw92, c_pw92dmc, c_pw92vmc, c_pz, c_pzdmc, c_pzvmc, do_vwn3, do_vwn5, ke_lc, ke_llp, &
-        ke_ol1, ke_ol2, ke_pbe, ke_pw86, ke_pw91, ke_t92, pz_orig, xalpha, xc_b97_3c, &
-        xc_b97_grimme, xc_b97_mardirossian, xc_b97_orig, xc_deriv_collocate, xc_deriv_nn10_smooth, &
-        xc_deriv_nn50_smooth, xc_deriv_pw, xc_deriv_spline2, xc_deriv_spline2_smooth, &
-        xc_deriv_spline3, xc_deriv_spline3_smooth, xc_pbe_orig, xc_pbe_rev, xc_pbe_sol, &
-        xc_rho_nn10, xc_rho_nn50, xc_rho_no_smooth, xc_rho_spline2_smooth, xc_rho_spline3_smooth, &
-        xgga_b88x, xgga_ev93, xgga_opt, xgga_pbex, xgga_pw86, xgga_pw91, xgga_revpbe
+        ke_ol1, ke_ol2, ke_pbe, ke_pw86, ke_pw91, ke_t92, pz_orig, skala_gapw_cp2k_default, &
+        skala_gapw_direct_valence, skala_gapw_paw_one_center, skala_gapw_paw_one_center_split, &
+        xalpha, xc_b97_3c, xc_b97_grimme, xc_b97_mardirossian, xc_b97_orig, xc_deriv_collocate, &
+        xc_deriv_nn10_smooth, xc_deriv_nn50_smooth, xc_deriv_pw, xc_deriv_spline2, &
+        xc_deriv_spline2_smooth, xc_deriv_spline3, xc_deriv_spline3_smooth, xc_pbe_orig, &
+        xc_pbe_rev, xc_pbe_sol, xc_rho_nn10, xc_rho_nn50, xc_rho_no_smooth, xc_rho_spline2_smooth, &
+        xc_rho_spline3_smooth, xgga_b88x, xgga_ev93, xgga_opt, xgga_pbex, xgga_pw86, xgga_pw91, &
+        xgga_revpbe
    USE xc_libxc,                        ONLY: libxc_add_sections
 #include "./base/base_uses.f90"
 
@@ -1311,7 +1313,7 @@ CONTAINS
                           "The current CP2K bridge uses GauXC's molecular quadrature. Periodic inputs "// &
                           "are limited to isolated validation cells and are not compact periodic "// &
                           "material calculations.", &
-                          n_keywords=27, n_subsections=0, repeats=.FALSE.)
+                          n_keywords=28, n_subsections=0, repeats=.FALSE.)
 
       NULLIFY (keyword)
 
@@ -1333,10 +1335,37 @@ CONTAINS
                           description="GauXC Skala model name or path. Use NONE for conventional GauXC. "// &
                           "MODEL SKALA selects the installed Skala-1.1 model when available; "// &
                           "other Skala models are supplied as .fun files or model names. "// &
-                          "NLCC pseudopotentials are rejected in the molecular GauXC Skala "// &
-                          "path; use the CP2K-native SKALA grid path for NLCC calculations.", &
+                          "NLCC pseudopotentials are rejected by the direct molecular GauXC "// &
+                          "Skala path. Pseudopotential GAPW PAW_ONE_CENTER and the CP2K-native "// &
+                          "SKALA grid path include NLCC in their reconstructed primitive fields.", &
                           usage="MODEL SKALA", &
                           default_c_val="NONE")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create( &
+         keyword, __LOCATION__, name="PSEUDOPOTENTIAL_GAPW_REPRESENTATION", &
+         description="Select the density representation used by an active GauXC model for "// &
+         "METHOD GAPW/GAPW_XC kinds with GTH or ECP pseudopotentials. "// &
+         "DIRECT_VALENCE treats those kinds as GPW_TYPE and evaluates the model on "// &
+         "the direct valence density; this is the default for non-local models such "// &
+         "as Skala. PAW_ONE_CENTER combines the smooth and all hard-minus-soft "// &
+         "one-center primitive fields before one model evaluation, retaining all 15 pairwise "// &
+         "spin-gradient cross terms (14 additional to the smooth-density baseline) and the "// &
+         "non-local couplings. PAW_ONE_CENTER_SPLIT is a diagnostic that evaluates smooth, hard, "// &
+         "and soft fields separately. CP2K_DEFAULT retains the representation selected "// &
+         "by KIND%GPW_TYPE, basis hardness, and DFT%QS%FORCE_PAW. All-electron kinds "// &
+         "and conventional GauXC MODEL NONE calculations are unaffected.", &
+         usage="PSEUDOPOTENTIAL_GAPW_REPRESENTATION DIRECT_VALENCE", &
+         enum_c_vals=s2a("DIRECT_VALENCE", "PAW_ONE_CENTER", "CP2K_DEFAULT", &
+                         "PAW_ONE_CENTER_SPLIT"), &
+         enum_i_vals=[skala_gapw_direct_valence, skala_gapw_paw_one_center, &
+                      skala_gapw_cp2k_default, skala_gapw_paw_one_center_split], &
+         enum_desc=s2a("Use the direct pseudopotential valence density", &
+                       "Reconstruct the GAPW primitive fields before model evaluation", &
+                       "Use the representation selected by the ordinary CP2K GAPW rules", &
+                       "Diagnose the separate smooth plus hard-minus-soft energy expression"), &
+         default_i_val=skala_gapw_direct_valence)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -1428,11 +1457,11 @@ CONTAINS
                           "all-electron regular-grid density. The current implementation is limited "// &
                           "to a single GAUXC functional and provides energy, VXC, and experimental "// &
                           "analytical nuclear-gradient/stress evaluations. K-point runs use CP2K's "// &
-                          "standard k-point and symmetry-reduction infrastructure; the CPU "// &
-                          "TorchScript path may require preloading libtorch_cpu.so before OpenBLAS, "// &
-                          "whereas CUDA k-point runs should not preload CPU-only Torch libraries. "// &
-                          "MPI runs collect a global atom-partitioned feature block by default; "// &
-                          "NATIVE_GRID_ATOM_CHUNKS can split the Torch evaluation by atom block. "// &
+                          "standard k-point and symmetry-reduction infrastructure; CPU k-point "// &
+                          "runs require mutually compatible BLAS, ScaLAPACK, OpenMP, and LibTorch "// &
+                          "runtimes, while CUDA evaluation is selected explicitly. "// &
+                          "Energy/VXC runs split the Torch evaluation into atom blocks by default "// &
+                          "and route dynamic features and gradients between MPI ranks. "// &
                           "PAW/one-center GAPW+GTH/ECP and METHOD GAPW_XC use CP2K's GAPW hard/soft "// &
                           "one-center XC correction with a selectable "// &
                           "NATIVE_GRID_GAPW_DENSITY_PARTITION. ROKS, ADMM, and non-k-point "// &
@@ -1470,9 +1499,9 @@ CONTAINS
                           "SKALA regular-grid feature block. HARD assigns each native grid point to "// &
                           "the nearest periodic atom and is intended for legacy energy/VXC-only runs. "// &
                           "SMOOTH uses a Becke-like fuzzy-cell partition on the native grid and creates "// &
-                          "weighted atom rows. Analytical atom forces and stress use the differentiable "// &
-                          "SMOOTH partition internally because the corresponding partition-weight "// &
-                          "derivatives enter the SKALA feature response.", &
+                          "weighted atom rows. Internal atom-grid weights vanish through a smooth taper "// &
+                          "when sparse rows reach the partition cutoff. Analytical atom forces and stress "// &
+                          "include both the partition and taper derivatives in the SKALA feature response.", &
                           usage="NATIVE_GRID_ATOM_PARTITION SMOOTH", &
                           enum_c_vals=s2a("HARD", "SMOOTH"), &
                           enum_i_vals=[1, 2], &
@@ -1502,15 +1531,88 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
+      CALL keyword_create(keyword, __LOCATION__, name="NATIVE_GRID_GAPW_COMPOSITE_REFERENCE", &
+                          description="Evaluate native-grid SKALA for METHOD GAPW or GAPW_XC on "// &
+                          "rho and tau reconstructed as smooth plus hard-minus-soft before nonlinear "// &
+                          "feature construction on one common regular grid. No separate one-center "// &
+                          "SKALA energy is added. This expensive, cutoff-sensitive diagnostic is "// &
+                          "intended to validate the nonlinear hard/soft cross terms.", &
+                          usage="NATIVE_GRID_GAPW_COMPOSITE_REFERENCE T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="NATIVE_GRID_GAPW_COMPOSITE_DIRECT_AO", &
+                          description="Use direct full-ORB rho and tau collocation for the native-grid "// &
+                          "GAPW composite diagnostic. This is the variational all-electron "// &
+                          "counterpart of the reconstructed smooth plus hard-minus-soft fields and "// &
+                          "provides a reference for their common-grid adjoint.", &
+                          usage="NATIVE_GRID_GAPW_COMPOSITE_DIRECT_AO T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="NATIVE_GRID_GAPW_ATOM_COMPOSITE_REFERENCE", &
+                          description="Replace the native smooth plus separate GAPW one-center SKALA "// &
+                          "terms by one atom-centered evaluation of smooth plus hard-minus-soft "// &
+                          "primitive fields before nonlinear feature construction. The smooth PW "// &
+                          "and one-center VXC adjoints are returned consistently. MPI ranks assemble "// &
+                          "the atom rows collectively; one communicator root evaluates the model and "// &
+                          "broadcasts the energy and feature adjoints.", &
+                          usage="NATIVE_GRID_GAPW_ATOM_COMPOSITE_REFERENCE T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="NATIVE_GRID_GAPW_ATOM_COMPOSITE_DIAGNOSTIC", &
+                          description="Evaluate an energy-only GAPW diagnostic on the combined "// &
+                          "smooth plus one-center hard-minus-soft density before nonlinear SKALA "// &
+                          "feature construction. The smooth native-grid density is interpolated to "// &
+                          "the atom-centered GAPW quadrature and all atomic grids are evaluated in "// &
+                          "one model call. This single-rank diagnostic does not replace the active "// &
+                          "XC energy or potential.", &
+                          usage="NATIVE_GRID_GAPW_ATOM_COMPOSITE_DIAGNOSTIC T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, &
+                          name="NATIVE_GRID_GAPW_ATOM_COMPOSITE_COMPONENTS", &
+                          description="Select which one-center hard-minus-soft fields enter the "// &
+                          "atom-composite SKALA diagnostic. FULL combines rho, gradient, and tau; "// &
+                          "RHO_GRAD and TAU isolate the corresponding reconstruction; SMOOTH "// &
+                          "uses only interpolated smooth fields.", &
+                          usage="NATIVE_GRID_GAPW_ATOM_COMPOSITE_COMPONENTS FULL", &
+                          enum_c_vals=s2a("FULL", "RHO_GRAD", "TAU", "SMOOTH"), &
+                          enum_i_vals=[1, 2, 3, 4], &
+                          enum_desc=s2a("Combine rho, gradient, and tau corrections", &
+                                        "Combine only rho and gradient corrections", &
+                                        "Combine only the tau correction", &
+                                        "Use only interpolated smooth fields"), &
+                          default_i_val=1)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, &
+                          name="NATIVE_GRID_GAPW_ATOM_COMPOSITE_FD_STEP", &
+                          description="Central finite-difference step used by the atom-composite "// &
+                          "feature-VXC diagnostic.", &
+                          usage="NATIVE_GRID_GAPW_ATOM_COMPOSITE_FD_STEP 3.0E-3", &
+                          default_r_val=3.0E-3_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
       CALL keyword_create(keyword, __LOCATION__, name="NATIVE_GRID_ATOM_CHUNKS", &
                           description="Split the experimental CP2K-native SKALA GPW TorchScript "// &
                           "evaluation into contiguous atom blocks. MPI runs evaluate one atom block per "// &
                           "rank, while single-rank runs can still use atom subchunks to reduce peak CUDA "// &
                           "memory. Dynamic feature rows and VXC gradients are routed between their "// &
-                          "local grid and atom-block owner ranks. Analytical force and stress runs use "// &
-                          "the full differentiable tensor graph instead of routed atom chunks.", &
+                          "local grid and atom-block owner ranks. This is enabled by default; set it to "// &
+                          "false to retain the replicated global feature block. Analytical force and "// &
+                          "stress runs use the full differentiable tensor graph instead of routed atom "// &
+                          "chunks.", &
                           usage="NATIVE_GRID_ATOM_CHUNKS T", &
-                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+                          default_l_val=.TRUE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -1526,8 +1628,8 @@ CONTAINS
                           description="Maximum number of atom-grid rows evaluated by one TorchScript "// &
                           "call in the experimental CP2K-native SKALA GPW atom-chunk path. A positive "// &
                           "value splits each rank-local atom chunk into contiguous atom subchunks to "// &
-                          "reduce peak CUDA memory use; zero disables subchunking; -1 selects an "// &
-                          "automatic CUDA-oriented row cap.", &
+                          "reduce peak CPU or CUDA memory use; zero disables subchunking; -1 selects "// &
+                          "an automatic row cap.", &
                           usage="NATIVE_GRID_ATOM_CHUNK_MAX_ROWS 250000", &
                           default_i_val=-1)
       CALL section_add_keyword(section, keyword)
@@ -1588,11 +1690,13 @@ CONTAINS
 
       CALL keyword_create(keyword, __LOCATION__, name="LWD_KERNEL", &
                           description="Local work driver kernel used by the GauXC integrator. "// &
-                          "DEFAULT uses GauXC's default for the selected execution space. "// &
+                          "AUTO uses SCHEME1-CUTLASS for device SKALA when GauXC provides it "// &
+                          "and otherwise uses GauXC's default for the selected execution space. "// &
+                          "DEFAULT always uses GauXC's default. "// &
                           "Device builds with CUTLASS support can use SCHEME1-CUTLASS to run "// &
                           "the grouped local potential update through CUTLASS.", &
-                          usage="LWD_KERNEL DEFAULT", &
-                          default_c_val="DEFAULT")
+                          usage="LWD_KERNEL AUTO", &
+                          default_c_val="AUTO")
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 

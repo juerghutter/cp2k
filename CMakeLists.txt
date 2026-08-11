@@ -10,6 +10,15 @@ cmake_minimum_required(VERSION 3.24)
 # include our cmake snippets
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
+# Require out-of-source builds
+file(TO_CMAKE_PATH "${CMAKE_BINARY_DIR}/CMakeLists.txt" LOC_PATH)
+if(EXISTS "${LOC_PATH}")
+  message(
+    FATAL_ERROR
+      "You cannot build in a source directory (or any directory with a CMakeLists.txt file). "
+      "Please make a build subdirectory.")
+endif()
+
 # =================================================================================================
 # PROJECT AND VERSION
 include(CMakeDependentOption)
@@ -26,19 +35,10 @@ project(
   cp2k
   DESCRIPTION "CP2K"
   HOMEPAGE_URL "https://www.cp2k.org"
-  VERSION "2026.1"
+  VERSION "2026.2"
   LANGUAGES Fortran C CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/modules")
-
-# Require out-of-source builds
-file(TO_CMAKE_PATH "${PROJECT_BINARY_DIR}/CMakeLists.txt" LOC_PATH)
-if(EXISTS "${LOC_PATH}")
-  message(
-    FATAL_ERROR
-      "You cannot build in a source directory (or any directory with a CMakeLists.txt file). Please make a build subdirectory."
-  )
-endif()
 
 # set language and standard.
 #
@@ -105,10 +105,6 @@ foreach(__var ROCM_ROOT CRAY_ROCM_ROOT ORNL_ROCM_ROOT CRAY_ROCM_PREFIX
         CACHE PATH "Path to ROCm installation")
   endif()
 endforeach()
-
-set(CMAKE_INSTALL_LIBDIR
-    "lib"
-    CACHE PATH "Default installation directory for libraries")
 
 # =================================================================================================
 # OPTIONS
@@ -226,18 +222,18 @@ cmake_dependent_option(
   CP2K_USE_CUSOLVER_MP "Enable cuSOLVERMp. Only active when CUDA is ON" OFF
   "CP2K_USE_ACCEL MATCHES \"CUDA\"" OFF)
 
-cmake_dependent_option(CP2K_USE_NVHPC OFF "Enable Nvidia NVHPC kit"
-                       "(NOT CP2K_USE_ACCEL MATCHES \"CUDA\")" OFF)
+cmake_dependent_option(CP2K_USE_NVHPC "Enable Nvidia NVHPC kit" OFF
+                       "CP2K_USE_ACCEL MATCHES \"CUDA\"" OFF)
 
 cmake_dependent_option(
-  CP2K_USE_SPLA_GEMM_OFFLOADING ON
-  "Enable SpLA dgemm offloading (only valid with GPU support on)"
-  "(NOT CP2K_USE_ACCEL MATCHES \"NONE\") AND (CP2K_USE_SPLA)" OFF)
+  CP2K_USE_SPLA_GEMM_OFFLOADING
+  "Enable SpLA dgemm offloading (only valid with GPU support on)" ON
+  "CP2K_USE_ACCEL MATCHES \"HIP|CUDA\" AND CP2K_USE_SPLA" OFF)
 
 cmake_dependent_option(
-  CP2K_USE_CRAY_PM_ACCEL_ENERGY ON
-  "Enable CRAY power management framework with gpu support"
-  "(NOT CP2K_USE_ACCEL MATCHES \"NONE\") AND (CP2K_USE_CRAY_PM_ENERGY)" OFF)
+  CP2K_USE_CRAY_PM_ACCEL_ENERGY
+  "Enable CRAY power management framework with gpu support" ON
+  "CP2K_USE_ACCEL MATCHES \"OPENCL|HIP|CUDA\" AND CP2K_USE_CRAY_PM_ENERGY" OFF)
 
 cmake_dependent_option(
   CP2K_USE_LIBGINT "Enable LibGint support" ${CP2K_USE_EVERYTHING}
@@ -865,27 +861,12 @@ if(CP2K_USE_SPLA)
   endif()
 endif()
 
-# Sets CP2K_USE_DFTD4_V3 / CP2K_USE_DFTD4_V4_2 from dftd4_VERSION, which is
-# populated by dftd4-config-version.cmake either directly via
-# find_package(dftd4) or transitively via find_package(tblite).
-macro(cp2k_detect_dftd4_api)
-  if(dftd4_VERSION VERSION_LESS "4.0.0")
-    message(STATUS "DFTD4: found version ${dftd4_VERSION}, using v3.x API")
-    set(CP2K_USE_DFTD4_V3 ON)
-  else()
-    set(CP2K_USE_DFTD4_V3 OFF)
-  endif()
-  if(dftd4_VERSION VERSION_GREATER_EQUAL "4.2.0")
-    message(STATUS "DFTD4: found version ${dftd4_VERSION}, using v4.2+ API")
-    set(CP2K_USE_DFTD4_V4_2 ON)
-  else()
-    set(CP2K_USE_DFTD4_V4_2 OFF)
-  endif()
-endmacro()
-
 if(CP2K_USE_DFTD4)
+  find_package(mctc-lib REQUIRED) # workaround: find mctc-lib first
   find_package(dftd4 REQUIRED)
-  cp2k_detect_dftd4_api()
+  if(dftd4_VERSION VERSION_LESS "4.2.0")
+    message(FATAL_ERROR "dftd4 >= 4.2.0 is required; found ${dftd4_VERSION}")
+  endif()
 endif()
 
 if(CP2K_USE_DEEPMD)
@@ -909,25 +890,42 @@ if(CP2K_USE_ACE)
 endif()
 
 if(CP2K_USE_TBLITE)
-  find_package(tblite REQUIRED)
+  find_package(tblite CONFIG REQUIRED)
+  if(tblite_VERSION VERSION_LESS "0.7.0")
+    message(FATAL_ERROR "tblite >= 0.7.0 is required; found ${tblite_VERSION}")
+  endif()
   add_library(cp2k::tblite INTERFACE IMPORTED)
   target_link_libraries(
     cp2k::tblite INTERFACE tblite::tblite mctc-lib::mctc-lib dftd4::dftd4
                            toml-f::toml-f s-dftd3::s-dftd3)
-  cp2k_detect_dftd4_api()
 endif()
 
 # SIRIUS
 if(CP2K_USE_SIRIUS)
   find_package(sirius 7.7.0 REQUIRED)
+  add_library(cp2k::sirius INTERFACE IMPORTED)
+  target_link_libraries(cp2k::sirius INTERFACE sirius::sirius)
+
+  get_target_property(CP2K_SIRIUS_LIBRARY_TYPE sirius::sirius TYPE)
+  if(CP2K_SIRIUS_LIBRARY_TYPE STREQUAL "SHARED_LIBRARY")
+    # Shared SIRIUS does not export the private C++ library's link interface.
+    find_package(sirius_cxx CONFIG REQUIRED)
+    target_link_libraries(cp2k::sirius
+                          INTERFACE "$<LINK_ONLY:sirius::sirius_cxx>")
+  endif()
+  unset(CP2K_SIRIUS_LIBRARY_TYPE)
 endif()
 
 if(CP2K_USE_PLUMED)
   find_package(Plumed REQUIRED)
 endif()
 
+set(CP2K_USE_LIBTORCH_CUDA OFF)
 if(CP2K_USE_LIBTORCH)
   find_package(Torch REQUIRED)
+  if(DEFINED TORCH_CUDA_LIBRARIES AND NOT "${TORCH_CUDA_LIBRARIES}" STREQUAL "")
+    set(CP2K_USE_LIBTORCH_CUDA ON)
+  endif()
   get_target_property(CP2K_TORCH_CXX_STANDARD torch CXX_STANDARD)
   if(${CP2K_TORCH_CXX_STANDARD} VERSION_GREATER ${CMAKE_CXX_STANDARD})
     set(CMAKE_CXX_STANDARD ${CP2K_TORCH_CXX_STANDARD})
@@ -1076,11 +1074,10 @@ if(CP2K_USE_CUSOLVER_MP)
   else()
     message("    - CAL Include directories: ${CP2K_CAL_INCLUDE_DIRS}\n"
             "    - CAL Libraries: ${CP2K_CAL_LINK_LIBRARIES}")
+    message("    - UCC Include directories: ${CP2K_UCC_INCLUDE_DIRS}\n"
+            "    - UCC Libraries: ${CP2K_UCC_LINK_LIBRARIES}\n"
+            "    - UCX Libraries: ${CP2K_UCX_LINK_LIBRARIES}\n")
   endif()
-
-  message("    - UCC Include directories: ${CP2K_UCC_INCLUDE_DIRS}\n"
-          "    - UCC Libraries: ${CP2K_UCC_LINK_LIBRARIES}\n"
-          "    - UCX Libraries: ${CP2K_UCX_LINK_LIBRARIES}\n")
 endif()
 
 if(CP2K_USE_LIBXC)

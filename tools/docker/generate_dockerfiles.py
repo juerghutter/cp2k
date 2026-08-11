@@ -26,11 +26,7 @@ def main() -> None:
         f.write(regtest("toolchain", "psmp", testopts=testopts))
 
     with OutputFile(f"Dockerfile.test_generic_psmp", args.check) as f:
-        f.write(
-            install_deps_toolchain(
-                target_cpu="generic", with_gauxc="no", with_libtorch="no"
-            )
-        )
+        f.write(install_deps_toolchain(target_cpu="generic"))
         f.write(regtest("toolchain_generic", "psmp"))
 
     with OutputFile(f"Dockerfile.test_openmpi-psmp", args.check) as f:
@@ -183,7 +179,10 @@ def main() -> None:
     with OutputFile(f"Dockerfile.test_spack_ssmp", args.check) as f:
         f.write(
             install_cp2k_spack(
-                version="ssmp", mpi_mode="no", testopts=testopts, image_tag=f.image_tag
+                version="ssmp",
+                mpi_mode="no",
+                testopts=testopts,
+                image_tag=f.image_tag,
             )
         )
 
@@ -461,6 +460,7 @@ COPY ./data ./data
 COPY ./tools/build_utils ./tools/build_utils
 COPY ./cmake ./cmake
 COPY ./CMakeLists.txt .
+COPY ./CMakePresets.json .
 
 # Compile CP2K.
 COPY ./tools/docker/scripts/build_cp2k.sh ./tools/docker/scripts/cmake_cp2k.sh ./
@@ -764,6 +764,7 @@ COPY ./data ./data
 COPY ./tools/build_utils ./tools/build_utils
 COPY ./cmake ./cmake
 COPY ./CMakeLists.txt .
+COPY ./CMakePresets.json .
 
 RUN ./make_cp2k.sh -cv {version} {gcc_version_flag} -gpu {gpu_model} -mpi {mpi_mode} {feature_flags}
 """
